@@ -1,0 +1,35 @@
+#!/bin/sh
+# Recade harness pre-commit for the workspace: the staged documents pass the style check and the ID index is sound.
+# The plugin folder comes from RECADE_PLUGIN_ROOT or from .recade/plugin-root (written at install).
+set -u
+
+top=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+if [ -z "${RECADE_PLUGIN_ROOT:-}" ] && [ -f "$top/.recade/plugin-root" ]; then
+  RECADE_PLUGIN_ROOT=$(sed -n '1p' "$top/.recade/plugin-root")
+fi
+if [ -z "${RECADE_PLUGIN_ROOT:-}" ] || [ ! -f "$RECADE_PLUGIN_ROOT/bin/recade.js" ]; then
+  echo "recade pre-commit: RECADE_PLUGIN_ROOT is not set and .recade/plugin-root does not point at a plugin folder with bin/recade.js. Fix it, then commit again." >&2
+  exit 1
+fi
+
+staged=$(git diff --cached --name-only --diff-filter=ACMR | grep -E '\.(md|js|json|yml|yaml|txt)$' || true)
+if [ -n "$staged" ]; then
+  # One argument per line, so a path with a space stays whole.
+  status=0
+  old_ifs=$IFS
+  IFS='
+'
+  # shellcheck disable=SC2086
+  set -- $staged
+  IFS=$old_ifs
+  node "$RECADE_PLUGIN_ROOT/bin/recade.js" lint-style "$@" || status=$?
+  if [ "$status" -ne 0 ]; then
+    echo "recade pre-commit: style errors in the staged files. Fix them, then commit again." >&2
+    exit 1
+  fi
+fi
+
+node "$RECADE_PLUGIN_ROOT/bin/recade.js" index check "$top" || {
+  echo "recade pre-commit: the ID index has errors. Fix them, then commit again." >&2
+  exit 1
+}

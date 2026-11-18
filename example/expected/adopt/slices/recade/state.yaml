@@ -1,0 +1,59 @@
+version: 1
+kind: workspace
+mode: adopt
+phase: 5
+gates:
+  G0-inventory:
+    passed: 2026-11-18
+    by: owner
+  G1:
+    passed: 2026-11-18
+    by: owner
+  G2-stack:
+    passed: 2026-11-18
+    by: owner
+  G2:
+    passed: 2026-11-18
+    by: owner
+  G3:
+    passed: 2026-11-18
+    by: owner
+  G4:
+    passed: 2026-11-18
+    by: owner
+  G5: null
+next_action: Run /recade:adopt (G4 passed on 2026-11-18).
+voice: randall-munroe
+languages:
+  chat: en
+  work: en
+  deliverables:
+    - en
+  code: en
+  product_ui:
+    - en
+lots:
+  - FEE
+  - LED
+  - RPT
+slicing: mixed
+full: false
+second_opinion: sensitive
+hotspots: []
+repos:
+  - name: fernhill-desk
+    path: repos/fernhill-desk
+    remote: https://github.com/fernhill/fernhill-desk.git
+    default_branch: main
+    role: ""
+    visibility: private
+github:
+  owner: fernhill
+  project_number: 4
+  links:
+    S-01: https://github.com/fernhill/fernhill-desk/issues/11
+    S-02: https://github.com/fernhill/fernhill-desk/issues/12
+  repo: fernhill-desk-workspace
+workspace:
+  auto_push: true
+  auto_push_since: 2026-11-18

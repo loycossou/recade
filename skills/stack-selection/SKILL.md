@@ -1,0 +1,100 @@
+---
+name: stack-selection
+description: How to choose, or to describe, the technology stack of a Recade project. Criteria with weights from the project, candidates per layer, dated research, spikes for the finalists, a weighted matrix, one multiple-choice question per layer. Load it before any stack decision work.
+---
+
+# Stack selection
+
+The stack is a team decision, argued like an architecture decision and settled by the owner at gate G2-stack. It comes after D1 (we know what to build) and before D2 (which describes it). Use this with `writing-voice` for every text, and with `templates/STACK.md` for the shape of `docs/STACK.md`.
+
+Declare three biases at the start and fight them in the text: fashion, the comfort of the writer, and the habit of a language model to propose the same stack for every project. Say what you did against each one.
+
+## Mode adopt
+
+When `recade/state.yaml` says `mode: adopt`, the stack exists. Describe it, do not choose it.
+
+1. Read the repository: manifests, lock files, CI files, build and test scripts, Docker and infrastructure files. Run what is safe to run (version commands, the test suite, the linter) and record the real output.
+2. Fill section 1 (the constraints that make the existing stack the one to keep), section 9 (selected stack, with the pinned versions, the licences and the support dates, each looked up), section 11 (conditions for re-examination) and section 12 (harness technical sheet). Fill section 10 with the options the code shows were left behind, when the history says so. Sections 2 to 7 are one line each: "Not applicable, adopt mode".
+3. In section 8, one `ADR-nn` row for each layer, the Choice cell saying "Adopted as found, imposed by <source>", with the date. No spike, no matrix, no choice for the owner.
+4. Say in the report what is old, unsupported, unpinned or unlicensed. Each of these is a finding, and a choice the owner must make is a DEC.
+
+## The six steps, to choose a stack
+
+### 1. Criteria from the project, not from habit
+
+Derive the criteria from D1, the NFR and PAR, the brief and the intake. Each criterion cites its source (`NFR-*`, `PAR-*`, an intake constraint, a human fact) and gets a weight. The weights sum to 100. Cover these families:
+
+- Non-functional needs: performance, volume, real time, offline, mobile.
+- Constraints: hosting, regulation, budget, deadline, existing systems, the client's own stack.
+- People: the skills of those who will maintain it, local hiring.
+- Lifespan: maturity, long-term support, breaking changes, licence, community.
+- Security: history of flaws, supply chain, the requirements of D3 when it exists.
+- Fitness for development by agents: typing, conventions, fast tests, usable error messages. Measure it in step 4, never assume it.
+- Total cost: licences, hosting, the people.
+
+A criterion with no source is dropped or marked PROVISIONAL.
+
+### 2. Candidates per layer
+
+List the layers the project needs (for example front end, back end, data, hosting, queue, auth). For each layer, 2 or 3 options that really differ, and at least one outside the reflex choices. Write why each one is on the list. A layer with one possible answer (imposed by the client, the law or the existing system) is stated with its source, and not dressed up as a choice. It gets no spike and no DEC, and its ADR row in section 8 says "imposed by <source>".
+
+### 3. Research, dated
+
+For every candidate: the current version, the support calendar, the licence, flaws of the last 12 months, and field reports at the scale of this project. Search the web and read the pages. Write the date you read each one. Nothing rests on the memory of the model alone: a version or a date without a source and an accessed date is not written.
+
+### 4. Proof by spike
+
+Take the 2 or 3 finalists of a layer. The analyst writes one real task of this project, from D1, that touches the layers that matter (a form that writes to the data store, an import, a screen with a list and a filter), in `spikes/TASK-<layer>.md`. The task is chosen before any result exists, and its text is the same for every option, with the budget and the measures asked.
+
+Each spike is run by a fresh `spike-runner` agent that knows nothing of the other options, so that no option gets help from the work done on another. The analyst never runs a spike, never fixes one and never helps one. The dispatcher runs the finalists of a layer one after the other, so that the build times are comparable.
+
+- Each spike works in `spikes/<layer>-<option>/`, never in the product folders.
+- Each spike has a short budget, written in the task before it starts (for example 30 minutes of work or 40 tool calls, whichever comes first). When the budget runs out, the runner stops and records where it was.
+- The runner measures and reports: done without help (yes or no), fix loops (how many times a build, a test or the linter failed before it passed), build time and test time in seconds, readability (a one-line note), and every install command it ran.
+- Its commands and raw numbers stay in `spikes/<layer>-<option>/RESULT.md` while the work runs. The analyst copies the results that matter into section 4 of `STACK.md`, as reported: the spikes folder is deleted after G2-stack.
+- A spike that could not be run (no network, no licence, no tool) is recorded as not run, with the reason. Never write a measure nobody took.
+
+### 5. Weighted matrix
+
+Score each candidate from 1 to 5 on each criterion, with a one-line justification. Multiply by the weights and total. Then write the risks and the cost of leaving each option later. Then the recommendation of the architect, with its price. Then the written opinion of each contributor, disagreements included. A contributor is the architect, the devops-lead, the security-lead, the ui-designer and the domain expert when the project has one. Each one gives an independent written opinion in `docs/reviews/STACK-<role>.md`, from its own doctrine, after it has read the draft and the spike results. The analyst copies each opinion into section 7 and puts every disagreement there, in the contributor's own words, never smoothed or shortened. The qa-lead has no agent: its view is read from `team/qa-lead.md` and marked "from doctrine, no independent review". A role whose doctrine file does not exist is recorded as "no doctrine available". Never write words in the name of the expert who inspires a role.
+
+When the matrix and your recommendation disagree, say so and say why.
+
+### 6. Decision
+
+One multiple-choice question per layer that has a real choice, as a DEC (`recade decision new --doc 'STACK' ...`). The recommended option is first. The question says what the owner gets, what it costs, and what would change the recommendation. The owner answers through the dispatcher. Each answer becomes an `ADR-nn` in section 8 of `STACK.md`.
+
+After the owner's answers, write the sections 8 to 12 of `STACK.md`:
+
+- 8: one `ADR-nn` row per layer, with the DEC it comes from cited in the Choice cell. A layer imposed by a source says "imposed by <source>" there.
+- 9: the selected stack, with pinned versions, licences and support dates.
+- 10: the options that lost, and why.
+- 11: the conditions for re-examination. Facts that would reopen the decision (an end of support, a price change, a flaw, a measure that drifts). The retro reads them; a change goes through `/recade:amend`.
+- 12: the harness technical sheet. Build, test, lint, format, local run, conventions, quality and security tools, useful skills. Every command exact, as it will be run from the repository root. Run each one once in a throwaway folder in `spikes/` (for example `spikes/harness-check/`), never in the repository root, and say which ones could not be run.
+
+D2 section 12 mirrors the ADRs of section 8. The ids are defined once, in `STACK.md`.
+
+## Ask the owner, layer by layer
+
+The owner is not an engineer. The questions come in a fixed order and in plain words. Mode adopt asks no layer question: the stack exists.
+
+- **Layers announced first.** The layers are announced before any analysis. List them: language, framework, database, data access, hosting, authentication, CI and test tools, plus any layer that D1 needs (payments, search, mobile, offline). The owner is asked once, in the chat, what is imposed or preferred for each. Each answer is written in section 1 of `STACK.md` as a constraint with source `owner`. A layer the owner imposed is not studied as a choice: it has no spike.
+- **Questions in dependency order.** Language, framework, database, data access, hosting, then the rest. Each answer is given to the analyst before the next question, so the later layers are re-ranked: a finalist that does not fit the layers already chosen is dropped, with the reason.
+- **One plain line for each option.** The owner reads one plain line for each option: cost, skills to hire, hosting and lock-in. No jargon without a plain word beside it.
+- **Other.** The owner may answer with an option that is not a finalist. The analyst then runs dated research on it, checks it against the layers already chosen, adds a spike when the layer had spikes (a fresh runner, the same task text as the finalists), and weighs its risks against the recommendation. The owner sees the gap in plain words and answers `Keep my choice` or `Take the recommendation`. When the owner keeps the choice, the ADR says "owner choice" and the recommendation is listed in section 10 as an option not taken.
+
+## After the gate
+
+`spikes/` is deleted after the owner passes G2-stack. Its results already live in `STACK.md`. The dispatcher does the deletion and commits, not you.
+
+When the stack needs a specialist (a framework or a platform with its own habits that no core role covers), say so in the report with the name of the technology. The project lead may then add a role to the roster, and a doctrine is written for it.
+
+## Checks before you report
+
+- Every criterion has a source and a weight, and the weights sum to 100.
+- Every layer has 2 or 3 candidates, one of them outside the reflex choices, or a stated reason why not.
+- Every version and date in the text has a source and an accessed date.
+- Every spike has its budget, its measures and its commands, reported by its runner, or says it was not run.
+- Section 7 holds every disagreement of the independent notes, in the contributors' words.
+- Every layer has its DEC. No DEC is closed by you.
+- `recade lint-style docs/STACK.md` and `recade index check` print no error.

@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [20, 22]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      # pdftotext, used by the PDF header and footer test.
+      - run: sudo apt-get install -y poppler-utils
+      - run: npm test
+      # The guard runs once, on the Node 22 leg.
+      - name: Require the private name list on pushes to the main repository
+        if: matrix.node == 22 && github.event_name == 'push' && github.repository == 'loycossou/recade'
+        env:
+          RECADE_PRIVATE_NAMES: ${{ secrets.RECADE_PRIVATE_NAMES }}
+        run: |
+          if [ -z "$RECADE_PRIVATE_NAMES" ]; then
+            echo "RECADE_PRIVATE_NAMES is empty. Add the secret in the repository settings, then run this job again." >&2
+            exit 1
+          fi
+      - name: Check for private names
+        if: matrix.node == 22
+        run: node bin/recade.js guard-names
+        env:
+          RECADE_PRIVATE_NAMES: ${{ secrets.RECADE_PRIVATE_NAMES }}

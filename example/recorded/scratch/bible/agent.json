@@ -1,0 +1,5 @@
+{
+ "cli": [
+  ["state", "set", "hotspots", "api:src/store/**"]
+ ]
+}

@@ -1,0 +1,57 @@
+# The owner's recorded answers for the example project (Fernhill Lending).
+# The end-to-end driver gives them where the real commands would ask the owner a question.
+# One entry for each question of the intake questionnaire, in the order of the template (31 questions).
+# An empty entry is "Not known yet".
+questionnaire:
+  - The Fernhill Tool Library, a volunteer-run non-profit that lends tools to the neighbourhood.
+  - It earns nothing. Members pay a small yearly fee. There is no competitor nearby.
+  - Ines Calloway, the chair, owns the project and signs.
+  - Loans are written on paper, so tools go missing and late tools are found by chance.
+  - Volunteers and the chair, every Saturday. The library loses about one tool in ten each year.
+  - Tools keep going missing and the library cannot afford to replace them.
+  - Members who borrow tools, and the volunteers who run the desk on Saturdays.
+  - Volunteers register loans and returns. Members never use the desk screen.
+  - About 300 members now, 500 in two years. 4 volunteers on a shift.
+  - Register a loan and a return, keep the catalogue and the members, apply the late fee, list overdue tools.
+  - Online booking, payments and a public site.
+  - Never lend a tool that is already out.
+  - Small and fixed.
+  - The desk opens to members on 2026-12-28.
+  - One small server that a volunteer can restart.
+  - Member names and phone numbers stay on the library's own server.
+  - A paper register and a spreadsheet of about 180 tools.
+  - The spreadsheet can be read.
+  - The spreadsheet is migrated into the catalogue.
+  - None.
+  -
+  - Ines Calloway, within two days.
+  - Two volunteers test on Saturdays. Ines Calloway approves.
+  - One volunteer.
+  - No tool is lost without a record.
+  - Overdue tools are listed on the day they are due. A loan is registered in under 30 seconds.
+  - No logo yet.
+  -
+  - Plain, warm and readable.
+  - A neighbourhood bakery site, for its clear opening hours.
+  - Apps full of pop-ups.
+decisions:
+  # Each decision the agents open in the run is answered by its letter, as the owner would in the multiple-choice question.
+  DEC-01: B
+  DEC-02: A
+slicing: mixed
+gates:
+  G0: yes
+  G1: yes
+  G2-stack: yes
+  G2: yes
+  G3: yes
+  G4: yes
+  G5: yes
+repos:
+  # After G2 the owner says yes to one code repository for each deployable of section 2.5 of D2.
+  - { name: api, role: The desk server, visibility: private }
+  - { name: web, role: The desk web application, visibility: private }
+github:
+  owner: fernhill
+  create: yes
+  auto_push: yes      # the owner agrees that Recade pushes the default branch of the workspace

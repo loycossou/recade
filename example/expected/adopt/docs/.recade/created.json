@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "files": [
+    {
+      "path": "docs/STACK.md",
+      "sha256": "bde3b14bd6553ed0d5b4bd6ffe4224fed41fba85a105a62affc05a61763a03c2"
+    },
+    {
+      "path": "docs/inventory.md",
+      "sha256": "2ba9764cde4c40282f2b91ca038b777da18dfedcd3f4b62f843fc53f8053a8e2"
+    },
+    {
+      "path": "docs/source/fernhill-desk/README.md",
+      "sha256": "0b55e5b99caf177a9414ef9976093b0d941c358f8175d1441ec2642a85c5435c"
+    },
+    {
+      "path": "docs/source/fernhill-desk/docs/adr/0001-plain-node.md",
+      "sha256": "c886018ad4bc9564c2831c76a7d5390fa1346ffe930b580dfe74e072867c2fd7"
+    },
+    {
+      "path": "docs/source/INDEX.md",
+      "sha256": "b4f1d4174dac6e7b45a6f976b73736c5fa7025d03670247747cd3b22e25df74b"
+    },
+    {
+      "path": "docs/CONTRACTS.md",
+      "sha256": "004afb213a59d6fc2187742664e6026ddbba5e7a1990cfb3fd4ad4bef6e45953"
+    },
+    {
+      "path": "docs/INVARIANTS.md",
+      "sha256": "b1ef67370f0394d85bd4bcd788601da7ef011cfbcbbc3ef948ff7463fc69d425"
+    },
+    {
+      "path": "docs/RULES.md",
+      "sha256": "f8a5da4289275b79cd779bdaa7bd6109621a0f05e05b942961c76b3942ebc42f"
+    }
+  ]
+}

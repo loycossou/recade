@@ -1,0 +1,5 @@
+{
+ "cli": [
+  ["state", "set", "lots", "FEE,LED,RPT"]
+ ]
+}

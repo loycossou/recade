@@ -1,0 +1,18 @@
+#!/bin/sh
+# Recade harness commit-msg: no em dash, and a conventional subject (type(scope)?!?: text).
+set -u
+msg_file="$1"
+em_dash=$(printf '\342\200\224')
+if grep -v '^#' "$msg_file" | grep -q "$em_dash"; then
+  echo "recade commit-msg: the message has an em dash. Use a comma, a colon, parentheses or a new sentence." >&2
+  exit 1
+fi
+subject=$(grep -v '^#' "$msg_file" | sed -n '1p')
+case "$subject" in
+  "Merge "*|"Revert "*|"fixup! "*|"squash! "*) exit 0 ;;
+esac
+if ! printf '%s\n' "$subject" | grep -Eq '^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([A-Za-z0-9._/-]+\))?!?: .+'; then
+  echo "recade commit-msg: the subject is not conventional. Use: type(scope): summary, with type among feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert." >&2
+  exit 1
+fi
+exit 0

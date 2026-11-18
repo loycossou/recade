@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "files": [
+    {
+      "path": "docs/STACK.md",
+      "sha256": "bde3b14bd6553ed0d5b4bd6ffe4224fed41fba85a105a62affc05a61763a03c2"
+    },
+    {
+      "path": "docs/inventory.md",
+      "sha256": "6db6dee2cc4dbba7463964ac73513bf5dcc45b39dc34653c60de506a46a3cf7c"
+    }
+  ]
+}

@@ -1,0 +1,53 @@
+name: Workspace
+
+# CI of the workspace, the private repository that holds the documents of the project and no code.
+# It checks the writing style, the ID index and the slice sheets. The code repositories have their own CI.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Read only. No job writes to the repository, no job needs a token, and no step reads a secret.
+permissions:
+  contents: read
+
+concurrency:
+  group: workspace-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # Where the Recade tools come from. Pinned to a tag or a commit at install.
+  RECADE_REPOSITORY: loycossou/recade
+  RECADE_REF: main
+
+jobs:
+  recade:
+    name: Recade style, ID index and slice sheets
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4 # v4 major tag
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4 # v4 major tag
+        with:
+          node-version: 22
+      # The tools go outside the workspace, so the checks below never read them as project files.
+      - name: Fetch the Recade tools
+        env:
+          REPOSITORY: ${{ env.RECADE_REPOSITORY }}
+          REF: ${{ env.RECADE_REF }}
+        run: |
+          set -euo pipefail
+          tools="${RUNNER_TEMP}/recade-tools"
+          git init --quiet "$tools"
+          git -C "$tools" fetch --quiet --depth 1 "https://github.com/${REPOSITORY}.git" "$REF"
+          git -C "$tools" checkout --quiet FETCH_HEAD
+          npm ci --omit=dev --ignore-scripts --prefix "$tools"
+          echo "RECADE_BIN=${tools}/bin/recade.js" >> "$GITHUB_ENV"
+      - name: Writing style
+        run: node "$RECADE_BIN" lint-style .
+      - name: ID index
+        run: node "$RECADE_BIN" index check .
+      - name: Slice sheets
+        run: node "$RECADE_BIN" slices check --project .

@@ -1,0 +1,38 @@
+# The owner's recorded answers for the adopt run (the Fernhill desk repository built by build.js).
+documentation: what-agents-need   # not the full D1 to D3
+slicing: mixed
+gates:
+  G0-inventory: yes
+  G1: yes
+  G2-stack: yes
+  G2: yes
+  G3: yes
+  G4: yes
+  G5: yes
+board:
+  # The repository already has a board (number 4) and three open issues. The owner links two of them to slices
+  # and leaves the third alone. A second board is never created.
+  project: 4          # the owner picks the board among those listed
+  create: no
+  accept:
+    fernhill-desk#11: S-01
+    fernhill-desk#12: S-02
+github:
+  create_missing_issues: yes
+  auto_push: yes      # the owner agrees that Recade pushes the default branch of the workspace
+stack_rows:
+  # The rows of the harness technical sheet that the scan could not fill. The harness install lists them and the owner
+  # answers one closed question each: a recommended command, or Not applicable. Nothing is invented.
+  Lint: Not applicable, the project has no linter
+  Typecheck: Not applicable, plain JavaScript
+  Build: Not applicable, nothing is built
+  Contract tests: Not applicable, no external contract
+  E2E setup: Not applicable, no browser tests
+  E2E tests: Not applicable, no browser tests
+  Confirmation tests: Not applicable, no screen
+  Accessibility tests: Not applicable, no screen
+  Performance budget: Not applicable, one volunteer at a time
+  SAST: Not applicable, no dependency
+  Dependency audit: Not applicable, no dependency
+  SBOM: Not applicable, no dependency
+  Secret scan: "`gitleaks detect --no-banner`"

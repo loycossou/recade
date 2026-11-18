@@ -1,0 +1,31 @@
+# Template filled at install: the ecosystem comes from the harness technical sheet of docs/STACK.md.
+# Dependency updates arrive as ordinary pull requests, so they pass the same CI, the same review chain
+# and the same human gate as any slice. Nothing here merges anything.
+version: 2
+updates:
+  - package-ecosystem: __RECADE_ECOSYSTEM__
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"
+    labels: [dependencies]
+    groups:
+      minor-and-patch:
+        update-types: [minor, patch]
+
+  # Keeps the actions of .github/workflows on their current major version.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(ci)"
+    labels: [dependencies]
+    groups:
+      actions:
+        patterns: ["*"]

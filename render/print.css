@@ -1,0 +1,118 @@
+/* PDF stylesheet. Colours and sizes come from the CSS variables that html.js writes on :root from the theme tokens;
+   the @page rules (size, margins, running header and footer) are generated there too. Fonts are declared by figures.js (fontFaceCss). */
+* {
+  box-sizing: border-box;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+html {
+  font-family: "Inter Tight", Arial, sans-serif;
+  font-size: var(--size-body);
+  color: var(--ink);
+}
+body {
+  margin: 0;
+  font-family: "Inter Tight", Arial, sans-serif;
+  line-height: 1.15;
+}
+p { margin: 0 0 6pt; }
+
+/* Headings: H1 starts a page, headings stay with what follows. */
+h1, h2, h3, h4 {
+  margin: 14pt 0 6pt;
+  font-weight: 700;
+  line-height: 1.2;
+  break-after: avoid;
+  break-inside: avoid;
+}
+h1 {
+  break-before: page;
+  margin: 0 0 10pt;
+  padding-bottom: 4pt;
+  font-size: var(--size-h1);
+  border-bottom: 1.5pt solid var(--accent);
+}
+h2 { font-size: var(--size-h2); }
+h3 { font-size: var(--size-h3); color: var(--muted); }
+h4 { font-size: var(--size-h4); }
+
+a { color: inherit; text-decoration: underline; }
+code { font-family: Consolas, "Courier New", monospace; font-size: 0.95em; }
+mark.prv { background: var(--provisional); color: inherit; }
+
+/* Lists */
+ul, ol { margin: 0 0 6pt; padding-left: 20pt; }
+li { margin: 0 0 3pt; }
+li > ul, li > ol { margin: 3pt 0 0; }
+
+/* Tables: the header row repeats, rows never split. */
+table {
+  width: 100%;
+  margin: 0 0 8pt;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: var(--size-table);
+}
+thead { display: table-header-group; }
+tr { break-inside: avoid; }
+th, td {
+  padding: 2.5pt 4.5pt;
+  border: 0.5pt solid var(--rule);
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+thead th { background: var(--header-fill); color: var(--header-text); font-weight: 700; }
+tbody tr:nth-child(even) td { background: var(--zebra); }
+table.meta th { width: 30%; background: var(--zebra); font-weight: 700; }
+table.meta td { width: 70%; }
+
+/* Callouts and code */
+.callout {
+  margin: 0 0 6pt;
+  padding: 5pt 7pt 1pt 8pt;
+  background: var(--callout-note);
+  border-left: 3pt solid var(--accent);
+  break-inside: avoid;
+}
+.callout.warning { background: var(--callout-warning); }
+.callout.decision { background: var(--callout-decision); }
+pre {
+  margin: 0 0 8pt;
+  padding: 5pt 8pt;
+  background: var(--zebra);
+  font-family: Consolas, "Courier New", monospace;
+  font-size: var(--size-code);
+  line-height: 1;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+pre code { font-size: inherit; }
+
+/* Figures: never wider than their natural size, never split from the caption. */
+figure { margin: 6pt 0 10pt; text-align: center; break-inside: avoid; }
+figure img { display: block; max-width: 100%; margin: 0 auto 4pt; }
+figcaption { font-size: var(--size-caption); font-style: italic; color: var(--muted); }
+.pagebreak { break-after: page; height: 0; }
+
+/* Cover */
+.cover .org {
+  margin: 120pt 0 6pt;
+  font-size: var(--size-body);
+  font-variant: small-caps;
+  letter-spacing: 2pt;
+  color: var(--muted);
+}
+.cover .project { margin: 0 0 3pt; font-size: var(--size-h2); }
+.cover .title { margin: 0 0 24pt; font-size: calc(var(--size-h1) * 1.6); font-weight: 700; line-height: 1.15; }
+.cover h2 { margin: 18pt 0 6pt; font-size: var(--size-h3); color: var(--muted); }
+.cover .source { margin: 18pt 0 0; font-size: var(--size-caption); font-style: italic; color: var(--muted); }
+
+/* Contents and list of figures */
+nav { break-inside: auto; }
+nav.contents { break-before: page; }
+.toc-title { margin: 12pt 0 8pt; font-size: var(--size-h2); font-weight: 700; break-after: avoid; }
+nav ul { margin: 0 0 12pt; padding: 0; list-style: none; }
+nav li { margin: 0 0 4pt; }
+nav li.l2 { padding-left: 14pt; }
+nav a { text-decoration: none; }

@@ -1,0 +1,54 @@
+{
+ "cli": [
+  [
+   "decision",
+   "new",
+   "--doc",
+   "STACK",
+   "--question",
+   "Where does the desk store its data?",
+   "--why",
+   "The storage layer decides the tests and the backup.",
+   "--known",
+   "One server, 500 members, about 20 loans a Saturday",
+   "--unknown",
+   "Whether the built-in SQLite module stays stable",
+   "--options",
+   "[{\"label\": \"JSON file\", \"cost\": \"No new dependency\", \"closes\": \"Where the desk keeps its data\", \"risks\": \"A second loan can be accepted in a race\", \"calendar\": \"Saves two days\", \"repo\": \"src/store.js reads and writes one JSON file\"}, {\"label\": \"SQLite file\", \"cost\": \"One built-in module\", \"closes\": \"Where the desk keeps its data\", \"risks\": \"The module is marked experimental in Node 22\", \"calendar\": \"Costs two days\", \"repo\": \"src/store.js uses node:sqlite and a unique index\"}]",
+   "--recommendation",
+   "SQLite file: it refuses a second open loan by itself, at the price of two days.",
+   "--change-mind",
+   "A breaking change of the built-in SQLite module",
+   "--due",
+   "2026-11-20"
+  ],
+  [
+   "decision",
+   "new",
+   "--doc",
+   "PLAN",
+   "--question",
+   "Is the late fee capped?",
+   "--why",
+   "The fee rule is in the backlog and has no end today.",
+   "--known",
+   "2 per day (PROVISIONAL)",
+   "--unknown",
+   "What the board will vote",
+   "--options",
+   "[{\"label\": \"Cap the late fee at 10\", \"cost\": \"None\", \"closes\": \"The amount a member can owe for one tool\", \"risks\": \"The board may want a higher cap\", \"calendar\": \"No impact\", \"repo\": \"docs/D1.md PAR-02 and docs/PLAN.md LOAN-03 carry the cap\"}, {\"label\": \"No cap\", \"cost\": \"None\", \"closes\": \"The amount a member can owe for one tool\", \"risks\": \"A forgotten tool owes more than it is worth\", \"calendar\": \"No impact\", \"repo\": \"docs/D1.md PAR-02 carries no cap\"}]",
+   "--recommendation",
+   "Cap the late fee at 10: a member never owes more than a cheap tool costs.",
+   "--change-mind",
+   "A board vote for another cap",
+   "--due",
+   "2026-11-25"
+  ],
+  [
+   "state",
+   "set",
+   "lots",
+   "CAT,LOAN,MEM,REP"
+  ]
+ ]
+}

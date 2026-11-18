@@ -1,0 +1,9 @@
+node_modules/
+coverage/
+*.log
+.superpowers/
+.recade-cache/
+# Private working files: plans, notes and the French design spec. Kept on disk, never published.
+docs/superpowers/
+docs/specs/
+.recade/plugin-root

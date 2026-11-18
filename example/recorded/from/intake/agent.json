@@ -1,0 +1,46 @@
+{
+ "cli": [
+  [
+   "provisional",
+   "open",
+   "--what",
+   "Late fee per day",
+   "--why",
+   "The board has not decided it",
+   "--assumption",
+   "2 per day",
+   "--owner",
+   "Ines Calloway",
+   "--due",
+   "2026-11-25"
+  ],
+  [
+   "provisional",
+   "open",
+   "--what",
+   "Logo",
+   "--why",
+   "The library has none",
+   "--assumption",
+   "A text wordmark",
+   "--owner",
+   "Ines Calloway",
+   "--due",
+   "2026-12-01"
+  ],
+  [
+   "provisional",
+   "open",
+   "--what",
+   "Monthly hosting budget",
+   "--why",
+   "The library has not asked for quotes",
+   "--assumption",
+   "15 per month",
+   "--owner",
+   "Ines Calloway",
+   "--due",
+   "2026-12-01"
+  ]
+ ]
+}

@@ -1,0 +1,13 @@
+{
+  "name": "recade",
+  "version": "1.0.0",
+  "description": "Takes a software project from an idea to agents shipping it slice by slice, with an expert-inspired team, real documents and a human at every gate.",
+  "author": {
+    "name": "Loyc COSSOU",
+    "url": "https://github.com/loycossou"
+  },
+  "homepage": "https://github.com/loycossou/recade",
+  "repository": "https://github.com/loycossou/recade",
+  "license": "MIT",
+  "keywords": ["project-setup", "agents", "specifications", "slices", "harness"]
+}

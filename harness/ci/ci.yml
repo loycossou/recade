@@ -1,0 +1,227 @@
+name: CI
+
+# Template filled at install from the harness technical sheet of docs/STACK.md (section 12).
+# Every token written RECADE between double underscores below is replaced by the command of the sheet row it names.
+# A row left empty becomes a step that fails and says which row to fill, so a gate never passes by silence.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Read only. No job writes to the repository, no job needs a token, and no step reads a secret.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # Where the Recade tools come from. Pin a tag or a commit here when Recade publishes releases.
+  RECADE_REPOSITORY: loycossou/recade
+  RECADE_REF: main
+
+# Actions are pinned to a major tag. The Dependabot file next to this one keeps them current,
+# and a team that wants stricter pinning replaces each tag by the full commit SHA, keeping the tag in a comment.
+jobs:
+  quality:
+    name: Lint, types, unit and contract tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4 # v4 major tag
+        with:
+          persist-credentials: false
+      # __RECADE_SETUP__
+      - name: Install dependencies
+        run: |
+          __RECADE_INSTALL__
+      - name: Lint
+        run: |
+          __RECADE_LINT__
+      - name: Typecheck
+        run: |
+          __RECADE_TYPECHECK__
+      - name: Build
+        run: |
+          __RECADE_BUILD__
+      - name: Unit tests
+        run: |
+          __RECADE_TEST__
+      - name: Contract tests
+        run: |
+          __RECADE_CONTRACT__
+
+  e2e:
+    name: End to end, confirmations, accessibility, performance
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4 # v4 major tag
+        with:
+          persist-credentials: false
+      # __RECADE_SETUP__
+      - name: Install dependencies
+        run: |
+          __RECADE_INSTALL__
+      - name: Install the browsers
+        run: |
+          __RECADE_E2E_SETUP__
+      - name: End to end tests (Playwright)
+        run: |
+          __RECADE_E2E__
+      # One test per sensitive action, tagged @confirmation: it proves the dialog, the distant confirm button and the undo.
+      - name: Confirmation tests
+        run: |
+          __RECADE_CONFIRMATION__
+      # Accessibility with axe, on the pages and the dialogs, WCAG 2.2 AA.
+      - name: Accessibility tests (axe)
+        run: |
+          __RECADE_ACCESSIBILITY__
+      # The budgets of the sheet (response time, page weight, Core Web Vitals). A budget is never raised to make a run pass.
+      - name: Performance budget
+        run: |
+          __RECADE_PERFORMANCE__
+      - name: Keep the Playwright reports
+        if: failure()
+        uses: actions/upload-artifact@v4 # v4 major tag
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  security:
+    name: SAST, dependency audit, SBOM, secrets
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4 # v4 major tag
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      # __RECADE_SETUP__
+      - name: Install dependencies
+        run: |
+          __RECADE_INSTALL__
+      - name: Static analysis (SAST)
+        run: |
+          __RECADE_SAST__
+      - name: Dependency audit
+        run: |
+          __RECADE_AUDIT__
+      # The command writes the bill of materials into sbom/.
+      - name: Software bill of materials (SBOM)
+        run: |
+          __RECADE_SBOM__
+      # Skipped when the sheet declares the SBOM not applicable: there is then nothing to keep.
+      - name: Keep the SBOM
+        if: __RECADE_SBOM_UPLOAD__
+        uses: actions/upload-artifact@v4 # v4 major tag
+        with:
+          name: sbom
+          path: sbom/
+          if-no-files-found: error
+          retention-days: 30
+      - name: Secret scan
+        run: |
+          __RECADE_SECRETS__
+
+  # Flaky tests. The tracked file tests/quarantine.json lists them, and the test command of the blocking jobs above
+  # skips them (a tag or a skip list that reads that file). They run here, alone: a failure here shows in the log and
+  # in the run summary but never blocks the pull request (continue-on-error). The job in `recade` below fails when a
+  # quarantined test outlives its increment.
+  quarantine:
+    name: Quarantined tests (non-blocking, reported)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4 # v4 major tag
+        with:
+          persist-credentials: false
+      # __RECADE_SETUP__
+      - name: Install dependencies
+        run: |
+          __RECADE_INSTALL__
+      - name: Fetch the Recade tools
+        env:
+          REPOSITORY: ${{ env.RECADE_REPOSITORY }}
+          REF: ${{ env.RECADE_REF }}
+        run: |
+          set -euo pipefail
+          tools="${RUNNER_TEMP}/recade-tools"
+          git init --quiet "$tools"
+          git -C "$tools" fetch --quiet --depth 1 "https://github.com/${REPOSITORY}.git" "$REF"
+          git -C "$tools" checkout --quiet FETCH_HEAD
+          npm ci --omit=dev --ignore-scripts --prefix "$tools"
+          echo "RECADE_BIN=${tools}/bin/recade.js" >> "$GITHUB_ENV"
+      - name: List the quarantined tests
+        id: listing
+        run: |
+          set -euo pipefail
+          {
+            echo "### Quarantined tests"
+            echo
+            node "$RECADE_BIN" quarantine list
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          count="$(node "$RECADE_BIN" quarantine list --names | grep -c . || true)"
+          echo "count=${count}" >> "$GITHUB_OUTPUT"
+      - name: Install the browsers
+        if: steps.listing.outputs.count != '0'
+        run: |
+          __RECADE_E2E_SETUP__
+      - name: Run the quarantined tests
+        id: quarantined
+        if: steps.listing.outputs.count != '0'
+        run: |
+          __RECADE_QUARANTINE__
+      - name: Report the outcome
+        if: always()
+        env:
+          OUTCOME: ${{ steps.quarantined.outcome }}
+        run: |
+          echo "Quarantined tests: ${OUTCOME}. This job never blocks the pull request." | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Keep the Playwright reports
+        if: always()
+        uses: actions/upload-artifact@v4 # v4 major tag
+        with:
+          name: quarantine-report
+          path: |
+            playwright-report/
+            test-results/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  recade:
+    name: Recade style and quarantine expiry
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4 # v4 major tag
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4 # v4 major tag
+        with:
+          node-version: 22
+      # The tools go outside the workspace, so the checks below never read them as project files.
+      - name: Fetch the Recade tools
+        env:
+          REPOSITORY: ${{ env.RECADE_REPOSITORY }}
+          REF: ${{ env.RECADE_REF }}
+        run: |
+          set -euo pipefail
+          tools="${RUNNER_TEMP}/recade-tools"
+          git init --quiet "$tools"
+          git -C "$tools" fetch --quiet --depth 1 "https://github.com/${REPOSITORY}.git" "$REF"
+          git -C "$tools" checkout --quiet FETCH_HEAD
+          npm ci --omit=dev --ignore-scripts --prefix "$tools"
+          echo "RECADE_BIN=${tools}/bin/recade.js" >> "$GITHUB_ENV"
+      - name: Writing style
+        run: node "$RECADE_BIN" lint-style .
+      # This repository holds its own tests/quarantine.json. The check reads it and fails on a file that is not valid. The slice
+      # sheets are private and live in the workspace, so the increments are judged there, by /retro.
+      - name: Quarantine expiry
+        run: node "$RECADE_BIN" quarantine check

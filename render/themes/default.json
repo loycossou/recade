@@ -1,0 +1,11 @@
+{
+  "font": { "family": "Inter Tight", "fallback": "Arial" },
+  "size": { "body": 10, "h1": 17, "h2": 13, "h3": 11, "h4": 10, "table": 8.5, "caption": 8.5, "code": 8 },
+  "color": {
+    "ink": "0F1A22", "muted": "5A6672", "rule": "D9DFE4", "zebra": "F7F9FA",
+    "headerFill": "0F1A22", "headerText": "FFFFFF", "accent": "17C79A",
+    "calloutNote": "EEF7F4", "calloutWarning": "FDF3E1", "calloutDecision": "EEF0FD",
+    "provisional": "FFF6C2", "inputFill": "FFF6C2"
+  },
+  "page": { "size": "A4", "marginCm": 2 }
+}

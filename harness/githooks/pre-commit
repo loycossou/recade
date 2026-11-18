@@ -1,0 +1,54 @@
+#!/bin/sh
+# Recade harness pre-commit: the commit holds what the gates ran on, the staged files pass the style check, and the
+# required gates are green. The plugin folder comes from RECADE_PLUGIN_ROOT or from .recade/plugin-root (written at install).
+set -u
+
+if [ -z "${RECADE_PLUGIN_ROOT:-}" ]; then
+  top=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+  common=$(git rev-parse --git-common-dir 2>/dev/null || true)
+  main=""
+  if [ -n "$common" ]; then main=$(cd "$common/.." 2>/dev/null && pwd || true); fi
+  for dir in "$top" "$main"; do
+    if [ -n "$dir" ] && [ -f "$dir/.recade/plugin-root" ]; then
+      RECADE_PLUGIN_ROOT=$(sed -n '1p' "$dir/.recade/plugin-root")
+      break
+    fi
+  done
+fi
+if [ -z "${RECADE_PLUGIN_ROOT:-}" ] || [ ! -f "$RECADE_PLUGIN_ROOT/bin/recade.js" ]; then
+  echo "recade pre-commit: RECADE_PLUGIN_ROOT is not set and .recade/plugin-root does not point at a plugin folder with bin/recade.js. Fix it, then commit again." >&2
+  exit 1
+fi
+
+# A file that is staged and also changed after staging: the stamp was taken on the working tree, the commit would hold the index.
+tmp=$(mktemp)
+git diff --name-only > "$tmp"
+both=$(git diff --cached --name-only | grep -Fx -f "$tmp" || true)
+rm -f "$tmp"
+if [ -n "$both" ]; then
+  echo "recade pre-commit: these files are staged and changed again after staging. Stage them fully (or stash the rest), run the gates, then commit:" >&2
+  echo "$both" >&2
+  exit 1
+fi
+
+staged=$(git diff --cached --name-only --diff-filter=ACMR | grep -E '\.(md|js|json|yml|yaml|txt)$' || true)
+if [ -n "$staged" ]; then
+  # One argument per line, so a path with a space stays whole.
+  status=0
+  old_ifs=$IFS
+  IFS='
+'
+  # shellcheck disable=SC2086
+  set -- $staged
+  IFS=$old_ifs
+  node "$RECADE_PLUGIN_ROOT/bin/recade.js" lint-style "$@" || status=$?
+  if [ "$status" -ne 0 ]; then
+    echo "recade pre-commit: style errors in the staged files. Fix them, then commit again." >&2
+    exit 1
+  fi
+fi
+
+node "$RECADE_PLUGIN_ROOT/bin/recade.js" gate check || {
+  echo "recade pre-commit: a required gate is not green for this tree." >&2
+  exit 1
+}

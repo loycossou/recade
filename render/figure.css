@@ -1,0 +1,16 @@
+/* Wrapper page for Mermaid and SVG figures, captured as PNG. Fonts are declared by figures.js. */
+html, body {
+  margin: 0;
+  background: #fff;
+  font-family: "Inter Tight", Arial, sans-serif;
+}
+.figure-frame {
+  display: inline-block;
+  padding: 16px;
+  background: #fff;
+}
+.figure-frame svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}

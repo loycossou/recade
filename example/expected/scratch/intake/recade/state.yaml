@@ -1,0 +1,28 @@
+version: 1
+kind: workspace
+mode: scratch
+phase: 1
+gates:
+  G0:
+    passed: 2026-11-18
+    by: owner
+  G1: null
+  G2-stack: null
+  G2: null
+  G3: null
+  G4: null
+  G5: null
+next_action: Run /recade:team (G0 passed on 2026-11-18).
+voice: randall-munroe
+languages:
+  chat: en
+  work: en
+  deliverables:
+    - en
+  code: en
+  product_ui:
+    - en
+lots: []
+slicing: mixed
+second_opinion: sensitive
+hotspots: []

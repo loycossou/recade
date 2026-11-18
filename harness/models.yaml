@@ -1,0 +1,71 @@
+# Single source for the model and effort of every harness agent (spec 10.2).
+# `recade harness models` copies these values into the front matter of harness/agents/*.md.
+# Rules: floor Sonnet medium (test-runner is low), no xhigh or max, and the
+# second-opinion model is always from another family than the reviewer.
+# ui-designer: raise it to opus for the art direction phase in the project copy of this file.
+agents:
+  spec-writer:
+    standard: { model: opus, effort: high }
+    sensitive: { model: opus, effort: high }
+  ux-designer:
+    standard: { model: opus, effort: high }
+    sensitive: { model: opus, effort: high }
+  ui-designer:
+    standard: { model: sonnet, effort: high }
+    sensitive: { model: sonnet, effort: high }
+  test-engineer:
+    standard: { model: sonnet, effort: high }
+    sensitive: { model: sonnet, effort: high }
+  implementer:
+    standard: { model: sonnet, effort: high }
+    sensitive: { model: sonnet, effort: high }
+  implementer-critical:
+    standard: { model: opus, effort: high }
+    sensitive: { model: opus, effort: high }
+  reviewer:
+    standard: { model: opus, effort: high }
+    sensitive: { model: opus, effort: high }
+  security-reviewer:
+    standard: { model: sonnet, effort: high }
+    sensitive: { model: opus, effort: high }
+  design-reviewer:
+    standard: { model: sonnet, effort: high }
+    sensitive: { model: sonnet, effort: high }
+  product-reviewer:
+    standard: { model: opus, effort: medium }
+    sensitive: { model: opus, effort: medium }
+  domain-reviewer:
+    standard: { model: sonnet, effort: high }
+    sensitive: { model: sonnet, effort: high }
+  devops:
+    standard: { model: sonnet, effort: medium }
+    sensitive: { model: sonnet, effort: medium }
+  doc-writer:
+    standard: { model: sonnet, effort: medium }
+    sensitive: { model: sonnet, effort: medium }
+  release-manager:
+    standard: { model: sonnet, effort: medium }
+    sensitive: { model: sonnet, effort: medium }
+  board-keeper:
+    standard: { model: sonnet, effort: medium }
+    sensitive: { model: sonnet, effort: medium }
+  explorer:
+    standard: { model: sonnet, effort: medium }
+    sensitive: { model: sonnet, effort: medium }
+  test-runner:
+    standard: { model: sonnet, effort: low }
+    sensitive: { model: sonnet, effort: low }
+  code-teacher:
+    standard: { model: sonnet, effort: high }
+    sensitive: { model: sonnet, effort: high }
+  second-opinion:
+    standard: { model: claude-fable-5-2, effort: high }
+    sensitive: { model: claude-fable-5-2, effort: high }
+  merge-keeper:
+    standard: { model: sonnet, effort: medium }
+    sensitive: { model: sonnet, effort: medium }
+# Which family each model id or alias belongs to. Used to check the second-opinion rule.
+families:
+  opus: [opus]
+  sonnet: [sonnet]
+  fable: [claude-fable-5-2]

@@ -1,0 +1,95 @@
+name: Slice conflicts
+
+# Compares this pull request with the other open ones, and with the base branch, without merging anything
+# (git merge-tree). A conflict fails the job and names the files, as soon as it appears.
+on:
+  pull_request:
+
+# Read only: the job lists pull requests and reads the repository. It writes nothing and uses no secret.
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: slice-conflicts-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  # Where the Recade tools come from. Pin a tag or a commit here when Recade publishes releases.
+  RECADE_REPOSITORY: loycossou/recade
+  RECADE_REF: main
+
+jobs:
+  conflicts:
+    # A pull request from a fork is not checked: a branch of the fork with the same name as a branch of this
+    # repository would be compared with the wrong commits.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ env.RECADE_REPOSITORY }}
+          ref: ${{ env.RECADE_REF }}
+          path: .recade-tools
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install the Recade tools
+        run: npm ci --omit=dev --ignore-scripts --prefix .recade-tools
+      - name: List and fetch the open pull request branches
+        id: branches
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          set -euo pipefail
+          # Branches of this repository only. A fork branch is not on origin, and a name with an odd character is left out.
+          gh pr list --state open --limit 200 --json headRefName,isCrossRepository \
+            --jq '.[] | select(.isCrossRepository == false) | .headRefName | select(test("^[A-Za-z0-9][A-Za-z0-9._/-]*$"))' > branches.txt
+          git fetch --no-tags origin "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
+          list=""
+          while IFS= read -r name; do
+            if git fetch --no-tags origin "+refs/heads/${name}:refs/remotes/origin/${name}"; then
+              list="${list:+$list,}${name}"
+            fi
+          done < branches.txt
+          echo "list=${list}" >> "$GITHUB_OUTPUT"
+      # The check runs on every open branch, so two other pull requests may conflict with each other. Only the
+      # conflicts that involve the branch of this pull request, or this branch and the base, fail the job. A pull
+      # request from a fork is not on origin, so it is not checked: its branch is not in the list below.
+      - name: Check this pull request against the others and against the base
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          HEAD_REF: ${{ github.head_ref }}
+          BRANCHES: ${{ steps.branches.outputs.list }}
+        run: |
+          set -uo pipefail
+          if [ -z "${BRANCHES}" ]; then
+            echo "No open pull request branch to check."
+            exit 0
+          fi
+          code=0
+          out=$(node .recade-tools/bin/recade.js conflicts check --base "${BASE_REF}" --branches "${BRANCHES}") || code=$?
+          if [ "${code}" -ne 0 ] && [ "${code}" -ne 1 ]; then
+            echo "The conflict check failed (exit ${code})." >&2
+            exit "${code}"
+          fi
+          # Each conflict is one line: "<a> and <b> conflict on: <files>". Branch names have no space.
+          mine=$(printf '%s\n' "${out}" | awk '$2 == "and" && $4 == "conflict" && ($1 == ENVIRON["HEAD_REF"] || $3 == ENVIRON["HEAD_REF"])')
+          others=$(printf '%s\n' "${out}" | grep ' conflict on: ' | grep -vxF "${mine:-__none__}" || true)
+          if [ -n "${others}" ]; then
+            echo "Conflicts between other open branches (not this pull request):"
+            printf '%s\n' "${others}"
+          fi
+          if [ -n "${mine}" ]; then
+            echo "This pull request conflicts:" | tee -a "$GITHUB_STEP_SUMMARY"
+            printf '%s\n' "${mine}" | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          echo "No conflict involves ${HEAD_REF}."

@@ -1,0 +1,14 @@
+version: 1
+mode: scratch
+phase: 0
+gates: {}
+next_action: null
+voice: randall-munroe
+languages:
+  chat: en
+  work: en
+  deliverables: [en]
+  code: en
+  product_ui: [en]
+lots: []
+slicing: mixed
