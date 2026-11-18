@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parse, stringify } from 'yaml';
 
@@ -57,11 +57,21 @@ export function loadState(projectDir) {
 }
 
 /**
- * Write `<projectDir>/recade/state.yaml`, creating the directory when needed.
+ * Write `<projectDir>/recade/state.yaml`, creating the directory when needed. The file is replaced in one step (a
+ * temporary file, then a rename): another process that reads the state while this one writes sees the old text or the
+ * new one, never an empty or half written file.
  * @param {string} projectDir
  * @param {object} state
  */
 export function saveState(projectDir, state) {
   mkdirSync(join(projectDir, 'recade'), { recursive: true });
-  writeFileSync(statePath(projectDir), stringify(state));
+  const path = statePath(projectDir);
+  const temp = `${path}.${process.pid}.tmp`;
+  try {
+    writeFileSync(temp, stringify(state));
+    renameSync(temp, path);
+  } catch (err) {
+    rmSync(temp, { force: true });
+    throw err;
+  }
 }

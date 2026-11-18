@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, symlinkSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
 import { join, isAbsolute } from 'node:path';
 import { parse } from 'yaml';
@@ -156,6 +157,31 @@ test('saveState writes recade/state.yaml and loadState reads it back', () => {
   assert.deepEqual(loadState(dir), state);
   writeFileSync(join(dir, 'recade', 'state.yaml'), 'a: [unclosed\n  : :\n');
   assert.throws(() => loadState(dir), /state\.yaml is not valid YAML/);
+  rmSync(dir, { recursive: true });
+});
+
+test('saveState replaces the file in one step: a reader in another process never sees it empty or half written', async () => {
+  const dir = tmp();
+  const state = { ...initState(dir, { mode: 'scratch' }, DEFAULT_CONFIG), lots: Array.from({ length: 400 }, (_, i) => `LOT${i}`) };
+  saveState(dir, state);
+  const writer = spawn(process.execPath, ['--input-type=module', '-e',
+    `import { saveState } from ${JSON.stringify(new URL('../src/state.js', import.meta.url).href)};
+     const [dir, text] = process.argv.slice(1);
+     const state = JSON.parse(text);
+     for (let i = 0; i < 1500; i++) saveState(dir, state);`,
+    dir, JSON.stringify(state)], { stdio: 'ignore' });
+  const done = new Promise((resolve) => writer.on('close', resolve));
+  let reads = 0;
+  let finished = false;
+  done.then(() => { finished = true; });
+  while (!finished) {
+    assert.deepEqual(loadState(dir), state);
+    reads += 1;
+    if (reads % 20 === 0) await new Promise((r) => setImmediate(r));
+  }
+  assert.equal(await done, 0);
+  assert.ok(reads > 0);
+  assert.deepEqual(readdirSync(join(dir, 'recade')), ['state.yaml']);
   rmSync(dir, { recursive: true });
 });
 

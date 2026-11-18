@@ -51,6 +51,32 @@ function sheet(ws, file, touches, status, quote = '"') {
   writeFileSync(path, `${rows.join('\n')}\n`);
 }
 
+/** Run `fn` with the git identity of the process set to `env` (undefined removes a variable), then put the old one back. */
+async function withGitEnv(env, fn) {
+  const saved = {};
+  for (const k of Object.keys(env)) saved[k] = process.env[k];
+  for (const [k, v] of Object.entries(env)) {
+    if (v === undefined) delete process.env[k];
+    else process.env[k] = v;
+  }
+  try {
+    return await fn();
+  } finally {
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  }
+}
+
+const OWNER_MAIL = ['owner', 'example.test'].join('@');
+const OWNER_IDENTITY = { GIT_AUTHOR_NAME: 'Owner', GIT_AUTHOR_EMAIL: OWNER_MAIL, GIT_COMMITTER_NAME: 'Owner', GIT_COMMITTER_EMAIL: OWNER_MAIL };
+// No identity at all, as on a CI machine: not even the one git guesses from the user and host names.
+const NO_IDENTITY = {
+  GIT_AUTHOR_NAME: undefined, GIT_AUTHOR_EMAIL: undefined, GIT_COMMITTER_NAME: undefined, GIT_COMMITTER_EMAIL: undefined, EMAIL: undefined,
+  GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'user.useConfigOnly', GIT_CONFIG_VALUE_0: 'true',
+};
+
 test('addRepo --new runs git init -b main, links the repository first, records the entry', async () => {
   const ws = await workspace();
   const calls = [];
@@ -58,7 +84,7 @@ test('addRepo --new runs git init -b main, links the repository first, records t
     calls.push([cmd, ...args]);
     return defaultExec(cmd, args);
   };
-  const entry = await addRepo(ws, 'api', { new: true, role: 'api' }, { exec });
+  const entry = await withGitEnv(OWNER_IDENTITY, () => addRepo(ws, 'api', { new: true, role: 'api' }, { exec }));
   assert.deepEqual(calls, [
     ['git', '-C', join(ws, 'repos', 'api'), 'init', '-b', 'main'],
     ['git', '-C', join(ws, 'repos', 'api'), '-c', 'commit.gpgsign=false', 'commit', '-q', '--allow-empty', '-m', 'chore: initial commit'],
@@ -73,6 +99,21 @@ test('addRepo --new runs git init -b main, links the repository first, records t
   assert.equal(readFileSync(join(ws, 'repos', 'api', '.recade', 'workspace'), 'utf8').trim(), ws);
   assert.equal(existsSync(join(ws, '.recade', 'workspace')), false);
   assert.equal(findWorkspace(join(ws, 'repos', 'api')).via, 'link');
+});
+
+test('addRepo --new commits with the Recade placeholder identity when git has none', async () => {
+  const ws = await workspace();
+  const calls = [];
+  const exec = (cmd, args) => {
+    calls.push([cmd, ...args]);
+    return defaultExec(cmd, args);
+  };
+  await withGitEnv(NO_IDENTITY, () => addRepo(ws, 'api', { new: true }, { exec }));
+  const commits = calls.filter((c) => c.includes('commit'));
+  assert.equal(commits.length, 2);
+  assert.ok(!commits[0].includes('user.name=Recade'));
+  assert.ok(commits[1].includes('user.name=Recade'));
+  assert.equal(must(git(join(ws, 'repos', 'api'), 'log', '--format=%an|%s')).stdout.trim(), 'Recade|chore: initial commit');
 });
 
 test('addRepo refuses a bad name, a used name, a non-empty folder and a missing source, and leaves nothing behind', async () => {

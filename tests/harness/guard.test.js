@@ -15,8 +15,10 @@ const guardMjs = join(plugin, 'harness', 'hooks', 'guard.mjs');
 const launcherMjs = join(plugin, 'harness', 'hooks', 'launcher.mjs');
 const EM = '\u2014';
 
+// Every git call carries its own identity: a merge needs one too, and a CI machine has none.
+const gitRaw = (cwd, ...args) => spawnSync('git', ['-c', 'user.name=ci', '-c', 'user.email=ci', '-c', 'commit.gpgsign=false', ...args], { cwd, encoding: 'utf8' });
 const git = (cwd, ...args) => {
-  const r = spawnSync('git', ['-c', 'user.name=ci', '-c', 'user.email=ci', '-c', 'commit.gpgsign=false', ...args], { cwd, encoding: 'utf8' });
+  const r = gitRaw(cwd, ...args);
   assert.equal(r.status, 0, r.stderr);
   return r.stdout;
 };
@@ -248,7 +250,7 @@ test('handleHook: merge-keeper may edit the conflicted files only', async () => 
   git(repo, 'checkout', '-q', 'main');
   writeFileSync(join(repo, 'a.txt'), 'main\n');
   git(repo, 'commit', '-qam', 'chore: main');
-  spawnSync('git', ['merge', 'side'], { cwd: repo });
+  gitRaw(repo, 'merge', 'side'); // stops on the conflict, which is what the test needs
   assert.match(git(repo, 'diff', '--name-only', '--diff-filter=U'), /a\.txt/);
   assert.equal(await hook(repo, { agent_type: 'merge-keeper', tool_name: 'Edit', tool_input: { file_path: join(repo, 'a.txt') } }), '');
   denied(await hook(repo, { agent_type: 'merge-keeper', tool_name: 'Edit', tool_input: { file_path: join(repo, 'README.md') } }));
@@ -818,7 +820,7 @@ test('handleHook: a write resolves the repository, branch and conflicts from the
   git(home, 'worktree', 'add', '-q', merge, 'side');
   writeFileSync(join(merge, 'a.txt'), 'side\n');
   git(merge, 'commit', '-qam', 'chore: side');
-  spawnSync('git', ['merge', 'main'], { cwd: merge });
+  gitRaw(merge, 'merge', 'main'); // stops on the conflict, which is what the test needs
   assert.match(git(merge, 'diff', '--name-only', '--diff-filter=U'), /a\.txt/);
   // The session stays on the main checkout, where nothing conflicts.
   assert.equal(await hook(home, { agent_type: 'merge-keeper', tool_name: 'Edit', tool_input: { file_path: join(merge, 'a.txt') } }), '');
