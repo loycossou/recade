@@ -844,3 +844,72 @@ test('an adopted project reaches G4 through team, docs, bible, slices and resume
   const resume = read('resume.md');
   for (const part of ['In mode `adopt` (`mode` of the state) there is no intake', 'phase 2 (`docs`) is Step 5.1 of `adopt.md`', 'phase 5 is Step 6 of `adopt.md`']) assert.ok(resume.includes(part), part);
 });
+
+const READ_WRITING_MODEL = 'Read the writing model once: run `recade models writer` and keep the word it prints (`fable` or `opus`).';
+const PASS_WRITING_MODEL = 'Pass it as the `model` of the Agent tool in every dispatch of a writer-tier agent';
+
+test('every command that dispatches a writer-tier agent reads the writing model once and passes it as the model of each dispatch', () => {
+  for (const f of ['new.md', 'team.md', 'docs.md', 'bible.md', 'slices.md', 'adopt.md', 'amend.md', 'harness.md']) {
+    const text = read(f);
+    assert.equal(text.split(READ_WRITING_MODEL).length, 2, `${f}: reads it once`);
+    assert.equal(text.split(PASS_WRITING_MODEL).length, 2, `${f}: passes it`);
+    assert.ok(text.indexOf(READ_WRITING_MODEL) < text.indexOf(PASS_WRITING_MODEL), f);
+    assert.ok(text.includes('Never write the full id in a dispatch'), f);
+  }
+  for (const f of ['help.md', 'languages.md', 'resume.md', 'setup.md', 'start.md', 'status.md']) {
+    assert.equal(read(f).includes(PASS_WRITING_MODEL), false, f);
+  }
+});
+
+test('the mechanical agents keep their own model: docs leaves the spike-runner alone, adopt the inventory-analyst', () => {
+  assert.ok(read('docs.md').includes('The `spike-runner` is mechanical tier: dispatch it with no `model`, it keeps its own.'));
+  assert.ok(read('adopt.md').includes('The `inventory-analyst` is mechanical tier: dispatch it with no `model`, it keeps its own.'));
+  for (const f of ['new.md', 'team.md', 'bible.md', 'slices.md', 'amend.md', 'harness.md']) {
+    assert.equal(read(f).includes('is mechanical tier'), false, f);
+  }
+});
+
+test('team.md gives the recruiter the chosen model id and the writer effort for the roster', () => {
+  const step4 = stepSection('team.md', 4);
+  assert.ok(step4.includes('the model is the full id that `recade models writer --id` prints, and the effort is the `effort` of the `writer` entry of `${CLAUDE_PLUGIN_ROOT}/agents/models.json`'));
+  assert.equal(step4.includes('pass both as they are written there'), false);
+});
+
+test('bible.md puts the owner\'s writing model, not the default of models.json, in the model table of the BIBLE', () => {
+  const step2 = stepSection('bible.md', 2);
+  assert.ok(step2.includes('replace the `model` of its `writer` entry with the full id that `recade models writer --id` prints'));
+});
+
+test('start.md asks the writing model once, Fable first and recommended, Opus second, and saves it with config set', () => {
+  const step4 = stepSection('start.md', 4);
+  assert.ok(step4.includes('Skip this step if `recade config get started` prints `true`.'));
+  for (const part of [
+    'Writing model, the model of the agents that write and review the documents. Ask with `AskUserQuestion`: "Which model should write your documents?"',
+    '- **Fable** (recommended): the most capable writer, at high effort. Saved as `fable`.',
+    '- **Opus**: the latest Opus, at the same high effort. Saved as `opus`.',
+    'Save with `recade config set models.writer <fable or opus>`.',
+    '`recade config set models.writer opus` changes it later',
+  ]) assert.ok(step4.includes(part), part);
+  assert.ok(step4.indexOf('**Fable**') < step4.indexOf('**Opus**'));
+  assert.ok(step4.indexOf('Writing model') < step4.indexOf('Writing voice'));
+});
+
+test('setup.md and help.md mention the writing model and how to change it', () => {
+  for (const f of ['setup.md', 'help.md']) {
+    const text = read(f);
+    assert.ok(text.includes('config get models.writer'), f);
+    assert.ok(text.includes('`recade config set models.writer fable`'), f);
+    assert.ok(text.includes('`recade config set models.writer opus`'), f);
+  }
+});
+
+test('recade help lists recade models and the plugin README documents the choice', async () => {
+  const text = await help();
+  assert.match(text, /^recade models\s+.*recade models writer \[--id\]/m);
+  const readme = readFileSync(join(repo, 'README.md'), 'utf8');
+  for (const part of ['models.writer', 'recade models writer', 'claude-opus-5-5', 'second opinion stays on Fable']) assert.ok(readme.includes(part), part);
+  const design = readFileSync(join(repo, 'docs', 'design.md'), 'utf8');
+  for (const part of ['models.writer', 'recade models writer', 'second-opinion stays on Fable']) assert.ok(design.includes(part), part);
+  const changelog = readFileSync(join(repo, 'CHANGELOG.md'), 'utf8');
+  assert.ok(changelog.includes('models.writer'));
+});

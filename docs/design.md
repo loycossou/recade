@@ -84,7 +84,7 @@ Two families of commands exist:
 
 1. It shows a two-sentence introduction.
 2. It checks the machine (`recade doctor`): `gh` signed in with the `project` scope, Node 20 or later, the render dependencies, the Playwright browser. Each line says `ok`, `warn` or `missing` with how to fix it. `/recade:setup` runs only this step.
-3. It asks for your preferences: languages, the GitHub account for private project repositories, the projects folder (the default parent of a workspace) and the voice.
+3. It asks for your preferences: languages, the GitHub account for private project repositories, the projects folder (the default parent of a workspace), the writing model (Fable or Opus, section 8.2) and the voice.
 4. It shows the command map.
 5. It suggests the next step for the current folder: `/recade:new <project>` in an empty folder, `/recade:new <project> --from <folder>` when documents exist, or `/recade:adopt` in a code repository.
 
@@ -320,6 +320,8 @@ One table, `harness/models.yaml`, is the only source. `recade harness models` wr
 - The `security-reviewer` moves up a model in the `sensitive` lane.
 - The `second-opinion` agent always runs on a different model family from the `reviewer`.
 - Phases 0 to 4 use the most capable model for the team, the documents and the BIBLE, and a mid-size model for mechanical cutting and board creation.
+- **The owner chooses the writing model.** The plugin agents of the `writer` tier (15 of the 17 in `agents/`) run on Fable by default, at high effort. The user preference `models.writer` (`fable`, the default, or `opus`, the latest Opus) replaces the model, never the effort. `/recade:start` asks it once, `recade config set models.writer opus` changes it, and `recade models writer` prints the alias to dispatch with (`--id` prints the full id, `claude-fable-5-2` or `claude-opus-5-5`). Each `/recade:*` command that dispatches a writer agent reads it once and passes it as the `model` of every such dispatch; the recruiter writes the chosen id in the model column of the roster. The front matter of the agents keeps Fable as the fallback, so `tools/sync-agent-models.js --check` stays green, and the mechanical agents (`inventory-analyst`, `spike-runner`) are not touched.
+- **The second-opinion stays on Fable** whatever `models.writer` says, because it must come from a family different from the reviewer's, which is `opus`. If the second opinion followed the owner to Opus, it would share the reviewer's family and the rule above would fail. `harness/models.yaml` says so, and `recade harness models` still checks the rule.
 - The real cost of each slice is measured (section 8.9) so the table can be tuned.
 
 ### 8.3 Chain and lanes

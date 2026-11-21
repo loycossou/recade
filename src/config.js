@@ -2,6 +2,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parse, stringify } from 'yaml';
 import { configDir } from './paths.js';
+import { WRITER_CHOICES, isWriterChoice } from './models.js';
 
 export const DEFAULT_CONFIG = Object.freeze({
   version: 1,
@@ -16,6 +17,7 @@ export const DEFAULT_CONFIG = Object.freeze({
   github_owner: null,
   projects_root: '~/projects',
   voice: 'randall-munroe',
+  models: Object.freeze({ writer: 'fable' }),
 });
 
 const LANGUAGE_CODE = /^[a-z]{2}$/;
@@ -120,6 +122,7 @@ export function setConfigValue(config, key, raw) {
   } else {
     value = raw.trim();
     if (key === 'voice' && value === '') throw new Error('voice cannot be empty.');
+    if (key === 'models.writer' && !isWriterChoice(value)) throw new Error(`models.writer must be ${WRITER_CHOICES.join(' or ')}.`);
   }
   if (LANGUAGE_KEYS.has(key)) {
     const tags = LIST_KEYS.has(key);

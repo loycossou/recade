@@ -39,6 +39,7 @@ test('DEFAULT_CONFIG has the documented values', () => {
     github_owner: null,
     projects_root: '~/projects',
     voice: 'randall-munroe',
+    models: { writer: 'fable' },
   });
 });
 
@@ -323,4 +324,51 @@ test('deliverables and product_ui accept BCP 47 tags, the other keys stay two le
     assert.throws(() => setConfigValue(DEFAULT_CONFIG, key, 'pt-BR'), /language code/i, key);
     assert.throws(() => setConfigValue(DEFAULT_CONFIG, key, 'fil'), /language code/i, key);
   }
+});
+
+test('models.writer is fable or opus, and anything else is refused in one line', () => {
+  assert.equal(DEFAULT_CONFIG.models.writer, 'fable');
+  assert.equal(setConfigValue(DEFAULT_CONFIG, 'models.writer', 'opus').models.writer, 'opus');
+  assert.equal(setConfigValue(DEFAULT_CONFIG, 'models.writer', ' fable ').models.writer, 'fable');
+  for (const bad of ['sonnet', 'claude-opus-5-5', 'Opus', '']) {
+    assert.throws(() => setConfigValue(DEFAULT_CONFIG, 'models.writer', bad), { message: 'models.writer must be fable or opus.' }, bad);
+  }
+  assert.throws(() => setConfigValue(DEFAULT_CONFIG, 'models.second_opinion', 'opus'), /Unknown key/);
+});
+
+test('recade config set models.writer opus is read back by config get and by recade models writer', async () => {
+  const dir = tmp();
+  const env = { RECADE_CONFIG_DIR: dir };
+  const read = async (args) => {
+    const t = makeIO(dir, env);
+    const code = await run(args, t.io);
+    return { code, out: t.stdout(), err: t.stderr() };
+  };
+  assert.deepEqual(await read(['models', 'writer']), { code: 0, out: 'fable\n', err: '' });
+  assert.deepEqual(await read(['models', 'writer', '--id']), { code: 0, out: 'claude-fable-5-2\n', err: '' });
+  assert.equal((await read(['config', 'set', 'models.writer', 'opus'])).code, 0);
+  assert.equal((await read(['config', 'get', 'models.writer'])).out, 'opus\n');
+  assert.deepEqual(await read(['models', 'writer']), { code: 0, out: 'opus\n', err: '' });
+  assert.deepEqual(await read(['models', 'writer', '--id']), { code: 0, out: 'claude-opus-5-5\n', err: '' });
+  const bad = await read(['config', 'set', 'models.writer', 'gpt']);
+  assert.equal(bad.code, 2);
+  assert.equal(bad.err, 'models.writer must be fable or opus.\n');
+  assert.equal((await read(['models', 'writer'])).out, 'opus\n');
+  rmSync(dir, { recursive: true });
+});
+
+test('recade models writer names the bad value of a hand-edited config and exits 1; bad usage exits 2', async () => {
+  const dir = tmp();
+  const env = { RECADE_CONFIG_DIR: dir };
+  writeFileSync(join(dir, 'config.yaml'), 'models:\n  writer: gpt\n');
+  const t = makeIO(dir, env);
+  assert.equal(await run(['models', 'writer'], t.io), 1);
+  assert.equal(t.stdout(), '');
+  assert.match(t.stderr(), /models\.writer is "gpt" in .*config\.yaml\. Use fable or opus: recade config set models\.writer fable/);
+  for (const args of [[], ['reviewer'], ['writer', '--json'], ['writer', '--id', 'x']]) {
+    const u = makeIO(dir, env);
+    assert.equal(await run(['models', ...args], u.io), 2, args.join(' '));
+    assert.equal(u.stderr(), 'Usage: recade models writer [--id]\n');
+  }
+  rmSync(dir, { recursive: true });
 });

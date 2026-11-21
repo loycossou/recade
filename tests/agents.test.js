@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { syncAgents } from '../tools/sync-agent-models.js';
+import { WRITER_MODELS } from '../src/models.js';
 import { AXES, CONTRACT_SECTIONS, INVARIANT_SECTIONS, RULES_SECTIONS, REGISTER_FILES, SOURCE_DIR } from '../src/project/fromcode.js';
 
 const repo = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -40,6 +41,20 @@ test('models.json holds the two tiers', () => {
     writer: { model: 'claude-fable-5-2', effort: 'high' },
     mechanical: { model: 'sonnet', effort: 'medium' },
   });
+});
+
+test('the writer models are the two ids the owner chooses from, and the default one is the fallback of every writer agent', () => {
+  assert.deepEqual(WRITER_MODELS, { fable: 'claude-fable-5-2', opus: 'claude-opus-5-5' });
+  assert.equal(models.writer.model, WRITER_MODELS.fable);
+  const writers = files.filter((f) => parseAgent(readFileSync(join(agentsDir, f), 'utf8')).front.tier === 'writer');
+  assert.equal(writers.length, 15);
+  for (const f of writers) assert.equal(parseAgent(readFileSync(join(agentsDir, f), 'utf8')).front.model, WRITER_MODELS.fable, f);
+});
+
+test('the recruiter writes the model the dispatcher gives in the model column of the roster, and says Fable is only the fallback', () => {
+  const text = readFileSync(join(agentsDir, 'recruiter.md'), 'utf8');
+  assert.ok(text.includes('the owner chose for the writing agents (Fable or Opus): write the id exactly as the dispatcher gives it, never your own'));
+  assert.ok(text.includes('only the default'));
 });
 
 test('the agents that exist so far', () => {

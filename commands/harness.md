@@ -44,6 +44,8 @@ Run `state`, `harness`, `claude-md` and `lint-style` commands with `--project '<
 
 ## Step 3. The team specialises
 
+Read the writing model once: run `recade models writer` and keep the word it prints (`fable` or `opus`). Pass it as the `model` of the Agent tool in every dispatch of a writer-tier agent (every role below, and each one you send back). It is the owner's choice between Fable and Opus, at the same effort. Never write the full id in a dispatch, and never run the command again for the next dispatch.
+
 The roster of the project decides who takes part: `<dir>/team/roster.md`. Each role below reads its own doctrine `<dir>/team/<role>.md`. Dispatch the roles that are in the roster in one message, so they run in parallel, with the stage `harness`. They write no file in this stage: each replies with the text to add below the specialisation line of one file, and you add it. Every prompt holds:
 
 - the stage `harness`, the full path `<dir>`, today's date and `languages.work`;

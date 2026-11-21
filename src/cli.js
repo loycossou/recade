@@ -8,6 +8,7 @@ import { scanAttachments, formatFinding } from './style/attachments.js';
 import { checkRoot, renderIndexMd } from './index/check.js';
 import { stringify } from 'yaml';
 import { configPath, loadConfig, saveConfig, setConfigValue } from './config.js';
+import { WRITER_CHOICES, WRITER_MODELS, isWriterChoice } from './models.js';
 import { loadState, saveState } from './state.js';
 import {
   PHASES, GATES, ADOPT_GATES, SETTINGS, phasesOf, gatesOf, normalizeState, canStart, passGate, resetFrom, nextAction, projectRoot, workspaceOf, currentPhase, setSetting,
@@ -105,6 +106,7 @@ function renderHelp() {
   out += '\nFrom the terminal\n\n';
   // A label longer than the column still keeps two spaces before its text.
   const term = (label) => label.padEnd(Math.max(20, label.length + 2));
+  out += `${term('recade models')}Print the model the writing agents use, the owner's choice of Fable or Opus: recade models writer [--id]\n`;
   out += `${term('recade cases')}List and replay the agent test cases, the plugin's and the harness's: recade cases [--plugin] [--harness] [--run] [--agent <name>]\n`;
   out += `${term('recade workspace')}Find the project workspace, set its auto-push, commit its leftover documents: recade workspace root | auto-push on|off | commit --paths <path>[,<path>...] -m <message>\n`;
   out += `${term('recade repo')}Register the code repositories of the workspace, check and relink them: recade repo add <name> (--new | --clone <url>) | list | check | sync\n`;
@@ -1579,6 +1581,24 @@ export const commands = {
     }
     io.stderr.write('Usage: recade config path | get [key] | set <key> <value>\n');
     return 2;
+  },
+  async models(args, io) {
+    const usage = 'Usage: recade models writer [--id]';
+    const [which, ...flags] = args;
+    if (which !== 'writer' || flags.some((f) => f !== '--id') || flags.length > 1) {
+      io.stderr.write(`${usage}\n`);
+      return 2;
+    }
+    const loaded = readConfig(io);
+    if (!loaded) return 1;
+    for (const w of loaded.warnings) io.stderr.write(`${w}\n`);
+    const choice = loaded.config.models?.writer;
+    if (!isWriterChoice(choice)) {
+      io.stderr.write(`models.writer is ${JSON.stringify(choice)} in ${configPath(io.env)}. Use ${WRITER_CHOICES.join(' or ')}: recade config set models.writer ${WRITER_CHOICES[0]}\n`);
+      return 1;
+    }
+    io.stdout.write(`${flags.length === 1 ? WRITER_MODELS[choice] : choice}\n`);
+    return 0;
   },
   async doctor(args, io) {
     if (args.some((a) => a !== '--json')) {

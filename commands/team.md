@@ -30,9 +30,11 @@ Run `node "${CLAUDE_PLUGIN_ROOT}/bin/recade.js" version`. If it prints a version
 
 Run `state` and `team` commands with `--project '<dir>'` at the end of the command. Run Git as `git -C '<dir>' ...`. Give Read, Write and Edit the full path under `<dir>`.
 
-## Step 2. Today's date
+## Step 2. Today's date and the writing model
 
 Run `node -p "new Date().toLocaleDateString('en-CA')"`. It prints the date as YYYY-MM-DD. The doctrine writers need it for the date they read each source.
+
+Read the writing model once: run `recade models writer` and keep the word it prints (`fable` or `opus`). Pass it as the `model` of the Agent tool in every dispatch of a writer-tier agent (here the `recruiter`, both times, and every `doctrine-writer`). It is the owner's choice between Fable and Opus, at the same effort. Never write the full id in a dispatch, and never run the command again for the next dispatch.
 
 ## Step 3. The project lead
 
@@ -44,7 +46,7 @@ Run `node -p "new Date().toLocaleDateString('en-CA')"`. It prints the date as YY
 
 ## Step 4. The roster
 
-1. Dispatch the `recruiter` agent again. Its prompt must hold: the stage `roster`, the full path `<dir>`, the project lead the owner chose, the languages, and the model and effort for the roster. Read them in the `writer` entry of `${CLAUDE_PLUGIN_ROOT}/agents/models.json` with Read, and pass both as they are written there.
+1. Dispatch the `recruiter` agent again. Its prompt must hold: the stage `roster`, the full path `<dir>`, the project lead the owner chose, the languages, and the model and effort for the roster: the model is the full id that `recade models writer --id` prints, and the effort is the `effort` of the `writer` entry of `${CLAUDE_PLUGIN_ROOT}/agents/models.json`, read with Read. The model column of the roster holds the owner's choice.
 2. Read `<dir>/team/roster.md` with Read and validate it. Every point must hold:
    - the 8 core roles are all in it: `project-lead`, `architect`, `security-lead`, `ux-designer`, `qa-lead`, `ui-designer`, `devops-lead`, `chief-reviewer`;
    - every role name is a kebab-case slug, matching `^[a-z0-9]+(-[a-z0-9]+)*$`, because it becomes the file name `team/<role>.md`;

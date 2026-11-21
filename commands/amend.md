@@ -35,6 +35,8 @@ Run `state`, `provisional`, `decision`, `amend`, `slices`, `index`, `lint-style`
 
 Run `node -p "new Date().toLocaleDateString('en-CA')"` for today's date, as YYYY-MM-DD.
 
+Read the writing model once: run `recade models writer` and keep the word it prints (`fable` or `opus`). Pass it as the `model` of the Agent tool in every dispatch of a writer-tier agent (every owner, contributor and the `slicer` of this command). It is the owner's choice between Fable and Opus, at the same effort. Never write the full id in a dispatch, and never run the command again for the next dispatch.
+
 Each document has one owner, the agent that wrote it. Use the same owner as `/recade:docs`, `/recade:bible` and `/recade:slices`:
 
 | File | Owner | Also |

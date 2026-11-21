@@ -54,13 +54,18 @@ On `Customize languages`, ask these five questions. Each offers English and Fren
 
 Codes are `en`, `fr` or the ISO 639-1 code of the other language. For a list, join the codes with commas and no spaces.
 
-## Step 4. GitHub owner, projects root, voice
+## Step 4. GitHub owner, projects root, writing model, voice
 
 Skip this step if `recade config get started` prints `true`.
 
 1. GitHub owner, the account or organization where private project repositories are created. Get the default with `gh api user --jq .login`. If that command fails, ask the user for the GitHub owner instead. Otherwise ask with `AskUserQuestion`: the default, or another name. Save with `recade config set github_owner <name>`.
 2. Projects root, the folder that holds your projects. Default `~/projects`. Ask, then save with `recade config set projects_root <path>`.
-3. Writing voice, the style of every document, comment and report Recade writes. Ask with `AskUserQuestion`, always naming the person in full, never by a short id:
+3. Writing model, the model of the agents that write and review the documents. Ask with `AskUserQuestion`: "Which model should write your documents?"
+   - **Fable** (recommended): the most capable writer, at high effort. Saved as `fable`.
+   - **Opus**: the latest Opus, at the same high effort. Saved as `opus`.
+
+   AskUserQuestion adds "Other" by itself; if the answer is neither, ask again once, then save `fable`. Save with `recade config set models.writer <fable or opus>`. Say in one line that `recade config set models.writer opus` changes it later, and that the second opinion of the harness stays on Fable, because it must come from another model family than the reviewer.
+4. Writing voice, the style of every document, comment and report Recade writes. Ask with `AskUserQuestion`, always naming the person in full, never by a short id:
    - **Randall Munroe** (recommended): plain words, short sentences, deadpan humour born from precision. Saved as `randall-munroe`.
    - **Julia Evans**: warm and curious, explains things step by step, friendly without fluff. Saved as `julia-evans`.
    - **Paul Graham**: plain and direct essay style, no jokes, every sentence earns its place. Saved as `paul-graham`.

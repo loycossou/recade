@@ -2,6 +2,14 @@
 
 This file is curated by hand for each release. At tag time, `recade release-notes <from>..<to> --version <v> --write` produces the raw list from the conventional commits, and this section is then edited from it.
 
+## Unreleased
+
+### The writing model
+
+- You choose the model of the agents that write and review your documents: Fable (the default) or the latest Opus, at the same high effort. `/recade:start` asks it once, `recade config set models.writer opus` changes it, `/recade:setup` and `/recade:help` show it.
+- `recade models writer` prints the alias to dispatch with (`fable` or `opus`), and `recade models writer --id` the full id (`claude-fable-5-2` or `claude-opus-5-5`). Every `/recade:*` command that dispatches a writing agent reads it once and passes it to each dispatch, and the recruiter writes it in the model column of the roster. The mechanical agents keep their own model.
+- The second opinion of the harness stays on Fable whatever you choose, because it must come from another model family than the reviewer, which runs on Opus.
+
 ## 1.0.0 (2026-11-18)
 
 First public release.

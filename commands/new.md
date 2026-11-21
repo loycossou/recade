@@ -65,6 +65,8 @@ Then run `recade intake scan --project '<dir>' --json`. It exits 1 when any find
 
 ## Step 5. Analysis
 
+Read the writing model once: run `recade models writer` and keep the word it prints (`fable` or `opus`). Pass it as the `model` of the Agent tool in every dispatch of a writer-tier agent (here the `intake-analyst`, every time you dispatch it). It is the owner's choice between Fable and Opus, at the same effort. Never write the full id in a dispatch, and never run the command again for the next dispatch.
+
 Dispatch the `intake-analyst` agent with the Agent tool. Its prompt must hold:
 
 - the project name and the full path `<dir>`;

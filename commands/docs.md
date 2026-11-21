@@ -36,6 +36,8 @@ Run `state`, `decision`, `index`, `lint-style` and `render` commands with `--pro
 
 Run `node -p "new Date().toLocaleDateString('en-CA')"` for today's date, as YYYY-MM-DD.
 
+Read the writing model once: run `recade models writer` and keep the word it prints (`fable` or `opus`). Pass it as the `model` of the Agent tool in every dispatch of a writer-tier agent. It is the owner's choice between Fable and Opus, at the same effort. Never write the full id in a dispatch, and never run the command again for the next dispatch. The `spike-runner` is mechanical tier: dispatch it with no `model`, it keeps its own.
+
 The agents of this command are `project-lead`, `ux-designer`, `ui-designer`, `stack-analyst`, `architect`, `security-lead`, `devops-lead`, `domain-expert`, `spike-runner`, `bible-writer` (only to apply the decisions of `BIBLE` and `PLAN` in Step 9, with its Step 2 prompt and the full path of `${CLAUDE_PLUGIN_ROOT}/templates/BIBLE.md`) and, for a technology specialist, `doctrine-writer`. The `domain-expert` is for the roster row that is the domain expert of the project (named `domain-expert`, or whose reason says so). Use it only when the roster has one, and give it the role name of that row. Without such a row, skip every `domain-expert` point below. Each, except the `spike-runner`, reads its own doctrine in `<dir>/team/<role>.md` (the `bible-writer` reads `team/project-lead.md` and `team/architect.md`). Every prompt you send must hold:
 
 - the stage name, and the document it is about;

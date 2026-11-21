@@ -23,7 +23,7 @@ In Claude Code:
 /recade:start
 ```
 
-`/recade:start` checks your machine, asks which languages and writing voice to use, and shows the commands. Run it again at any time. It skips what is already done.
+`/recade:start` checks your machine, asks which languages, writing model and writing voice to use, and shows the commands. Run it again at any time. It skips what is already done.
 
 To test a local copy, start Claude Code with `claude --plugin-dir <path>`, where `<path>` is the folder of this repository.
 
@@ -75,6 +75,10 @@ Every project lives in one folder, `<project>-workspace`, which is a private git
 A phase does not start while the gate before it is open, and a gate passes only on your answer. `/recade:status` shows where you are. `/recade:resume` picks up after a break. `/recade:amend` changes an approved document and regenerates what depends on it.
 
 Before an agent reads a file you gave it, `recade intake scan` checks it for invisible Unicode and bidirectional controls. A file that cannot be checked, such as a PDF or an image, is blocked until you accept it yourself.
+
+## The writing model
+
+The agents that write and review your documents (the team, D1 to D3, the STACK, the BIBLE, the slice sheets, the intake and the code reading of an adopted repository) run on Fable by default, at high effort. You can choose the latest Opus instead, at the same effort. `/recade:start` asks once. Change it later with `recade config set models.writer opus` (or `fable`), and read it with `recade models writer`, which prints the alias, or `recade models writer --id`, which prints the full id (`claude-fable-5-2` or `claude-opus-5-5`). Every `/recade:*` command reads it once and passes it to each agent that writes. The mechanical agents (the inventory and the spikes) keep their own model, and the second opinion stays on Fable whatever you choose: it must come from another model family than the reviewer.
 
 ## The harness
 

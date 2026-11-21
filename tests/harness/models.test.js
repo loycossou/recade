@@ -260,3 +260,11 @@ test('protocol: the second opinion follows second_opinion, sensitive by default,
   assert.doesNotMatch(lanes, /runs on every `sensitive` PR and on every PR of more than 400 changed lines\. Elsewhere/);
   assert.match(lanes, /sensitive_model/);
 });
+
+test('models.yaml keeps the second opinion on Fable, whatever the owner chose for the writers, and says why', () => {
+  const text = readFileSync(modelsPath, 'utf8');
+  assert.ok(text.includes('second-opinion stays on Fable'));
+  assert.ok(text.includes('models.writer'));
+  assert.ok(text.includes('different family from the reviewer'));
+  assert.equal(models.agents['second-opinion'].standard.model, 'claude-fable-5-2');
+});

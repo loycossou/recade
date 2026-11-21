@@ -37,7 +37,9 @@ Run `state`, `decision`, `index`, `lint-style` and `render` commands with `--pro
 
 ## Step 2. What every dispatch holds
 
-Run `node -p "new Date().toLocaleDateString('en-CA')"` for today's date, as YYYY-MM-DD. Read `${CLAUDE_PLUGIN_ROOT}/agents/models.json` with Read: its content is the model table that the BIBLE puts in its section 14.
+Run `node -p "new Date().toLocaleDateString('en-CA')"` for today's date, as YYYY-MM-DD. Read `${CLAUDE_PLUGIN_ROOT}/agents/models.json` with Read: its content is the model table that the BIBLE puts in its section 14. In the table you give the `bible-writer`, replace the `model` of its `writer` entry with the full id that `recade models writer --id` prints: the BIBLE records the owner's choice, not the default of the file.
+
+Read the writing model once: run `recade models writer` and keep the word it prints (`fable` or `opus`). Pass it as the `model` of the Agent tool in every dispatch of a writer-tier agent. It is the owner's choice between Fable and Opus, at the same effort. Never write the full id in a dispatch, and never run the command again for the next dispatch.
 
 The agents of this command are `bible-writer`, `chief-reviewer` and `security-lead`. Each reads its own doctrine in `<dir>/team/<role>.md`, except the `bible-writer`, which reads `team/project-lead.md` and `team/architect.md`. Every prompt you send must hold:
 

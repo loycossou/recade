@@ -3,6 +3,9 @@
 # Rules: floor Sonnet medium (test-runner is low), no xhigh or max, and the
 # second-opinion model is always from another family than the reviewer.
 # ui-designer: raise it to opus for the art direction phase in the project copy of this file.
+# The owner's choice between Fable and Opus (`models.writer`, `recade models writer`) covers the plugin's writing
+# agents, not this table. The second-opinion stays on Fable whatever the owner chose, because it must be a
+# different family from the reviewer, which is opus: do not move it to opus, and do not follow models.writer here.
 agents:
   spec-writer:
     standard: { model: opus, effort: high }

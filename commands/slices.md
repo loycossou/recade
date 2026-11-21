@@ -49,6 +49,8 @@ If the owner typed another answer instead of choosing an option, ask again once,
 
 Run `node -p "new Date().toLocaleDateString('en-CA')"` for today's date, as YYYY-MM-DD.
 
+Read the writing model once: run `recade models writer` and keep the word it prints (`fable` or `opus`). Pass it as the `model` of the Agent tool in every dispatch of a writer-tier agent (here the `slicer`, for `cut` and for every `revise`). It is the owner's choice between Fable and Opus, at the same effort. Never write the full id in a dispatch, and never run the command again for the next dispatch.
+
 Dispatch `slicer`, stage `cut`. Its prompt holds:
 
 - the stage name, the full path `<dir>`, today's date, and `languages.work` for the sheets;

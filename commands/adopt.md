@@ -36,6 +36,8 @@ If it prints `false`, read `${CLAUDE_PLUGIN_ROOT}/commands/languages.md` with Re
 
 From here on, answer in the language of `languages.chat` (`recade config get languages.chat`). Keep Recade keywords in English: slice, gate, lane, harness, BIBLE, PLAN, DEC, retro.
 
+Read the writing model once: run `recade models writer` and keep the word it prints (`fable` or `opus`). Pass it as the `model` of the Agent tool in every dispatch of a writer-tier agent (here the `code-reader` and the `bible-writer`; when Step 5 sends you to `bible.md` or `slices.md`, use the word you already have for the same agents there and do not read it again). It is the owner's choice between Fable and Opus, at the same effort. Never write the full id in a dispatch, and never run the command again for the next dispatch. The `inventory-analyst` is mechanical tier: dispatch it with no `model`, it keeps its own.
+
 ## Step 3. Preflight, the documentation level, the workspace and the repositories
 
 1. Run `recade adopt preflight`. It checks the repository you are in and writes nothing. If it exits 0, go on.

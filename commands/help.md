@@ -12,3 +12,5 @@ Run `node "${CLAUDE_PLUGIN_ROOT}/bin/recade.js" version`. If it prints a version
 Run `node "${CLAUDE_PLUGIN_ROOT}/bin/recade.js" help` and show the output as it is.
 
 Answer the user in the language of `languages.chat` (`node "${CLAUDE_PLUGIN_ROOT}/bin/recade.js" config get languages.chat`). If it is not set, use English. Keep the command names and the summaries from the output unchanged.
+
+Then run `node "${CLAUDE_PLUGIN_ROOT}/bin/recade.js" config get models.writer` and add one line: the writing agents use that model (`fable` or `opus`), and `recade config set models.writer fable` or `recade config set models.writer opus` changes it.

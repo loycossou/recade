@@ -21,3 +21,7 @@ From here on, answer in the language of `languages.chat` (`recade config get lan
 4. For each check with status `warn`, show it, say in one sentence what it affects and show its `fix` line if it has one. A `warn` does not block: go on with the next step.
 5. Do not run the fix commands yourself; show them to the user.
 6. If something was missing, offer to run `recade doctor` again once the user has fixed it.
+
+## Step 2. The writing model
+
+Run `recade config get models.writer`. It prints `fable` or `opus`: the model the agents that write and review the documents use, at high effort either way. Show it in one line. Say that `recade config set models.writer fable` or `recade config set models.writer opus` changes it, and that it applies to the next dispatch.
