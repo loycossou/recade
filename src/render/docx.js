@@ -6,7 +6,7 @@ import {
   TableCell, TableLayoutType, TableOfContents, TableRow, TextRun, VerticalAlign, WidthType,
 } from 'docx';
 import JSZip from 'jszip';
-import { FONT_DIR, normalizeLanguage } from './theme.js';
+import { FONT_DIR, normalizeLanguage, themeStyle } from './theme.js';
 import { collectFigures } from './figures.js';
 import { bookmarkName, isSafeLink } from './bookmarks.js';
 
@@ -39,6 +39,7 @@ function buildContext(doc, { theme, labels, figures }) {
     figures: figures ?? new Map(),
     color: theme.color,
     size: theme.size,
+    style: themeStyle(theme),
     language: proofingLanguage(normalizeLanguage(doc.meta.language)),
     family: theme.font?.family ?? 'Inter Tight',
     fallback: theme.font?.fallback ?? 'Arial',
@@ -93,6 +94,9 @@ function border(color, size = 4) {
   return { style: BorderStyle.SINGLE, size, color, space: 0 };
 }
 
+/** A width in points as a Word border size, in eighths of a point (Word takes 2 to 96); 0 gives no border. */
+const eighths = (pt) => (pt > 0 ? Math.min(96, Math.max(2, Math.round(pt * 8))) : 0);
+
 // ---------------------------------------------------------------------------------------------------------------
 // Tables
 
@@ -146,11 +150,12 @@ function dataTable(ctx, { header, rows, widths, anchors, firstColumnFill }) {
     }));
   });
   const line = border(c.rule);
+  const side = ctx.style.tableRules === 'horizontal' ? NO_BORDER : line;
   return new Table({
     width: { size: ctx.textWidth, type: WidthType.DXA },
     columnWidths: cols,
     layout: TableLayoutType.FIXED,
-    borders: { top: line, bottom: line, left: line, right: line, insideHorizontal: line, insideVertical: line },
+    borders: { top: line, bottom: line, left: side, right: side, insideHorizontal: line, insideVertical: side },
     rows: tableRows,
   });
 }
@@ -185,7 +190,9 @@ function calloutBlock(ctx, b) {
     ? [{ ...first, runs: [label, { text: ' ' }, ...first.runs] }, ...rest]
     : [{ type: 'paragraph', runs: [label], line: b.line }, ...b.blocks];
   const fill = ctx.color[`callout${b.kind[0].toUpperCase()}${b.kind.slice(1)}`] ?? ctx.color.calloutNote;
-  return [boxTable(ctx, { fill, left: border(ctx.color.accent, 24), cantSplit: true, children: blockList(ctx, blocks) }), spacer()];
+  const bar = eighths(ctx.style.calloutBar);
+  const left = bar > 0 ? border(ctx.color.accent, bar) : undefined;
+  return [boxTable(ctx, { fill, left, cantSplit: true, children: blockList(ctx, blocks) }), spacer()];
 }
 
 function codeBlock(ctx, b) {
@@ -370,8 +377,8 @@ function pageChrome(ctx, { blankFirst = false } = {}) {
       tabStops: [{ type: TabStopType.RIGHT, position: ctx.textWidth }],
       border: { bottom: { style: BorderStyle.SINGLE, size: 4, space: 4, color: ctx.color.rule } },
       children: [
-        new TextRun({ text: clean(`${meta.project} · ${meta.title}`), ...small }),
-        new TextRun({ children: [new Tab(), clean(`v${meta.version} · ${meta.status}`)], ...small }),
+        new TextRun({ text: clean(`${meta.project}${ctx.style.headerSeparator}${meta.title}`), ...small }),
+        new TextRun({ children: [new Tab(), clean(`v${meta.version}${ctx.style.headerSeparator}${meta.status}`)], ...small }),
       ],
     })],
   });
@@ -392,6 +399,7 @@ function pageChrome(ctx, { blankFirst = false } = {}) {
 function styles(ctx) {
   const { color, size } = ctx;
   const font = ctx.family;
+  const h1Rule = eighths(ctx.style.h1Rule);
   const heading = (pt, extra = {}, paragraph = {}) => ({
     run: { font, size: halfPoints(pt), bold: true, color: color.ink, ...extra },
     paragraph: { keepNext: true, keepLines: true, spacing: { before: 280, after: 120 }, ...paragraph },
@@ -402,7 +410,7 @@ function styles(ctx) {
       heading1: heading(size.h1, {}, {
         pageBreakBefore: true,
         spacing: { before: 0, after: 200 },
-        border: { bottom: { style: BorderStyle.SINGLE, size: 12, space: 4, color: color.accent } },
+        ...(h1Rule > 0 ? { border: { bottom: { style: BorderStyle.SINGLE, size: h1Rule, space: 4, color: color.accent } } } : {}),
       }),
       heading2: heading(size.h2),
       heading3: heading(size.h3, { color: color.muted }),

@@ -22,6 +22,10 @@ This file is curated by hand for each release. At tag time, `recade release-note
 - Recade installs nothing and never requires a server. With none connected it says so in one line and goes on as before. What a server returns is untrusted data.
 - The `design` extra also renders `design/references.md` to `design-references.pdf` when it exists.
 
+### Render theme
+
+- `design/theme.json` takes a `style` group: `h1Rule` and `calloutBar` set the width in points of the rule under an H1 and of the bar on the left of a callout (0 removes them), `headerSeparator` the text between the parts of the running header and of the sheet titles, and `tableRules` `grid` or `horizontal` (rules between rows only). `color.chartFill` fills the Gantt bars and the Mermaid boxes, and falls back to `color.accent`. A theme without these keys renders as before; an invalid value stops the render with a one-line error that names the key.
+
 ### Plain words in the chat
 
 - When a command names an ID to you (a DEC, a provisional value, a requirement, a slice, a gate), it adds what that ID says in parentheses, as in `DEC-03 (weekly payouts)`, and it names an ID only when you need it to act.

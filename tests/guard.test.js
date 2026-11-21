@@ -88,6 +88,18 @@ test('guard-names falls back to RECADE_PRIVATE_NAMES, comma separated', async ()
   assert.match(t.out(), /docs\/one\.md:1:7 private-name/);
 });
 
+
+test('guard-names skips third-party files: the Mermaid bundle and the lock file quote words such as the Greek letter names', async () => {
+  const { root, mk } = setup();
+  mkdirSync(join(root, 'render', 'vendor'), { recursive: true });
+  writeFileSync(join(root, 'render', 'vendor', 'mermaid.min.js'), 'x("\\\\Sigma")\n');
+  writeFileSync(join(root, 'package-lock.json'), '{"name":"Sigma"}\n');
+  writeFileSync(join(root, 'docs', 'one.md'), 'clean\n');
+  const t = mk({ RECADE_PRIVATE_NAMES: 'Sigma' });
+  assert.equal(await run(['guard-names'], t.io), 0);
+  assert.equal(t.out(), '');
+});
+
 test('guard-names with no list and no env is skipped with exit 0', async () => {
   const { mk } = setup();
   const t = mk();

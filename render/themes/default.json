@@ -7,5 +7,6 @@
     "calloutNote": "EEF7F4", "calloutWarning": "FDF3E1", "calloutDecision": "EEF0FD",
     "provisional": "FFF6C2", "inputFill": "FFF6C2"
   },
+  "style": { "h1Rule": 1.5, "calloutBar": 3, "headerSeparator": " \u00b7 ", "tableRules": "grid" },
   "page": { "size": "A4", "marginCm": 2 }
 }

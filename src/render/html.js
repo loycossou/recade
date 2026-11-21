@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { RENDER_DIR, normalizeLanguage } from './theme.js';
+import { RENDER_DIR, normalizeLanguage, themeStyle } from './theme.js';
 import { fontFaceCss } from './figures.js';
 import { bookmarkName, isSafeLink } from './bookmarks.js';
 
@@ -250,8 +250,9 @@ function pageCss(ctx) {
   const small = `font-family:inherit;font-size:${Number(theme.size?.caption) || 8.5}pt;color:var(--muted)`;
   const header = `${small};vertical-align:bottom;padding-bottom:8pt;border-bottom:0.5pt solid var(--rule)`;
   const footer = `${small};vertical-align:top;padding-top:8pt`;
-  const left = cssString(`${meta.project} \u00b7 ${meta.title}`);
-  const right = cssString(`v${meta.version} \u00b7 ${meta.status}`);
+  const sep = themeStyle(theme).headerSeparator;
+  const left = cssString(`${meta.project}${sep}${meta.title}`);
+  const right = cssString(`v${meta.version}${sep}${meta.status}`);
   const pageOf = `${cssString(`${labels.page} `)} counter(page) ${cssString(` ${labels.of} `)} counter(pages)`;
   return `@page{size:${page.size};margin:${page.marginCm}cm;`
     + `@top-left{content:${left};${header}}@top-center{content:"";${header}}@top-right{content:${right};${header}}`
@@ -259,16 +260,21 @@ function pageCss(ctx) {
     + '@page :first{@top-left{content:none;border:0}@top-center{content:none;border:0}@top-right{content:none;border:0}@bottom-center{content:none}}';
 }
 
-/** Theme tokens as CSS variables on :root, the generated @page rules, and a family override for custom fonts. */
+/**
+ * Theme tokens as CSS variables on :root, the generated @page rules, a family override for custom fonts, and the
+ * table rules between rows only when `style.tableRules` is `horizontal`.
+ */
 function themeCss(ctx) {
   const { theme } = ctx;
-  const vars = [];
+  const style = themeStyle(theme);
+  const vars = [`--h1-rule:${style.h1Rule}pt`, `--callout-bar:${style.calloutBar}pt`];
   for (const [key, value] of Object.entries(theme.color ?? {})) if (HEX.test(String(value))) vars.push(`--${kebab(key)}:#${value}`);
   for (const [key, value] of Object.entries(theme.size ?? {})) if (Number.isFinite(Number(value))) vars.push(`--size-${kebab(key)}:${Number(value)}pt`);
   const family = theme.font?.family ?? 'Inter Tight';
   const fallback = cssFamily(theme.font?.fallback ?? 'Arial');
   const override = family === 'Inter Tight' ? '' : `\nhtml,body{font-family:"${cssFamily(family)}", ${fallback}, sans-serif}`;
-  return `:root{${vars.join(';')}}\n${pageCss(ctx)}${override}`;
+  const rules = style.tableRules === 'horizontal' ? '\nth,td{border-left:0;border-right:0}' : '';
+  return `:root{${vars.join(';')}}\n${pageCss(ctx)}${override}${rules}`;
 }
 
 /**

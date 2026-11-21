@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync, existsSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { FONT_DIR, PLUGIN_ROOT, RENDER_DIR } from './theme.js';
+import { FONT_DIR, PLUGIN_ROOT, RENDER_DIR, chartFill } from './theme.js';
 import { withBrowser as defaultWithBrowser } from './browser.js';
 
 /** @typedef {{png:Buffer, width:number, height:number}} FigureImage */
@@ -178,7 +178,7 @@ async function renderMermaid(browser, fig, doc, theme, projectRoot) {
       text: fig.source.text,
       id: fig.id,
       vars: {
-        primaryColor: `#${color.accent ?? '17C79A'}`,
+        primaryColor: `#${chartFill(theme)}`,
         primaryTextColor: `#${color.ink ?? '0F1A22'}`,
         lineColor: `#${color.muted ?? '5A6672'}`,
         fontFamily: family,

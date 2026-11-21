@@ -1,6 +1,7 @@
 import { basename } from 'node:path';
 import ExcelJS from 'exceljs';
 import { plainText } from './inline.js';
+import { chartFill, themeStyle } from './theme.js';
 
 const HEADER_ROW = 4;
 const FIRST_ROW = 5;
@@ -182,7 +183,7 @@ export async function renderPlanWorkbook(doc, { theme, labels }) {
     const last = FIRST_ROW + rows.length - 1;
     const end = last + SPARE_ROWS;
 
-    ws.getCell('A1').value = `${doc.meta.project} · ${sheet}`;
+    ws.getCell('A1').value = `${doc.meta.project}${themeStyle(theme).headerSeparator}${sheet}`;
     ws.getCell('A1').font = { ...font, size: 14, bold: true };
     ws.getCell('A2').value = `${labels.sourceOfTruth} (${source})`;
     ws.getCell('A2').font = { ...font, color: { argb: argb(theme.color.muted) } };
@@ -298,7 +299,7 @@ export async function renderPlanWorkbook(doc, { theme, labels }) {
       addRules(range(c1, c2), [{
         type: 'expression',
         formulae: [`AND(${pos}>=MATCH(${first},${heads},0),${pos}<=MATCH(${lastS},${heads},0))`],
-        style: cfFill(theme.color.accent),
+        style: cfFill(chartFill(theme)),
       }]);
     }
 
@@ -389,7 +390,7 @@ export async function renderTablesWorkbook({ meta, source, sheets }, { theme, la
     const ws = workbook.addWorksheet(name, {
       views: [{ state: 'frozen', xSplit: 1, ySplit: HEADER_ROW, topLeftCell: `B${FIRST_ROW}`, activeCell: `B${FIRST_ROW}`, showGridLines: false }],
     });
-    ws.getCell('A1').value = `${meta.project} · ${name}`;
+    ws.getCell('A1').value = `${meta.project}${themeStyle(theme).headerSeparator}${name}`;
     ws.getCell('A1').font = { ...font, size: 14, bold: true };
     ws.getCell('A2').value = `${labels.sourceOfTruth} (${source})`;
     ws.getCell('A2').font = { ...font, color: { argb: argb(theme.color.muted) } };

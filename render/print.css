@@ -30,7 +30,7 @@ h1 {
   margin: 0 0 10pt;
   padding-bottom: 4pt;
   font-size: var(--size-h1);
-  border-bottom: 1.5pt solid var(--accent);
+  border-bottom: var(--h1-rule, 1.5pt) solid var(--accent);
 }
 h2 { font-size: var(--size-h2); }
 h3 { font-size: var(--size-h3); color: var(--muted); }
@@ -72,7 +72,7 @@ table.meta td { width: 70%; }
   margin: 0 0 6pt;
   padding: 5pt 7pt 1pt 8pt;
   background: var(--callout-note);
-  border-left: 3pt solid var(--accent);
+  border-left: var(--callout-bar, 3pt) solid var(--accent);
   break-inside: avoid;
 }
 .callout.warning { background: var(--callout-warning); }
