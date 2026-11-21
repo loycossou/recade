@@ -4,6 +4,12 @@ This file is curated by hand for each release. At tag time, `recade release-note
 
 ## Unreleased
 
+### Extra deliverables
+
+- D1, D2, D3 and the PLAN are rendered as before. You can now add four extras for your stakeholders: `stack` (`STACK.docx`, `STACK.pdf` and `STACK-matrix.xlsx`, one sheet for each table of the weighted matrix), `decisions` (`DECISIONS.docx`, `DECISIONS.pdf` and `DECISIONS.xlsx`, one section and one row for each DEC), `design` (one `design-<board>.pdf` for each board of `design/directions/`) and `reviews` (`REVIEWS.docx` and `REVIEWS.pdf`, one section for each note).
+- `/recade:start` asks once which extras you want. The choice is the user config key `deliverables.extras`, empty by default: `recade config set deliverables.extras stack,decisions` changes it, `none` clears it, and a name that is not one of the four is refused. `/recade:setup` and `/recade:help` show it.
+- `recade render extras --project <dir>` renders the chosen extras into `docs/deliverables/`. `/recade:docs` and `/recade:amend` run it after the usual render and list the files. A missing source is a warning line, nothing is written unless every output succeeded, and the registers are built in memory, never saved in `docs/`.
+
 ### Plain words in the chat
 
 - When a command names an ID to you (a DEC, a provisional value, a requirement, a slice, a gate), it adds what that ID says in parentheses, as in `DEC-03 (weekly payouts)`, and it names an ID only when you need it to act.

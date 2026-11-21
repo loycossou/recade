@@ -14,3 +14,5 @@ Run `node "${CLAUDE_PLUGIN_ROOT}/bin/recade.js" help` and show the output as it 
 Answer the user in the language of `languages.chat` (`node "${CLAUDE_PLUGIN_ROOT}/bin/recade.js" config get languages.chat`). If it is not set, use English. Keep the command names and the summaries from the output unchanged.
 
 Then run `node "${CLAUDE_PLUGIN_ROOT}/bin/recade.js" config get models.writer` and add one line: the writing agents use that model (`fable` or `opus`), and `recade config set models.writer fable` or `recade config set models.writer opus` changes it.
+
+Then run `node "${CLAUDE_PLUGIN_ROOT}/bin/recade.js" config get deliverables.extras` and add one line: it prints `[]` when no extra file is chosen, else the extras to render (`stack`, `decisions`, `design`, `reviews`) next to D1, D2, D3 and the PLAN, which are always rendered, and `recade config set deliverables.extras stack,decisions` (or `none`) changes it.

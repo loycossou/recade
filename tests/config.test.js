@@ -40,6 +40,7 @@ test('DEFAULT_CONFIG has the documented values', () => {
     projects_root: '~/projects',
     voice: 'randall-munroe',
     models: { writer: 'fable' },
+    deliverables: { extras: [] },
   });
 });
 
@@ -370,5 +371,49 @@ test('recade models writer names the bad value of a hand-edited config and exits
     assert.equal(await run(['models', ...args], u.io), 2, args.join(' '));
     assert.equal(u.stderr(), 'Usage: recade models writer [--id]\n');
   }
+  rmSync(dir, { recursive: true });
+});
+
+test('deliverables.extras is empty by default and takes stack, decisions, design and reviews', () => {
+  assert.deepEqual(DEFAULT_CONFIG.deliverables.extras, []);
+  assert.deepEqual(setConfigValue(DEFAULT_CONFIG, 'deliverables.extras', 'stack').deliverables.extras, ['stack']);
+  assert.deepEqual(setConfigValue(DEFAULT_CONFIG, 'deliverables.extras', 'reviews, stack,design').deliverables.extras, ['stack', 'design', 'reviews']);
+  assert.deepEqual(setConfigValue(DEFAULT_CONFIG, 'deliverables.extras', 'stack,stack,decisions').deliverables.extras, ['stack', 'decisions']);
+  assert.deepEqual(setConfigValue(DEFAULT_CONFIG, 'deliverables.extras', 'stack,decisions,design,reviews').deliverables.extras, ['stack', 'decisions', 'design', 'reviews']);
+});
+
+test('deliverables.extras is cleared by none or an empty value', () => {
+  const set = setConfigValue(DEFAULT_CONFIG, 'deliverables.extras', 'stack,design');
+  for (const clear of ['none', ' None ', '', '  ', ',']) {
+    assert.deepEqual(setConfigValue(set, 'deliverables.extras', clear).deliverables.extras, [], JSON.stringify(clear));
+  }
+});
+
+test('deliverables.extras refuses an unknown name, none beside a name, and a bare group, each in one line', () => {
+  assert.throws(() => setConfigValue(DEFAULT_CONFIG, 'deliverables.extras', 'stack,slides'), { message: 'Unknown extra deliverable: slides. Use stack, decisions, design, reviews, or none.' });
+  assert.throws(() => setConfigValue(DEFAULT_CONFIG, 'deliverables.extras', 'Stack'), /Unknown extra deliverable: Stack/);
+  assert.throws(() => setConfigValue(DEFAULT_CONFIG, 'deliverables.extras', 'none,stack'), { message: 'none cannot be combined with other extras.' });
+  assert.throws(() => setConfigValue(DEFAULT_CONFIG, 'deliverables', 'stack'), /has sub-keys/);
+  assert.throws(() => setConfigValue(DEFAULT_CONFIG, 'deliverables.other', 'x'), /Unknown key/);
+});
+
+test('recade config set and get round-trip deliverables.extras, and the file keeps a plain list', async () => {
+  const dir = tmp();
+  const env = { RECADE_CONFIG_DIR: dir };
+  const go = async (args) => {
+    const t = makeIO(dir, env);
+    const code = await run(args, t.io);
+    return { code, out: t.stdout(), err: t.stderr() };
+  };
+  assert.deepEqual(await go(['config', 'get', 'deliverables.extras']), { code: 0, out: '[]\n', err: '' });
+  assert.equal((await go(['config', 'set', 'deliverables.extras', 'design,stack'])).code, 0);
+  assert.equal((await go(['config', 'get', 'deliverables.extras'])).out, '- stack\n- design\n');
+  assert.deepEqual(parse(readFileSync(join(dir, 'config.yaml'), 'utf8')).deliverables, { extras: ['stack', 'design'] });
+  const bad = await go(['config', 'set', 'deliverables.extras', 'pdf']);
+  assert.equal(bad.code, 2);
+  assert.equal(bad.err, 'Unknown extra deliverable: pdf. Use stack, decisions, design, reviews, or none.\n');
+  assert.equal((await go(['config', 'get', 'deliverables.extras'])).out, '- stack\n- design\n');
+  assert.equal((await go(['config', 'set', 'deliverables.extras', 'none'])).code, 0);
+  assert.equal((await go(['config', 'get', 'deliverables.extras'])).out, '[]\n');
   rmSync(dir, { recursive: true });
 });

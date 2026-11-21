@@ -913,3 +913,64 @@ test('recade help lists recade models and the plugin README documents the choice
   const changelog = readFileSync(join(repo, 'CHANGELOG.md'), 'utf8');
   assert.ok(changelog.includes('models.writer'));
 });
+
+test('start.md asks the extra files once, with multiSelect and four options, after the writing model, and saves them with config set', () => {
+  const step4 = stepSection('start.md', 4);
+  for (const part of [
+    '`AskUserQuestion` with `multiSelect` on: "Which extra files should Recade render for your stakeholders? D1, D2, D3 and the PLAN are always rendered."',
+    '- **Stack**:',
+    '- **Decisions**:',
+    '- **Design**:',
+    '- **Reviews**:',
+    'Saved as `stack`.',
+    'Saved as `decisions`.',
+    'Saved as `design`.',
+    'Saved as `reviews`.',
+    'save with `recade config set deliverables.extras <names>`',
+    'Keep the valid picks and ignore the rest of the answer; save `none` only when no valid pick remains',
+    '`recade config set deliverables.extras stack,decisions` (or `none`) changes it later',
+  ]) assert.ok(step4.includes(part), part);
+  assert.ok(step4.indexOf('Writing model') < step4.indexOf('Extra files'));
+  assert.ok(step4.indexOf('Extra files') < step4.indexOf('Writing voice'));
+  assert.equal(step4.split('multiSelect').length, 2);
+});
+
+test('setup.md and help.md show deliverables.extras and how to change it', () => {
+  for (const f of ['setup.md', 'help.md']) {
+    const text = read(f);
+    assert.ok(text.includes('config get deliverables.extras'), f);
+    assert.ok(text.includes('`recade config set deliverables.extras stack,decisions` (or `none`)'), f);
+    assert.ok(text.includes('D1, D2, D3 and the PLAN'), f);
+  }
+});
+
+test('docs.md renders the extras after the usual render and lists them, amend.md does the same after its render', () => {
+  const docs = stepSection('docs.md', 9);
+  const point5 = docs.split('\n').find((l) => l.startsWith('5. '));
+  const point6 = docs.split('\n').find((l) => l.startsWith('6. '));
+  assert.ok(point5.includes("`recade render extras --project '<dir>'`"));
+  assert.ok(point5.indexOf('recade render docs/D1.md') < point5.indexOf('recade render extras'));
+  assert.ok(point5.includes('`Warning:`'));
+  assert.ok(point5.includes('/recade:setup'));
+  assert.ok(point6.includes('the extra files that `recade render extras` listed'));
+  const amend = stepSection('amend.md', 6);
+  const point7 = amend.split('\n').find((l) => l.startsWith('7. '));
+  assert.ok(point7.includes("`recade render extras --project '<dir>'`"));
+  assert.ok(point7.includes('List the files it wrote to the owner'));
+  assert.ok(amend.indexOf('6. When D1, D2, D3 or the PLAN changed') < amend.indexOf(point7));
+  for (const f of ['bible.md', 'slices.md', 'new.md', 'team.md', 'harness.md', 'adopt.md', 'resume.md', 'status.md', 'languages.md']) {
+    assert.equal(read(f).includes('render extras'), false, f);
+  }
+});
+
+test('the plugin README, the design document and the changelog describe the extra deliverables', () => {
+  const parts = ['deliverables.extras', 'recade render extras', 'STACK-matrix.xlsx', 'DECISIONS.xlsx', 'REVIEWS.docx', 'design-<board>.pdf'];
+  const readme = readFileSync(join(repo, 'README.md'), 'utf8');
+  for (const part of parts) assert.ok(readme.includes(part), `README: ${part}`);
+  const design = readFileSync(join(repo, 'docs', 'design.md'), 'utf8');
+  for (const part of ['deliverables.extras', 'recade render extras', 'STACK-matrix.xlsx', 'DECISIONS.xlsx', 'REVIEWS.docx', 'design-<board>.pdf', 'in memory']) assert.ok(design.includes(part), `design: ${part}`);
+  const changelog = readFileSync(join(repo, 'CHANGELOG.md'), 'utf8');
+  const unreleased = changelog.slice(changelog.indexOf('## Unreleased'), changelog.indexOf('\n## 1.0.0'));
+  for (const part of ['deliverables.extras', 'recade render extras']) assert.ok(unreleased.includes(part), `CHANGELOG: ${part}`);
+  for (const text of [readme, design]) assert.ok(text.includes('delete them by hand'));
+});

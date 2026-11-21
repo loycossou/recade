@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { parse, stringify } from 'yaml';
 import { configDir } from './paths.js';
 import { WRITER_CHOICES, isWriterChoice } from './models.js';
+import { parseExtras } from './deliverables.js';
 
 export const DEFAULT_CONFIG = Object.freeze({
   version: 1,
@@ -18,6 +19,7 @@ export const DEFAULT_CONFIG = Object.freeze({
   projects_root: '~/projects',
   voice: 'randall-munroe',
   models: Object.freeze({ writer: 'fable' }),
+  deliverables: Object.freeze({ extras: Object.freeze([]) }),
 });
 
 const LANGUAGE_CODE = /^[a-z]{2}$/;
@@ -113,7 +115,9 @@ export function setConfigValue(config, key, raw) {
   }
 
   let value;
-  if (LIST_KEYS.has(key)) {
+  if (key === 'deliverables.extras') {
+    value = parseExtras(raw);
+  } else if (LIST_KEYS.has(key)) {
     value = splitList(raw);
     if (value.length === 0) throw new Error(`${key} needs at least one language code.`);
   } else if (typeof defaultValue === 'boolean') {

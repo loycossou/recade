@@ -25,3 +25,7 @@ From here on, answer in the language of `languages.chat` (`recade config get lan
 ## Step 2. The writing model
 
 Run `recade config get models.writer`. It prints `fable` or `opus`: the model the agents that write and review the documents use, at high effort either way. Show it in one line. Say that `recade config set models.writer fable` or `recade config set models.writer opus` changes it, and that it applies to the next dispatch.
+
+## Step 3. The extra files
+
+Run `recade config get deliverables.extras`. It prints `[]` when the owner chose none, else one line `- <name>` for each extra among `stack`, `decisions`, `design` and `reviews`. Show it in one line, with what each chosen name adds (`stack`: STACK and its matrix, `decisions`: the decision register, `design`: one PDF for each design board, `reviews`: every review note in one file). Say that `recade config set deliverables.extras stack,decisions` (or `none`) changes it, and that `recade render extras --project '<dir>'` renders them. D1, D2, D3 and the PLAN are always rendered.

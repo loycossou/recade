@@ -23,7 +23,7 @@ In Claude Code:
 /recade:start
 ```
 
-`/recade:start` checks your machine, asks which languages, writing model and writing voice to use, and shows the commands. Run it again at any time. It skips what is already done.
+`/recade:start` checks your machine, asks which languages, writing model, extra files and writing voice to use, and shows the commands. Run it again at any time. It skips what is already done.
 
 To test a local copy, start Claude Code with `claude --plugin-dir <path>`, where `<path>` is the folder of this repository.
 
@@ -144,6 +144,19 @@ node bin/recade.js render docs/D1.md docs/PLAN.md [--format docx,pdf,xlsx] [--ou
 ```
 
 Outputs go to `docs/deliverables` of the project (the nearest folder holding `recade/state.yaml`). `PLAN.md` also yields a workbook. The source is checked first (style, IDs, line anchors); nothing is written if a check fails or a figure cannot be drawn. The PDF and Mermaid or HTML figures need Chromium: `npx --prefix "<path>" playwright install chromium`. `/recade:setup` shows what is missing. Drawn figures are cached in `.recade-cache/` (keyed on the plugin version, the bundled Mermaid, the figure stylesheet and the page size), and `render` adds `.recade-cache/` to an existing `.gitignore`. Assets linked from an HTML figure are not part of the cache key: delete `.recade-cache/` after changing one.
+
+### Extra deliverables
+
+D1, D2, D3 and the PLAN are always rendered. `/recade:start` also asks which of four extras to render for your stakeholders, and keeps the answer in your user config as `deliverables.extras` (none by default). Change it with `recade config set deliverables.extras stack,decisions`, or `none` to clear it.
+
+| Extra | Files in `docs/deliverables/` |
+|---|---|
+| `stack` | `STACK.docx`, `STACK.pdf` and `STACK-matrix.xlsx` (one sheet for each table of the weighted matrix) |
+| `decisions` | `DECISIONS.docx`, `DECISIONS.pdf` and `DECISIONS.xlsx` (one section, and one row, for each decision) |
+| `design` | `design-<board>.pdf`, one for each board of `design/directions/` |
+| `reviews` | `REVIEWS.docx` and `REVIEWS.pdf`, one section for each note of `docs/reviews/` |
+
+`recade render extras --project <dir>` renders the ones you chose, and `/recade:docs` and `/recade:amend` run it after the usual render. The decision and review registers are built in memory and never saved in `docs/`. A missing source is a warning line, not a failure. An extra you un-choose, or whose source you remove, leaves its old files in `docs/deliverables/`: Recade never deletes them, so delete them by hand. Each board is its own PDF: no PDF merge library is part of Recade, and a board prints without JavaScript, with no network and with no file from outside the project.
 
 ## Development
 

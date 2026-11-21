@@ -9,6 +9,7 @@ import { checkRoot, renderIndexMd } from './index/check.js';
 import { stringify } from 'yaml';
 import { configPath, loadConfig, saveConfig, setConfigValue } from './config.js';
 import { WRITER_CHOICES, WRITER_MODELS, isWriterChoice } from './models.js';
+import { EXTRAS, isExtra } from './deliverables.js';
 import { loadState, saveState } from './state.js';
 import {
   PHASES, GATES, ADOPT_GATES, SETTINGS, phasesOf, gatesOf, normalizeState, canStart, passGate, resetFrom, nextAction, projectRoot, workspaceOf, currentPhase, setSetting,
@@ -116,7 +117,7 @@ function renderHelp() {
   out += `${term('recade intake')}Scan intake/attachments for invisible Unicode and bidi controls before an agent reads them: recade intake scan [--json]\n`;
   out += `${term('recade quarantine')}Keep flaky tests in tests/quarantine.json until they are fixed: recade quarantine add | remove | list | check\n`;
   out += `${term('recade release-notes')}Release notes from conventional commits: recade release-notes <from>..<to> [--version <v>] [--write]\n`;
-  out += `${term('recade render')}Render Markdown documents to DOCX, PDF and XLSX: recade render <file.md...> [--format docx,pdf,xlsx] [--out <dir>] [--no-check]\n`;
+  out += `${term('recade render')}Render Markdown documents to DOCX, PDF and XLSX: recade render <file.md...> [--format docx,pdf,xlsx] [--out <dir>] [--no-check], or the extras you chose (deliverables.extras: stack, decisions, design, reviews): recade render extras --project <dir> [--no-check]\n`;
   return out;
 }
 
@@ -1631,6 +1632,7 @@ export const commands = {
     return 0;
   },
   async render(args, io) {
+    if (args[0] === 'extras') return renderExtrasCommand(args.slice(1), io);
     const opts = parseRenderArgs(args);
     if (opts.error) {
       io.stderr.write(`${opts.error}\n${RENDER_USAGE}\n`);
@@ -2353,6 +2355,76 @@ function renderState(state, root) {
 }
 
 const RENDER_USAGE = 'Usage: recade render <file.md...> [--format docx,pdf,xlsx] [--out <dir>] [--no-check]';
+const EXTRAS_USAGE = 'Usage: recade render extras [--project <dir>] [--no-check]';
+
+/**
+ * `recade render extras`: render the extra deliverables the owner chose (`deliverables.extras` of the user config)
+ * into docs/deliverables. Exit 0 when none is chosen or a source is missing (a warning line), 1 when a check, a
+ * figure, Chromium or a write fails, 2 for a usage error.
+ */
+async function renderExtrasCommand(args, io) {
+  if (args.some((a) => a !== '--no-check')) {
+    io.stderr.write(`${EXTRAS_USAGE}\n`);
+    return 2;
+  }
+  const root = findRenderRoot(io.cwd);
+  if (root === null) {
+    io.stderr.write(`${io.cwd} is not a Recade project (no recade/state.yaml up from there). Use --project <dir>.\n`);
+    return 2;
+  }
+  const loaded = readConfig(io);
+  if (!loaded) return 1;
+  for (const w of loaded.warnings) io.stderr.write(`${w}\n`);
+  const chosen = loaded.config.deliverables?.extras;
+  const fix = `Fix it with: recade config set deliverables.extras ${EXTRAS.join(',')} (or none).`;
+  if (!Array.isArray(chosen)) {
+    io.stderr.write(`deliverables.extras in ${configPath(io.env)} must be a list of ${EXTRAS.join(', ')}. ${fix}\n`);
+    return 1;
+  }
+  const bad = chosen.find((e) => !isExtra(e));
+  if (bad !== undefined) {
+    io.stderr.write(`deliverables.extras in ${configPath(io.env)} is not valid. Unknown extra deliverable: ${String(bad)}. ${fix}\n`);
+    return 1;
+  }
+  if (chosen.length === 0) {
+    io.stdout.write('No extra deliverables chosen. Choose some with: recade config set deliverables.extras stack,decisions,design,reviews\n');
+    return 0;
+  }
+  let engine;
+  try {
+    engine = await import('./render/extras.js');
+  } catch (err) {
+    io.stderr.write(`Cannot load the render engine: ${oneLine(err)}. Run: npm ci --omit=dev --prefix "${resolve(fileURLToPath(import.meta.url), '..', '..')}"\n`);
+    return 1;
+  }
+  const warn = (warnings) => { for (const w of warnings ?? []) io.stderr.write(`Warning: ${w}\n`); };
+  try {
+    const { outputs, findings, warnings } = await engine.renderExtras(root, chosen, {
+      check: !args.includes('--no-check'), env: io.env,
+      // Test seams, as for render.
+      chromiumStatus: io.chromiumStatus ? () => io.chromiumStatus(io.env) : undefined,
+      withBrowser: io.withBrowser,
+    });
+    printPlainFindings(findings, io);
+    warn(warnings);
+    for (const file of outputs) io.stdout.write(`Wrote ${file}\n`);
+    return 0;
+  } catch (err) {
+    printPlainFindings(err.findings ?? [], io);
+    warn(err.warnings);
+    const message = oneLine(err);
+    io.stderr.write(`${/^Chromium is not installed/.test(message) ? `${message} /recade:setup shows what is missing.` : message}\n`);
+    return err.exitCode ?? 1;
+  }
+}
+
+/** The nearest folder up from `dir` that holds `recade/state.yaml`, or null. */
+function findRenderRoot(dir) {
+  for (let d = resolve(dir); ; d = dirname(d)) {
+    if (existsSync(join(d, 'recade', 'state.yaml'))) return d;
+    if (dirname(d) === d) return null;
+  }
+}
 
 function printPlainFindings(findings, io) {
   for (const f of findings) io.stdout.write(`${f.file}:${f.line}:${f.column} ${f.rule} ${f.message}\n`);

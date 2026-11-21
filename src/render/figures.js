@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync, existsSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { FONT_DIR, PLUGIN_ROOT, RENDER_DIR } from './theme.js';
 import { withBrowser as defaultWithBrowser } from './browser.js';
 
@@ -74,13 +74,27 @@ const within = (root, file) => {
 };
 
 /** True when `file` is inside `root`, symbolic links followed (a link that leaves the project does not count). */
-function insideProject(file, root) {
+export function insideProject(file, root) {
   const base = resolve(root);
   if (!within(base, file)) return false;
   try {
     return within(realpathSync(base), realpathSync(file));
   } catch {
     return true; // not there yet: the read reports it
+  }
+}
+
+/**
+ * Whether a page of the renderer may fetch `url`: a data URL, or a file inside the project (links followed).
+ * Everything else, a file elsewhere on the machine included, is refused.
+ */
+export function allowRequest(url, projectRoot) {
+  if (/^data:/i.test(url)) return true;
+  if (!/^file:/i.test(url)) return false;
+  try {
+    return insideProject(fileURLToPath(url), projectRoot);
+  } catch {
+    return false;
   }
 }
 
@@ -97,10 +111,11 @@ function readSource(fig, doc, docDir, projectRoot) {
   }
 }
 
-async function newPage(browser) {
+async function newPage(browser, projectRoot) {
   const context = await browser.newContext({ viewport: { width: VIEWPORT_WIDTH, height: 800 }, deviceScaleFactor: SCALE });
-  // A figure is a picture of local content: nothing may leave the machine, whatever an HTML figure asks for.
-  await context.route('**/*', (route) => (/^(file|data):/i.test(route.request().url()) ? route.continue() : route.abort()));
+  // A figure is a picture of local content: nothing may leave the machine, and no file outside the project may
+  // come in, whatever an HTML figure asks for.
+  await context.route('**/*', (route) => (allowRequest(route.request().url(), projectRoot) ? route.continue() : route.abort()));
   const page = await context.newPage();
   return { page, close: () => context.close() };
 }
@@ -113,8 +128,8 @@ async function ready(page) {
   await page.evaluate(() => document.fonts.ready.then(() => undefined));
 }
 
-async function renderHtml(browser, file) {
-  const { page, close } = await newPage(browser);
+async function renderHtml(browser, file, projectRoot) {
+  const { page, close } = await newPage(browser, projectRoot);
   try {
     await page.goto(pathToFileURL(file).href);
     await page.addStyleTag({ content: fontFaceCss() });
@@ -126,8 +141,8 @@ async function renderHtml(browser, file) {
   }
 }
 
-async function renderSvg(browser, svg) {
-  const { page, close } = await newPage(browser);
+async function renderSvg(browser, svg, projectRoot) {
+  const { page, close } = await newPage(browser, projectRoot);
   try {
     await page.setContent('<!doctype html><html><head><meta charset="utf-8"></head><body><div class="figure-frame" id="frame"></div></body></html>');
     await page.addStyleTag({ content: `${fontFaceCss()}\n${readFileSync(FIGURE_CSS, 'utf8')}` });
@@ -139,8 +154,8 @@ async function renderSvg(browser, svg) {
   }
 }
 
-async function renderMermaid(browser, fig, doc, theme) {
-  const { page, close } = await newPage(browser);
+async function renderMermaid(browser, fig, doc, theme, projectRoot) {
+  const { page, close } = await newPage(browser, projectRoot);
   try {
     await page.setContent('<!doctype html><html><head><meta charset="utf-8"></head><body><div class="figure-frame" id="frame"></div></body></html>');
     await page.addStyleTag({ content: `${fontFaceCss()}\n${readFileSync(FIGURE_CSS, 'utf8')}` });
@@ -238,9 +253,9 @@ export async function renderFigures(doc, ctx) {
     const run = async (browser) => {
       for (const { fig, bytes, file, cacheFile } of pending) {
         let png;
-        if (fig.source.kind === 'html') png = await renderHtml(browser, file);
-        else if (fig.source.kind === 'svg') png = await renderSvg(browser, bytes.toString('utf8'));
-        else png = await renderMermaid(browser, { ...fig, source: { ...fig.source, text: bytes.toString('utf8') } }, doc, theme);
+        if (fig.source.kind === 'html') png = await renderHtml(browser, file, projectRoot);
+        else if (fig.source.kind === 'svg') png = await renderSvg(browser, bytes.toString('utf8'), projectRoot);
+        else png = await renderMermaid(browser, { ...fig, source: { ...fig.source, text: bytes.toString('utf8') } }, doc, theme, projectRoot);
         writeAtomic(cacheFile, png);
         results.set(fig.id, { png, ...pngSize(png) });
       }

@@ -17,7 +17,7 @@ export const FORMATS = ['docx', 'pdf', 'xlsx'];
 const LOT_NAME = /^[A-Z][A-Z0-9]*$/;
 /** Index findings that stop a render. The others are printed. */
 const BLOCKING_RULES = new Set(['unknown-id', 'duplicate-id', 'line-anchor', 'translation-extra-id']);
-const CACHE_DIR = '.recade-cache';
+export const CACHE_DIR = '.recade-cache';
 
 /** A failed render. `exitCode` is 1 (a check, a figure or Chromium) or 2 (usage). `findings` were found on the way. */
 export class RenderError extends Error {
@@ -30,8 +30,8 @@ export class RenderError extends Error {
   }
 }
 
-const oneLine = (err) => String(err?.message ?? err).split('\n')[0].trim();
-const posix = (p) => p.split(sep).join('/');
+export const oneLine = (err) => String(err?.message ?? err).split('\n')[0].trim();
+export const posix = (p) => p.split(sep).join('/');
 
 /** The nearest ancestor of `file` holding `recade/state.yaml`, else the folder of the file. */
 export function findProjectRoot(file) {
@@ -45,7 +45,7 @@ export function findProjectRoot(file) {
 }
 
 /** Lot names recorded in the project state, or `[]` (an unreadable state is not a render problem). */
-function lotsOf(root) {
+export function lotsOf(root) {
   try {
     const lots = loadState(root)?.lots;
     return Array.isArray(lots) ? lots.filter((l) => typeof l === 'string' && LOT_NAME.test(l)) : [];
@@ -58,7 +58,7 @@ function lotsOf(root) {
  * One browser for the whole run, launched on first use and closed by `close()`. `launch` is the withBrowser shape:
  * it runs a callback with the browser and closes it afterwards, so the callback is parked until `close()`.
  */
-function lazyBrowser(launch, status, what) {
+export function lazyBrowser(launch, status, what) {
   let session = null;
   let release;
   const gate = new Promise((r) => { release = r; });
@@ -96,7 +96,7 @@ function topmostMissing(dir) {
  * file moves to a backup name and the temp file takes its place. Any failure puts every backup back, removes the
  * outputs already placed and the folders this run created. On success the backups go.
  */
-function writeAll(outputs, rename = renameSync) {
+export function writeAll(outputs, rename = renameSync) {
   for (const { file } of outputs) {
     if (existsSync(file) && statSync(file).isDirectory()) {
       throw new RenderError(`Cannot write ${file}: it is a folder. Move it or use --out.`);
@@ -137,7 +137,7 @@ function writeAll(outputs, rename = renameSync) {
 }
 
 /** Add `.recade-cache/` to the project's .gitignore when there is one and it lacks the entry. Never creates it. */
-function ignoreCache(root) {
+export function ignoreCache(root) {
   const file = join(root, '.gitignore');
   try {
     if (!existsSync(file) || !existsSync(join(root, CACHE_DIR))) return;
@@ -147,6 +147,66 @@ function ignoreCache(root) {
   } catch {
     // A read-only .gitignore is not a reason to fail a render.
   }
+}
+
+/**
+ * Lint and index findings of the jobs, with the parser warnings. `blocking` holds the ones that stop a render.
+ * Nothing is checked when `check` is false: only the parser warnings are returned.
+ * @returns {{findings: Finding[], blocking: Finding[]}}
+ */
+export function checkJobs(jobs, check = true) {
+  const findings = [];
+  const blocking = [];
+  const indexes = new Map();
+  for (const job of jobs) {
+    if (check) {
+      const lint = lintText(job.text, job.rel);
+      findings.push(...lint);
+      blocking.push(...lint.filter((f) => f.severity === 'error'));
+      if (!indexes.has(job.root)) indexes.set(job.root, checkRoot(job.root, { lots: lotsOf(job.root) }).findings);
+      const cited = indexes.get(job.root).filter((f) => f.file === job.rel);
+      findings.push(...cited);
+      blocking.push(...cited.filter((f) => BLOCKING_RULES.has(f.rule)));
+    }
+    findings.push(...job.doc.warnings);
+  }
+  return { findings, blocking };
+}
+
+/**
+ * Every output of one document, in memory: the figures once, then one buffer for each format of `job.wanted`.
+ * `ctx.browser` is a lazyBrowser, `ctx.mark('figures' | 'pdf')` tells it what the browser is for (the message when
+ * Chromium is missing), `ctx.findings` gets the workbook warnings. `job.docDir` is the folder figure paths are read
+ * from, the folder of the file by default.
+ * @returns {Promise<{file: string, bytes: Buffer}[]>}
+ */
+export async function buildOutputs(job, { browser, mark, findings }) {
+  const theme = loadTheme(job.root);
+  const labels = loadLabels(job.doc.meta.language);
+  const figures = job.wanted.some((f) => f !== 'xlsx')
+    ? await renderFigures(job.doc, {
+      withBrowser: async (fn) => { mark('figures'); return fn(await browser.get()); },
+      cacheDir: join(job.root, CACHE_DIR, 'figures'),
+      docDir: job.docDir ?? dirname(job.file),
+      projectRoot: job.root,
+      theme,
+    })
+    : new Map();
+  const files = [];
+  for (const format of job.wanted) {
+    let bytes;
+    if (format === 'docx') bytes = await renderDocx(job.doc, { theme, labels, figures });
+    else if (format === 'pdf') {
+      mark('pdf');
+      bytes = await renderPdf(job.doc, { theme, labels, figures, browser: await browser.get() });
+    } else {
+      const sheet = await renderPlanWorkbook(job.doc, { theme, labels });
+      bytes = sheet.buffer;
+      findings.push(...sheet.warnings);
+    }
+    files.push({ file: `${job.base}.${format}`, bytes });
+  }
+  return files;
 }
 
 /**
@@ -173,7 +233,6 @@ export async function renderFiles(paths, options = {}) {
   // 1. Read, parse and check every document. Nothing is rendered yet.
   const jobs = [];
   const findings = [];
-  const indexes = new Map();
   const outputNames = new Map();
   for (const path of paths) {
     const file = resolve(cwd, path);
@@ -206,21 +265,8 @@ export async function renderFiles(paths, options = {}) {
     jobs.push({ file, root, rel, doc, wanted, base, text });
   }
 
-  const blocking = [];
-  for (const job of jobs) {
-    const mine = [];
-    if (check) {
-      const lint = lintText(job.text, job.rel);
-      mine.push(...lint);
-      blocking.push(...lint.filter((f) => f.severity === 'error'));
-      if (!indexes.has(job.root)) indexes.set(job.root, checkRoot(job.root, { lots: lotsOf(job.root) }).findings);
-      const cited = indexes.get(job.root).filter((f) => f.file === job.rel);
-      mine.push(...cited);
-      blocking.push(...cited.filter((f) => BLOCKING_RULES.has(f.rule)));
-    }
-    mine.push(...job.doc.warnings);
-    findings.push(...mine);
-  }
+  const { findings: found, blocking } = checkJobs(jobs, check);
+  findings.push(...found);
   if (blocking.length > 0) {
     const n = blocking.length;
     throw new RenderError(`Not rendered: ${n} ${n === 1 ? 'check' : 'checks'} failed. Fix ${n === 1 ? 'it' : 'them'}, or use --no-check.`, { findings });
@@ -232,30 +278,7 @@ export async function renderFiles(paths, options = {}) {
   const files = [];
   try {
     for (const job of jobs) {
-      const theme = loadTheme(job.root);
-      const labels = loadLabels(job.doc.meta.language);
-      const figures = job.wanted.some((f) => f !== 'xlsx')
-        ? await renderFigures(job.doc, {
-          withBrowser: async (fn) => { needs = 'figures'; return fn(await browser.get()); },
-          cacheDir: join(job.root, CACHE_DIR, 'figures'),
-          docDir: dirname(job.file),
-          projectRoot: job.root,
-          theme,
-        })
-        : new Map();
-      for (const format of job.wanted) {
-        let bytes;
-        if (format === 'docx') bytes = await renderDocx(job.doc, { theme, labels, figures });
-        else if (format === 'pdf') {
-          needs = 'pdf';
-          bytes = await renderPdf(job.doc, { theme, labels, figures, browser: await browser.get() });
-        } else {
-          const sheet = await renderPlanWorkbook(job.doc, { theme, labels });
-          bytes = sheet.buffer;
-          findings.push(...sheet.warnings);
-        }
-        files.push({ file: `${job.base}.${format}`, bytes });
-      }
+      files.push(...await buildOutputs(job, { browser, mark: (what) => { needs = what; }, findings }));
     }
   } catch (err) {
     if (err instanceof RenderError) { err.findings = findings; throw err; }

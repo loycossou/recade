@@ -54,7 +54,7 @@ On `Customize languages`, ask these five questions. Each offers English and Fren
 
 Codes are `en`, `fr` or the ISO 639-1 code of the other language. For a list, join the codes with commas and no spaces.
 
-## Step 4. GitHub owner, projects root, writing model, voice
+## Step 4. GitHub owner, projects root, writing model, extra files, voice
 
 Skip this step if `recade config get started` prints `true`.
 
@@ -65,7 +65,14 @@ Skip this step if `recade config get started` prints `true`.
    - **Opus**: the latest Opus, at the same high effort. Saved as `opus`.
 
    AskUserQuestion adds "Other" by itself; if the answer is neither, ask again once, then save `fable`. Save with `recade config set models.writer <fable or opus>`. Say in one line that `recade config set models.writer opus` changes it later, and that the second opinion of the harness stays on Fable, because it must come from another model family than the reviewer.
-4. Writing voice, the style of every document, comment and report Recade writes. Ask with `AskUserQuestion`, always naming the person in full, never by a short id:
+4. Extra files, the optional deliverables for your stakeholders. Ask with `AskUserQuestion` with `multiSelect` on: "Which extra files should Recade render for your stakeholders? D1, D2, D3 and the PLAN are always rendered."
+   - **Stack**: the stack decision as `STACK.docx` and `STACK.pdf`, and its weighted matrix as `STACK-matrix.xlsx`. Saved as `stack`.
+   - **Decisions**: one register of every decision (`DEC-*`) as `DECISIONS.docx`, `DECISIONS.pdf` and `DECISIONS.xlsx`. Saved as `decisions`.
+   - **Design**: each design direction board as its own PDF, `design-<board>.pdf`. Saved as `design`.
+   - **Reviews**: every review note gathered in `REVIEWS.docx` and `REVIEWS.pdf`. Saved as `reviews`.
+
+   AskUserQuestion adds "Other" by itself. Join the names the owner picked with commas and no spaces, and save with `recade config set deliverables.extras <names>`. Keep the valid picks and ignore the rest of the answer; save `none` only when no valid pick remains, and say so in one line. Say in one line that `recade config set deliverables.extras stack,decisions` (or `none`) changes it later, and that `/recade:docs` and `/recade:amend` render the extra files after the usual ones.
+5. Writing voice, the style of every document, comment and report Recade writes. Ask with `AskUserQuestion`, always naming the person in full, never by a short id:
    - **Randall Munroe** (recommended): plain words, short sentences, deadpan humour born from precision. Saved as `randall-munroe`.
    - **Julia Evans**: warm and curious, explains things step by step, friendly without fluff. Saved as `julia-evans`.
    - **Paul Graham**: plain and direct essay style, no jokes, every sentence earns its place. Saved as `paul-graham`.

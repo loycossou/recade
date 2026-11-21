@@ -311,3 +311,113 @@ export async function renderPlanWorkbook(doc, { theme, labels }) {
   const buffer = Buffer.from(await workbook.xlsx.writeBuffer());
   return { buffer, warnings };
 }
+
+// ---------------------------------------------------------------------------------------------------------------
+// Plain tables: the weighted matrix of the STACK and the decision register. One sheet per table, no formulas.
+
+const SHEET_NAME_MAX = 31;
+
+/** A worksheet name Excel accepts: no `[]:*?/\`, at most 31 characters, not empty, unique ignoring case. */
+function sheetName(wanted, taken) {
+  const base = String(wanted).replace(/[[\]:*?/\\]+/g, '-').replace(/\s+/g, ' ').replace(/^['\s-]+|['\s-]+$/g, '').trim() || 'Sheet';
+  let name = base.slice(0, SHEET_NAME_MAX).trim();
+  for (let n = 2; taken.has(name.toLowerCase()); n += 1) {
+    const suffix = ` ${n}`;
+    name = `${base.slice(0, SHEET_NAME_MAX - suffix.length).trim()}${suffix}`;
+  }
+  taken.add(name.toLowerCase());
+  return name;
+}
+
+/**
+ * The sheets of the STACK matrix workbook: one for each table of section 5 "Weighted matrix" (the number in front of
+ * the title does not matter). A sheet takes the name of the sub-heading that holds its table, else "Weighted matrix"
+ * when there is one table, else "Matrix n". A STACK with no such table gives no sheet and one warning.
+ * @param {{meta: any, blocks: any[], file: string}} doc
+ * @returns {{sheets: {name: string, columns: string[], rows: string[][]}[], warnings: any[]}}
+ */
+export function stackMatrixSheets(doc) {
+  const found = [];
+  let inside = false;
+  let sub = '';
+  let at = 0;
+  for (const block of doc.blocks) {
+    if (block.type === 'heading' && block.level <= 2) {
+      const title = norm(plainText(block.runs)).replace(/^\d+\s*[.)]?\s*/, '');
+      inside = block.level === 2 && title === 'weighted matrix';
+      sub = '';
+      if (inside) at = block.line;
+    } else if (inside && block.type === 'heading' && block.level === 3) {
+      sub = plainText(block.runs).trim();
+    } else if (inside && block.type === 'table') {
+      found.push({ block, sub });
+    }
+  }
+  if (found.length === 0) {
+    return {
+      sheets: [],
+      warnings: [{
+        file: doc.file, line: at || 1, column: 1, rule: 'stack-matrix', severity: 'warn',
+        message: 'Section 5 "Weighted matrix" holds no table: no matrix workbook.',
+      }],
+    };
+  }
+  const taken = new Set();
+  const sheets = found.map(({ block, sub: heading }, i) => {
+    const columns = block.header.map((runs) => plainText(runs).trim());
+    const rows = block.rows.map((row) => columns.map((_, c) => plainText(row[c] ?? []).trim()));
+    const wanted = heading || (found.length === 1 ? 'Weighted matrix' : `Matrix ${i + 1}`);
+    return { name: sheetName(wanted, taken), columns, rows };
+  });
+  return { sheets, warnings: [] };
+}
+
+/**
+ * A workbook of plain tables, styled like the plan workbook (title, source line, styled header row, frozen panes,
+ * filter), with numbers and dates typed and no formula.
+ * @param {{meta: any, source: string, sheets: {name: string, columns: string[], rows: string[][]}[]}} content
+ * @param {{theme: any, labels: Record<string,string>}} ctx
+ * @returns {Promise<Buffer>}
+ */
+export async function renderTablesWorkbook({ meta, source, sheets }, { theme, labels }) {
+  const font = { name: theme.font.family, size: theme.size.body };
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = meta.author || meta.project;
+  workbook.title = meta.title;
+  const list = sheets.length > 0 ? sheets : [{ name: 'Sheet', columns: [], rows: [] }];
+  for (const { name, columns, rows } of list) {
+    const ws = workbook.addWorksheet(name, {
+      views: [{ state: 'frozen', xSplit: 1, ySplit: HEADER_ROW, topLeftCell: `B${FIRST_ROW}`, activeCell: `B${FIRST_ROW}`, showGridLines: false }],
+    });
+    ws.getCell('A1').value = `${meta.project} · ${name}`;
+    ws.getCell('A1').font = { ...font, size: 14, bold: true };
+    ws.getCell('A2').value = `${labels.sourceOfTruth} (${source})`;
+    ws.getCell('A2').font = { ...font, color: { argb: argb(theme.color.muted) } };
+    const widths = columns.map((c) => c.length);
+    columns.forEach((text, i) => {
+      const cell = ws.getCell(HEADER_ROW, i + 1);
+      cell.value = text;
+      cell.font = { ...font, bold: true, color: { argb: argb(theme.color.headerText) } };
+      cell.fill = solid(theme.color.headerFill);
+      cell.alignment = { vertical: 'middle', wrapText: true };
+    });
+    rows.forEach((row, r) => {
+      row.forEach((text, i) => {
+        const cell = ws.getCell(FIRST_ROW + r, i + 1);
+        const { value, numFmt } = cellValue(text, TEXT_COLUMNS.has(norm(columns[i])));
+        cell.value = value;
+        if (numFmt) cell.numFmt = numFmt;
+        cell.font = font;
+        cell.alignment = { vertical: 'top', wrapText: true };
+        widths[i] = Math.max(widths[i], text.length);
+      });
+    });
+    columns.forEach((_, i) => {
+      ws.getColumn(i + 1).width = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, widths[i] + 2));
+    });
+    if (columns.length > 0) {
+      ws.autoFilter = { from: { row: HEADER_ROW, column: 1 }, to: { row: Math.max(FIRST_ROW + rows.length - 1, HEADER_ROW), column: columns.length } };
+    }
+  }
+  return Buffer.from(await workbook.xlsx.writeBuffer());
+}

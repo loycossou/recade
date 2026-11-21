@@ -84,7 +84,7 @@ Two families of commands exist:
 
 1. It shows a two-sentence introduction.
 2. It checks the machine (`recade doctor`): `gh` signed in with the `project` scope, Node 20 or later, the render dependencies, the Playwright browser. Each line says `ok`, `warn` or `missing` with how to fix it. `/recade:setup` runs only this step.
-3. It asks for your preferences: languages, the GitHub account for private project repositories, the projects folder (the default parent of a workspace), the writing model (Fable or Opus, section 8.2) and the voice.
+3. It asks for your preferences: languages, the GitHub account for private project repositories, the projects folder (the default parent of a workspace), the writing model (Fable or Opus, section 8.2), the extra files to render (section 7.3) and the voice.
 4. It shows the command map.
 5. It suggests the next step for the current folder: `/recade:new <project>` in an empty folder, `/recade:new <project> --from <folder>` when documents exist, or `/recade:adopt` in a code repository.
 
@@ -246,6 +246,17 @@ One Node pipeline, installed by `npm ci`. `recade render` takes Markdown with a 
 - Font: Inter Tight (OFL, shipped with the plugin and embedded), with Arial as the declared fallback.
 - Theme: per-project tokens derived from the art direction.
 - Checks before anything is written: IDs and gists, the em dash and tics, and `PROVISIONAL` values shown in the margin. Labels exist in English and French.
+
+**Extra deliverables.** D1, D2, D3 and the PLAN are always rendered, and that never changes. The owner can add four more, chosen once in `/recade:start` and kept in the user config as `deliverables.extras` (a list among `stack`, `decisions`, `design`, `reviews`, empty by default; `recade config set deliverables.extras stack,design`, or `none` to clear). `recade render extras --project <dir>` renders the chosen ones into `docs/deliverables/`, and `/recade:docs` and `/recade:amend` run it after the usual render.
+
+| Extra | Source | Files |
+|---|---|---|
+| `stack` | `docs/STACK.md` | `STACK.docx`, `STACK.pdf`, and `STACK-matrix.xlsx` with one sheet for each table of section 5, "Weighted matrix", its header row styled like the PLAN workbook |
+| `decisions` | `decisions/DEC-*.md` | `DECISIONS.docx` and `DECISIONS.pdf` (a summary table, then one section for each DEC: question, options, chosen option, status, date), and `DECISIONS.xlsx` with one row for each DEC |
+| `design` | `design/directions/*.html` | one `design-<board>.pdf` for each board |
+| `reviews` | `docs/reviews/*.md` | `REVIEWS.docx` and `REVIEWS.pdf`, one section for each note |
+
+The decision and review registers are built in memory from their source files and rendered, never saved as Markdown, so nothing new appears in `docs/` and the index check never sees them. The `STACK` is a real source and goes through the same checks as D1. The boards are printed by the same Chromium helper, one PDF each, with only file and data URLs fetched; there is no combined PDF because no PDF merge library is a dependency and a deliverable did not justify adding one. A symbolic link in `design/directions/` is skipped, and so is any source folder or file that is a link out of the project. A board is printed with JavaScript off, the network off, and only data URLs and files inside the project fetched; the HTML figures of the other documents get the same file restriction. An extra the owner un-chooses, or whose source is removed, leaves its old files in `docs/deliverables/`: nothing is deleted automatically, so delete them by hand. Everything is built in memory first and written all at once, as for `recade render`, so a failure writes nothing. A missing source (no STACK, no DEC, no board, no note) is one `Warning:` line on stderr and exit 0; with no extra chosen the command prints one line and exits 0; a missing Chromium gives the same message as `recade render`, with `/recade:setup`.
 
 ### 7.4 Slices
 
