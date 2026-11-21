@@ -1,5 +1,9 @@
 # Recade
 
+[![Watch the two-minute introduction to Recade](docs/video-poster.jpg)](https://github.com/loycossou/recade/releases/download/v1.0.0/recade-intro.mp4)
+
+A two-minute introduction to Recade (video, 19 MB).
+
 Recade takes a software project from "we should build this" to agents shipping it slice by slice, with an expert-inspired team, real documents and a human at every gate. It is named after the scepter the kings of Danxomè gave their messengers so that their word became law, and it was made by Loyc COSSOU (loycossou[at]gmail.com).
 
 It is a Claude Code plugin. It builds a team of roles, picks the stack from measured evidence, writes the documents (D1 Functional Specifications, D2 Technical Architecture, D3 Security Requirements, a delivery plan), writes the rules (the BIBLE), cuts the plan into slices, and installs a harness of agents, commands, hooks and CI in the workspace of the project and in each of its code repositories. It stops at every gate and waits for your yes. How it works, and why, is in [docs/design.md](docs/design.md).
