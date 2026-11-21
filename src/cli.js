@@ -57,7 +57,7 @@ import { protect } from './harness/protect.js';
 /** @typedef {{stdout:{write(s:string):void}, stderr:{write(s:string):void}, cwd:string, env:Record<string,string|undefined>, run?: (cmd: string[], opts: {cwd: string}) => {code: number, stdout: string, stderr: string}}} IO `run` is an optional test seam for the board commands. */
 
 const GUARD_EXTS = ['.md', '.js', '.json', '.yml', '.yaml', '.txt'];
-/** Files that quote third-party text (the Mermaid bundle, the lock file): a private name there is a word of someone else, such as the Greek letter Sigma. */
+/** Files that quote third-party text (the Mermaid bundle, the lock file): a private name there is a word of someone else. */
 const THIRD_PARTY = (rel) => rel === 'package-lock.json' || rel.startsWith('render/vendor/');
 const LOT_NAME = /^[A-Z][A-Z0-9]*$/;
 const pkgUrl = new URL('../package.json', import.meta.url);
