@@ -1,8 +1,6 @@
 # Recade
 
-[![Watch the two-minute introduction to Recade](docs/video-poster.jpg)](https://github.com/loycossou/recade/releases/download/v1.0.0/recade-intro.mp4)
-
-A two-minute introduction to Recade (video, 19 MB).
+[![A two-minute introduction to Recade, video of 19 MB](docs/video-poster.jpg)](https://github.com/loycossou/recade/releases/download/v1.0.0/recade-intro.mp4)
 
 Recade takes a software project from "we should build this" to agents shipping it slice by slice, with an expert-inspired team, real documents and a human at every gate. It is named after the scepter the kings of Danxomè gave their messengers so that their word became law, and it was made by Loyc COSSOU (loycossou[at]gmail.com).
 
