@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { parse } from 'yaml';
+import { budgetsOf } from '../budgets.js';
 import { checkLink, findWorkspace, SYNC_ADVICE } from '../workspace/layout.js';
 
 /**
@@ -43,7 +44,7 @@ export const SLICING = Object.freeze(['mixed', 'small', 'large']);
 export const SECOND_OPINION = Object.freeze(['always', 'sensitive', 'off']);
 /** The steps of `/recade:docs`, in order. `docs_step` holds the next one to do, so the command can resume. */
 export const DOCS_STEPS = Object.freeze(['d1', 'direction', 'stack', 'd2', 'd3', 'plan', 'gate', 'done']);
-export const SETTINGS = Object.freeze(['slicing', 'second_opinion', 'hotspots', 'lots', 'docs_step']);
+export const SETTINGS = Object.freeze(['slicing', 'second_opinion', 'hotspots', 'lots', 'docs_step', 'budgets']);
 
 const LOT_NAME = /^[A-Z][A-Z0-9]*$/;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -205,6 +206,18 @@ export function setSetting(state, key, value) {
   if (key === 'docs_step') {
     if (!DOCS_STEPS.includes(value)) throw new Error(`Invalid docs_step: ${value}. Use ${DOCS_STEPS.join(', ')}.`);
     next.docs_step = value;
+    return next;
+  }
+  if (key === 'budgets') {
+    // `D1=12000,PLAN=8000`: each document is merged into the budgets already set.
+    const set = { ...(next.budgets ?? {}) };
+    for (const item of value.split(',').map((v) => v.trim()).filter(Boolean)) {
+      const m = /^([A-Za-z0-9]+)=(\d+)$/.exec(item);
+      if (m === null) throw new Error(`Invalid budget: ${item}. Write DOCUMENT=WORDS, for example D1=12000.`);
+      set[m[1]] = Number(m[2]);
+    }
+    budgetsOf({ budgets: set });
+    next.budgets = set;
     return next;
   }
   const items = value.split(',').map((v) => v.trim()).filter(Boolean);

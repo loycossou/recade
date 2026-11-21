@@ -9,6 +9,7 @@ import JSZip from 'jszip';
 import { FONT_DIR, normalizeLanguage, themeStyle } from './theme.js';
 import { collectFigures } from './figures.js';
 import { bookmarkName, isSafeLink } from './bookmarks.js';
+import { captionSeparator, defaultWidths, isIdHeader, keyColumn, planTerm, provisionalText, splitIds } from './look.js';
 
 export { bookmarkName };
 
@@ -29,7 +30,7 @@ const clean = (text) => String(text ?? '').replace(/[\u0000-\u0008\u000B\u000C\u
 const plain = (runs) => (runs ?? []).map((r) => r.text).join('');
 const asRuns = (text) => [{ text: clean(text) }];
 
-function buildContext(doc, { theme, labels, figures }) {
+function buildContext(doc, { theme, labels, figures, lots }) {
   const [width, height] = PAGES[theme.page?.size] ?? PAGES.A4;
   const margin = twips(theme.page?.marginCm ?? 2);
   return {
@@ -37,6 +38,7 @@ function buildContext(doc, { theme, labels, figures }) {
     theme,
     labels,
     figures: figures ?? new Map(),
+    lots: lots ?? [],
     color: theme.color,
     size: theme.size,
     style: themeStyle(theme),
@@ -64,19 +66,45 @@ function bookmarked(ctx, anchor, children) {
   return claimBookmark(ctx, name) ? [new Bookmark({ id: name, children })] : children;
 }
 
-/** Inline runs to docx paragraph children. `base` is the run formatting every run starts from. */
+/** The PLAN's fixed terms (sheet titles, column titles) in the document language; any other runs as they are. */
+function planRuns(ctx, runs) {
+  if (ctx.doc.meta.doc_id !== 'PLAN') return runs;
+  const text = plain(runs);
+  const shown = planTerm(text, ctx.labels);
+  return shown === text ? runs : [{ ...(runs[0] ?? {}), text: shown }];
+}
+
+/** A fraction of a run size, in half points, never under 10 (5 pt). */
+const smaller = (size, ctx, factor) => Math.max(10, Math.round((size ?? halfPoints(ctx.size.body)) * factor));
+
+/**
+ * Inline runs to docx paragraph children. `base` is the run formatting every run starts from. An ID is small and muted
+ * (unless the run already has a colour, as in a header cell), and PROVISIONAL is a small tag in the document language.
+ */
 function inline(runs, ctx, base = {}) {
   return (runs ?? []).flatMap((run) => {
     const props = { ...base };
     if (run.bold) props.bold = true;
     if (run.italic) props.italics = true;
     if (run.code) props.font = MONO;
-    if (run.provisional) props.shading = { type: ShadingType.CLEAR, fill: ctx.color.provisional, color: 'auto' };
+    if (run.provisional) {
+      Object.assign(props, {
+        shading: { type: ShadingType.CLEAR, fill: ctx.color.provisional, color: 'auto' },
+        color: ctx.color.provisionalText,
+        size: smaller(base.size, ctx, 0.8),
+        allCaps: true,
+        bold: true,
+      });
+    }
     // An unsafe link (javascript:, data:...) is plain text, as in the HTML output.
     const link = isSafeLink(run.link) ? run.link : null;
     if (link) props.underline = { type: 'single' };
-    const lines = clean(run.text).split('\n');
-    const texts = lines.map((text, i) => new TextRun({ ...props, text, break: i > 0 ? 1 : undefined }));
+    const shown = run.provisional ? provisionalText(run, ctx.labels) : run.text;
+    const pieces = run.code || run.provisional || base.color ? [{ text: shown, id: false }] : splitIds(shown, ctx.lots);
+    const texts = pieces.flatMap((piece) => {
+      const own = piece.id ? { ...props, color: ctx.color.muted, size: smaller(base.size, ctx, 0.9) } : props;
+      return clean(piece.text).split('\n').map((text, i) => new TextRun({ ...own, text, break: i > 0 ? 1 : undefined }));
+    });
     if (!link) return texts;
     if (link.startsWith('#')) return [new InternalHyperlink({ anchor: bookmarkName(link.slice(1)), children: texts })];
     return [new ExternalHyperlink({ link, children: texts })];
@@ -127,7 +155,9 @@ function cell(ctx, runs, width, { fill, base, anchor, bold }) {
  */
 function dataTable(ctx, { header, rows, widths, anchors, firstColumnFill }) {
   const count = header ? header.length : Math.max(1, ...rows.map((r) => r.length));
-  const cols = columnWidths(count, widths, ctx.textWidth);
+  const cols = columnWidths(count, widths ?? defaultWidths(header, count, rows), ctx.textWidth);
+  const idCol = isIdHeader(header);
+  const key = firstColumnFill ? 0 : keyColumn(header, count);
   const fit = (row) => Array.from({ length: count }, (_, i) => row[i] ?? []);
   const c = ctx.color;
   const tableRows = [];
@@ -135,7 +165,7 @@ function dataTable(ctx, { header, rows, widths, anchors, firstColumnFill }) {
     tableRows.push(new TableRow({
       tableHeader: true,
       cantSplit: true,
-      children: fit(header).map((runs, i) => cell(ctx, runs, cols[i], { fill: c.headerFill, base: { color: c.headerText }, bold: true })),
+      children: fit(header.map((runs) => planRuns(ctx, runs))).map((runs, i) => cell(ctx, runs, cols[i], { fill: c.headerFill, base: { color: c.headerText }, bold: true })),
     }));
   }
   rows.forEach((row, r) => {
@@ -143,9 +173,10 @@ function dataTable(ctx, { header, rows, widths, anchors, firstColumnFill }) {
     tableRows.push(new TableRow({
       cantSplit: true,
       children: fit(row).map((runs, i) => cell(ctx, runs, cols[i], {
-        fill: firstColumnFill && i === 0 ? c.zebra : fill,
+        fill: i === key ? c.keyCell : fill,
+        base: idCol && i === 0 ? { color: c.muted, size: halfPoints(ctx.size.table - 0.5) } : undefined,
         anchor: i === 0 ? anchors?.[r] : undefined,
-        bold: firstColumnFill && i === 0,
+        bold: i === key && !idCol,
       })),
     }));
   });
@@ -212,7 +243,7 @@ function headingBlock(ctx, b) {
   const level = Math.min(Math.max(b.level, 1), 4);
   return [new Paragraph({
     heading: `Heading${level}`,
-    children: bookmarked(ctx, b.anchor, inline(b.runs, ctx)),
+    children: bookmarked(ctx, b.anchor, inline(level === 2 ? planRuns(ctx, b.runs) : b.runs, ctx)),
   })];
 }
 
@@ -239,7 +270,9 @@ function figureBlock(ctx, b) {
   const maxWidth = Math.min(ctx.textWidth / 15, image.width / FIGURE_SCALE);
   const maxHeight = (ctx.textHeight - 1200) / 15;
   const scale = Math.min(maxWidth / image.width, maxHeight / image.height);
-  const caption = { size: halfPoints(ctx.size.caption), color: ctx.color.muted, italics: true };
+  // The Caption style carries the bold navy of "Figure n"; the words of the caption go back to plain muted.
+  const caption = { size: halfPoints(ctx.size.caption), color: ctx.color.muted, bold: false };
+  const label = { size: halfPoints(ctx.size.caption) };
   return [
     new Paragraph({
       alignment: AlignmentType.CENTER,
@@ -257,9 +290,9 @@ function figureBlock(ctx, b) {
       alignment: AlignmentType.CENTER,
       spacing: { before: 0, after: 200 },
       children: [
-        new TextRun({ text: `${ctx.labels.figure} `, ...caption }),
+        new TextRun({ text: `${ctx.labels.figure} `, ...label }),
         new SimpleField('SEQ Figure \\* ARABIC', String(b.number)),
-        new TextRun({ text: ': ', ...caption }),
+        new TextRun({ text: captionSeparator(ctx.labels), ...caption }),
         ...inline(b.caption, ctx, caption),
       ],
     }),
@@ -326,7 +359,7 @@ function coverChildren(ctx) {
   }
   out.push(
     text(ctx, meta.project, { paragraph: { spacing: { before: meta.org ? 0 : 2400, after: 60 } }, run: { size: halfPoints(size.h2), color: color.ink } }),
-    text(ctx, meta.title, { paragraph: { spacing: { before: 0, after: 480 } }, run: { bold: true, size: halfPoints(size.h1 * 1.6), color: color.ink } }),
+    text(ctx, meta.title, { paragraph: { spacing: { before: 0, after: 480 } }, run: { bold: true, size: halfPoints(size.h1 * 1.6), color: color.heading } }),
     dataTable(ctx, { rows: metaRows, widths: [30, 70], firstColumnFill: true }),
   );
   if (meta.revisions?.length) {
@@ -407,12 +440,12 @@ function styles(ctx) {
   return {
     default: {
       document: { run: { font, size: halfPoints(size.body), color: color.ink, language: { value: ctx.language } }, paragraph: { spacing: BODY_SPACING } },
-      heading1: heading(size.h1, {}, {
+      heading1: heading(size.h1, { color: color.heading }, {
         pageBreakBefore: true,
         spacing: { before: 0, after: 200 },
         ...(h1Rule > 0 ? { border: { bottom: { style: BorderStyle.SINGLE, size: h1Rule, space: 4, color: color.accent } } } : {}),
       }),
-      heading2: heading(size.h2),
+      heading2: heading(size.h2, { color: color.heading }),
       heading3: heading(size.h3, { color: color.muted }),
       heading4: heading(size.h4),
     },
@@ -424,7 +457,7 @@ function styles(ctx) {
       },
       {
         id: 'Caption', name: 'caption', basedOn: 'Normal', next: 'Normal', quickFormat: true,
-        run: { font, italics: true, size: halfPoints(size.caption), color: color.muted },
+        run: { font, bold: true, size: halfPoints(size.caption), color: color.heading },
         paragraph: { alignment: AlignmentType.CENTER },
       },
     ],

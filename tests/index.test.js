@@ -368,3 +368,30 @@ test('design/references.md is not scanned: an app name that looks like an ID is 
   assert.deepEqual(buildIndex(root).definitions, []);
   rmSync(root, { recursive: true, force: true });
 });
+
+test('a gist before the ID is read: `gist (ID)`', () => {
+  const index = { definitions: extractDefinitions(fixture('D1.md'), 'D1.md', {}), duplicates: [] };
+  const cites = extractCitations('Let the user get a refund only within 24 h (FR-PAY-03) and stop.\n', 'B.md', {});
+  assert.equal(cites.length, 1);
+  assert.equal(cites[0].gist, 'a refund only within 24 h');
+  assert.deepEqual(checkCitations(index, cites), []);
+  const second = extractCitations('First point. Refund only within 24 h (FR-PAY-03)\n- Refund only within 24 h (FR-PAY-03)\n', 'B.md', {});
+  assert.deepEqual(second.map((c) => c.gist), ['Refund only within 24 h', 'Refund only within 24 h']);
+});
+
+test('gist-mismatch works with the gist before the ID', () => {
+  const index = { definitions: extractDefinitions(fixture('D1.md'), 'D1.md', {}), duplicates: [] };
+  const cites = extractCitations('Shipping costs for parcels (FR-PAY-03)\n', 'B.md', {});
+  assert.deepEqual(checkCitations(index, cites).map((f) => [f.rule, f.severity]), [['gist-mismatch', 'warn']]);
+});
+
+test('an ID alone in parentheses with nothing before it, or in a list of IDs, still has no gist', () => {
+  assert.equal(extractCitations('(FR-PAY-03)\n', 'B.md', {})[0].gist, null);
+  assert.equal(extractCitations('Cite (FR-PAY-03, FR-PAY-04) here.\n', 'B.md', {})[0].gist, null);
+  assert.equal(extractCitations('Refund rule: FR-PAY-03.\n', 'B.md', {})[0].gist, null);
+});
+
+test('the gist after the ID wins when both sides have one', () => {
+  const cites = extractCitations('Refund policy (FR-PAY-03 (refund only within 24 h))\n', 'B.md', {});
+  assert.equal(cites[0].gist, 'refund only within 24 h');
+});

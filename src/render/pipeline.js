@@ -7,6 +7,7 @@ import { parseDocument } from './parse.js';
 import { loadTheme, loadLabels } from './theme.js';
 import { chromiumStatus as defaultChromiumStatus, withBrowser as defaultWithBrowser } from './browser.js';
 import { renderFigures } from './figures.js';
+import { figureFindings } from './figurecheck.js';
 import { renderDocx } from './docx.js';
 import { renderPdf } from './pdf.js';
 import { renderPlanWorkbook } from './xlsx.js';
@@ -168,7 +169,7 @@ export function checkJobs(jobs, check = true) {
       findings.push(...cited);
       blocking.push(...cited.filter((f) => BLOCKING_RULES.has(f.rule)));
     }
-    findings.push(...job.doc.warnings);
+    findings.push(...job.doc.warnings, ...figureFindings(job.doc));
   }
   return { findings, blocking };
 }
@@ -183,6 +184,7 @@ export function checkJobs(jobs, check = true) {
 export async function buildOutputs(job, { browser, mark, findings }) {
   const theme = loadTheme(job.root);
   const labels = loadLabels(job.doc.meta.language);
+  const lots = lotsOf(job.root);
   const figures = job.wanted.some((f) => f !== 'xlsx')
     ? await renderFigures(job.doc, {
       withBrowser: async (fn) => { mark('figures'); return fn(await browser.get()); },
@@ -195,10 +197,10 @@ export async function buildOutputs(job, { browser, mark, findings }) {
   const files = [];
   for (const format of job.wanted) {
     let bytes;
-    if (format === 'docx') bytes = await renderDocx(job.doc, { theme, labels, figures });
+    if (format === 'docx') bytes = await renderDocx(job.doc, { theme, labels, figures, lots });
     else if (format === 'pdf') {
       mark('pdf');
-      bytes = await renderPdf(job.doc, { theme, labels, figures, browser: await browser.get() });
+      bytes = await renderPdf(job.doc, { theme, labels, figures, lots, browser: await browser.get() });
     } else {
       const sheet = await renderPlanWorkbook(job.doc, { theme, labels });
       bytes = sheet.buffer;

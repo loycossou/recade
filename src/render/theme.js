@@ -59,13 +59,24 @@ export function loadTheme(projectRoot) {
 export const STYLE_DEFAULTS = Object.freeze({ h1Rule: 1.5, calloutBar: 3, headerSeparator: ' \u00b7 ', tableRules: 'grid' });
 const TABLE_RULES = ['grid', 'horizontal'];
 const HEX6 = /^[0-9A-Fa-f]{6}$/;
+/** The colours of the tables, the callouts and the tags: when a theme sets one, it is 6 hex digits without `#`. */
+export const COLOR_KEYS = [
+  'heading', 'headerFill', 'headerText', 'zebra', 'keyCell', 'calloutNote', 'calloutWarning', 'calloutDecision', 'provisional', 'provisionalText',
+];
+/** The node kinds of a figure and the colours each may set: `fill`, `stroke`, `text`. */
+const FIGURE_NODE_KINDS = ['info', 'ok', 'warm', 'error', 'system'];
+const FIGURE_NODE_KEYS = ['fill', 'stroke', 'text'];
 
 /**
  * What is wrong with the style keys of a theme, in one line, or null. `style.h1Rule` is the width in points of the
  * rule under an H1 (0 to 6, 0 removes it), `style.calloutBar` the width of the bar on the left of a callout (0 to 12,
  * 0 removes it), `style.headerSeparator` the text between the parts of the running header (at most 8 characters, no
  * line break), `style.tableRules` `grid` (rules around every cell) or `horizontal` (rules between rows only), and
- * `color.chartFill` the fill of the Gantt bars and the Mermaid boxes (6 hex digits; without it, `color.accent`).
+ * `color.chartFill` the fill of the Gantt bars and the plain Mermaid boxes (6 hex digits; without it, `color.accent`).
+ * The colours of the tables, the callouts and the PROVISIONAL tag (`color.heading`, `headerFill`, `headerText`, `zebra`, `keyCell`,
+ * `calloutNote`, `calloutWarning`, `calloutDecision`, `provisional`, `provisionalText`) are 6 hex digits, and so is every
+ * colour of the `figure` group (`figure.info`, `ok`, `warm`, `error`, `system`, each with `fill`, `stroke`, `text`,
+ * and `figure.line`).
  * @param {any} theme
  * @returns {string|null}
  */
@@ -86,6 +97,26 @@ export function themeProblem(theme) {
   if (style.tableRules !== undefined && !TABLE_RULES.includes(style.tableRules)) return `style.tableRules must be one of ${TABLE_RULES.join(', ')}`;
   const fill = theme?.color?.chartFill;
   if (fill !== undefined && !HEX6.test(String(fill))) return 'color.chartFill must be 6 hex digits, without #';
+  const color = theme?.color ?? {};
+  for (const key of COLOR_KEYS) {
+    if (color[key] !== undefined && !HEX6.test(String(color[key]))) return `color.${key} must be 6 hex digits, without #`;
+  }
+  return figureProblem(theme?.figure);
+}
+
+function figureProblem(figure) {
+  if (figure === undefined) return null;
+  if (!isObject(figure)) return 'figure must be an object';
+  const hex = (path, value) => (HEX6.test(String(value)) ? null : `${path} must be 6 hex digits, without #`);
+  if (figure.line !== undefined && hex('figure.line', figure.line)) return hex('figure.line', figure.line);
+  for (const kind of FIGURE_NODE_KINDS) {
+    const node = figure[kind];
+    if (node === undefined) continue;
+    if (!isObject(node)) return `figure.${kind} must be an object`;
+    for (const key of FIGURE_NODE_KEYS) {
+      if (node[key] !== undefined && hex(`figure.${kind}.${key}`, node[key])) return hex(`figure.${kind}.${key}`, node[key]);
+    }
+  }
   return null;
 }
 
@@ -100,8 +131,8 @@ export function themeStyle(theme) {
   return { ...STYLE_DEFAULTS, ...(theme?.style ?? {}) };
 }
 
-/** The fill of the charts (Gantt bars, Mermaid boxes): `color.chartFill`, else `color.accent`. */
-export const chartFill = (theme) => theme?.color?.chartFill ?? theme?.color?.accent ?? '17C79A';
+/** The fill of the charts (Gantt bars, plain Mermaid boxes): `color.chartFill`, else `color.accent`. */
+export const chartFill = (theme) => theme?.color?.chartFill ?? theme?.color?.accent ?? '1F3864';
 
 /**
  * Every user-visible label of a rendered document. The code is normalised (`FR`, `fr-CA` give `fr`); an unknown

@@ -19,6 +19,7 @@ approvals:
 
 <!--
 Writing guide. Delete every comment before the draft goes to the owner.
+Size: the dispatcher gives the word budget of BIBLE (code blocks excluded). Write for a busy client, say each idea once, use a table only for real tabular data, and cite other documents instead of restating them.
 The BIBLE holds the rules. Agents apply them without interpreting, so each rule is short,
 imperative and checkable. It cites D1, D2 and D3 by ID with the gist, and never copies them.
 It never copies state either: section 17 says where to read it.
@@ -80,7 +81,7 @@ Decisions are revised, never bypassed. A rule that contradicts a decision is a `
 
 | Rule | Source | What the code enforces | Test |
 |---|---|---|---|
-| Example rule | FR-EX-01 (the user can do the example thing) | Example check in the service layer | Example test file |
+| Example rule | the user can do the example thing (FR-EX-01) | Example check in the service layer | Example test file |
 
 ## 7. Conventions
 

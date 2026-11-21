@@ -160,7 +160,7 @@ const deliverables = (root) => join(root, 'docs', 'deliverables');
 const listDeliverables = (root) => (existsSync(deliverables(root)) ? readdirSync(deliverables(root)).sort() : []);
 const isZip = (file) => readFileSync(file).subarray(0, 2).toString() === 'PK';
 const isPdf = (file) => readFileSync(file).subarray(0, 5).toString() === '%PDF-';
-const docxText = async (file) => (await (await JSZip.loadAsync(readFileSync(file))).file('word/document.xml').async('string')).replace(/<[^>]+>/g, ' ');
+const docxText = async (file) => (await (await JSZip.loadAsync(readFileSync(file))).file('word/document.xml').async('string')).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
 const sheetsOf = async (file) => {
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.load(readFileSync(file));

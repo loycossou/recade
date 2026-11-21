@@ -58,6 +58,23 @@ test('a Mermaid flowchart renders to a PNG', { skip }, async () => {
   }
 });
 
+test('a wide Mermaid flowchart is captured at its real width, not shrunk to the 1200 pixel viewport', { skip }, async () => {
+  const t = tmp();
+  try {
+    const nodes = Array.from({ length: 25 }, (_, i) => `N${i}[Step number ${i}]`);
+    const wide = doc(figure(1, { kind: 'mermaid', text: `flowchart LR\n  ${nodes.join(' --> ')}` }));
+    const narrow = doc(figure(2, { kind: 'mermaid', text: 'flowchart LR\n  A[Member] --> B[Tool shelf]' }));
+    const out = await withBrowser((browser) => renderFigures(doc(...wide.blocks, ...narrow.blocks), { browser, cacheDir: t.dir, docDir: DOC_DIR, theme }));
+    const fig = out.get('fig-1');
+    // 25 boxes of 100 pixels or more cannot fit 1200 pixels: the picture is wider than the old viewport, twice over at scale 2.
+    assert.ok(fig.width / 2 > 1500, `${fig.width / 2} CSS pixels`);
+    assert.ok(fig.width / 2 <= 3200 + 32, `${fig.width / 2} CSS pixels, capped`);
+    assert.ok(out.get('fig-2').width / 2 < 600, 'a small figure keeps its natural size');
+  } finally {
+    t.done();
+  }
+});
+
 test('an inline SVG figure renders to a PNG', { skip }, async () => {
   const t = tmp();
   try {

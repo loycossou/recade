@@ -36,6 +36,8 @@ import { impactOf } from './project/amend.js';
 import { buildIdPattern } from './index/ids.js';
 import { openProvisional, closeProvisional, listProvisionals } from './project/provisionals.js';
 import { newDecision, closeDecision, listDecisions } from './project/decisions.js';
+import { addTeamDecision, challengeTeamDecision, listTeamDecisions } from './project/teamdecisions.js';
+import { DEFAULT_BUDGETS, budgetsOf, checkSizes } from './budgets.js';
 import { loadModels, sensitiveLane, syncAgents } from './harness/models.js';
 import { runGate, checkGate, isGateName, defaultExec as runCommand } from './harness/stamps.js';
 import { handleHook, logGuard } from './harness/guard.js';
@@ -119,6 +121,7 @@ function renderHelp() {
   out += `${term('recade intake')}Scan intake/attachments for invisible Unicode and bidi controls before an agent reads them: recade intake scan [--json]\n`;
   out += `${term('recade quarantine')}Keep flaky tests in tests/quarantine.json until they are fixed: recade quarantine add | remove | list | check\n`;
   out += `${term('recade release-notes')}Release notes from conventional commits: recade release-notes <from>..<to> [--version <v>] [--write]\n`;
+  out += `${term('recade docs')}Measure the project documents against their word budgets: recade docs size [D1|D2|D3|PLAN|STACK|BIBLE ...] [--json] | budgets [--json]. The team's own choices: recade decision team add | list | challenge\n`;
   out += `${term('recade render')}Render Markdown documents to DOCX, PDF and XLSX: recade render <file.md...> [--format docx,pdf,xlsx] [--out <dir>] [--no-check], or the extras you chose (deliverables.extras: stack, decisions, design, reviews): recade render extras --project <dir> [--no-check]\n`;
   return out;
 }
@@ -161,6 +164,49 @@ export const commands = {
       io.stdout.write(`${f.file}:${f.line}:${f.column} ${f.rule} ${f.message}\n`);
     }
     return findings.some((f) => f.severity === 'error') ? 1 : 0;
+  },
+  async docs(args, io) {
+    const [sub, ...rest] = args;
+    const usage = () => {
+      io.stderr.write(`${DOCS_USAGE}\n`);
+      return 2;
+    };
+    if (!['size', 'budgets'].includes(sub)) return usage();
+    const parsed = parseOptions(rest, { flags: ['--json'], values: [] });
+    if (parsed.error || (sub === 'budgets' && parsed.positional.length > 0)) return usage();
+    if (parsed.positional.some((d) => !Object.hasOwn(DEFAULT_BUDGETS, d))) return usage();
+    const root = projectRoot(io.cwd);
+    if (root === null) {
+      io.stderr.write('No Recade project here: recade/state.yaml not found. Run /recade:new first.\n');
+      return 1;
+    }
+    const json = parsed.flags.has('--json');
+    try {
+      if (sub === 'budgets') {
+        const budgets = budgetsOf(loadState(root));
+        const set = loadState(root)?.budgets ?? {};
+        if (json) io.stdout.write(`${JSON.stringify(budgets)}\n`);
+        else for (const [doc, words] of Object.entries(budgets)) io.stdout.write(`${doc} ${words} words (${Object.hasOwn(set, doc) ? 'project' : 'default'})\n`);
+        return 0;
+      }
+      const found = checkSizes(root, parsed.positional.length > 0 ? parsed.positional : undefined);
+      if (json) {
+        io.stdout.write(`${JSON.stringify(found, null, 2)}\n`);
+      } else if (found.length === 0) {
+        io.stdout.write('No document to measure yet.\n');
+      } else {
+        for (const f of found) {
+          const head = `${f.level} ${f.file}: ${f.words} words, budget ${f.budget} (${f.percent}%).`;
+          const tail = f.level === 'warn' ? ' Over budget: cut, do not summarise the cut.'
+            : f.level === 'error' ? ' Over 150% of the budget: revise it, cut, do not summarise the cut.' : '';
+          io.stdout.write(`${head}${tail}\n`);
+        }
+      }
+      return found.some((f) => f.level === 'error') ? 1 : 0;
+    } catch (err) {
+      io.stderr.write(`${oneLine(err)}\n`);
+      return 2;
+    }
   },
   async intake(args, io) {
     const parsed = args[0] === 'scan' ? parseOptions(args.slice(1), { flags: ['--json'], values: [] }) : { error: 'usage' };
@@ -524,6 +570,7 @@ export const commands = {
       io.stderr.write(`${DECISION_USAGE}\n`);
       return 2;
     };
+    if (sub === 'team') return decisionTeam(rest, io, usage);
     if (!['new', 'close', 'list'].includes(sub)) return usage();
     const parsed = parseOptions(rest, sub === 'new'
       ? { flags: [], values: ['--doc', '--question', '--why', '--known', '--unknown', '--options', '--recommendation', '--change-mind', '--due'] }
@@ -1740,11 +1787,55 @@ export const commands = {
   },
 };
 
+/** `recade decision team`: the register of what the team decided itself. */
+async function decisionTeam(args, io, usage) {
+  const [sub, ...rest] = args;
+  if (!['add', 'list', 'challenge'].includes(sub)) return usage();
+  const parsed = parseOptions(rest, sub === 'add' ? { flags: [], values: ['--doc', '--question', '--decided', '--why'] }
+    : sub === 'challenge' ? { flags: [], values: ['--dec'] } : { flags: ['--json'], values: [] });
+  if (parsed.error || parsed.positional.length !== (sub === 'challenge' ? 1 : 0)) return usage();
+  if (sub === 'add' && ['--doc', '--question', '--decided', '--why'].some((k) => parsed.values[k] === undefined)) return usage();
+  if (sub === 'challenge' && parsed.values['--dec'] === undefined) return usage();
+  const root = projectRoot(io.cwd);
+  if (root === null) {
+    io.stderr.write('No Recade project here: recade/state.yaml not found. Run /recade:new first.\n');
+    return 1;
+  }
+  const date = localDate((io.now ?? (() => new Date()))());
+  try {
+    if (sub === 'add') {
+      const v = parsed.values;
+      const step = await endStep(io, root, ['decisions/TEAM.md'], (id) => `docs(decisions): ${id} decided by the team`,
+        () => addTeamDecision(root, { document: v['--doc'], question: v['--question'], decided: v['--decided'], why: v['--why'] }, { date }),
+        { push: false });
+      if (step.exit !== undefined) return step.exit;
+      io.stdout.write(`${step.value}\n`);
+    } else if (sub === 'challenge') {
+      const id = parsed.positional[0];
+      const dec = parsed.values['--dec'];
+      const step = await endStep(io, root, ['decisions/TEAM.md'], `docs(decisions): ${id} challenged`,
+        () => challengeTeamDecision(root, id, { dec, date }), { push: false });
+      if (step.exit !== undefined) return step.exit;
+      io.stdout.write(`${id} challenged: ${dec} replaces it.\n`);
+    } else {
+      const list = listTeamDecisions(root);
+      if (parsed.flags.has('--json')) io.stdout.write(`${JSON.stringify(list, null, 2)}\n`);
+      else for (const d of list) io.stdout.write(`${[d.id, d.status, d.document, d.question, d.decided, d.why, ...(d.dec === '' ? [] : [d.dec])].join('\t')}\n`);
+    }
+  } catch (err) {
+    io.stderr.write(`${oneLine(err)}\n`);
+    return 1;
+  }
+  return 0;
+}
+
 const DECISION_USAGE =
   'Usage: recade decision new --doc <D1|D2|D3|STACK|PLAN|BIBLE> --question <text> --why <text> --known <text> --unknown <text>'
   + ' --options <json: [{label, cost, closes, risks, calendar, repo}]> --recommendation <text> --change-mind <text> [--due YYYY-MM-DD]'
   + ' | close <DEC-nn> --choice <A|B|C|label> | list [--open] [--json]'
+  + ' | team add --doc <document> --question <text> --decided <text> --why <text> | team list [--json] | team challenge <TD-nn> --dec <DEC-nn>'
   + ' (add --project <dir> to work on a project from another folder)';
+const DOCS_USAGE = 'Usage: recade docs size [D1|D2|D3|PLAN|STACK|BIBLE ...] [--json] | budgets [--json] [--project <dir>]';
 const TEAM_USAGE = 'Usage: recade team check [--project <dir>]';
 const GATE_USAGE = "Usage: recade gate run '<name>' -- <command...> | recade gate check ['<name>']";
 const NO_PROJECT = 'No Recade project here: recade/state.yaml not found. Run /recade:new first.';
@@ -2331,7 +2422,7 @@ function parseOptions(args, { flags, values }) {
 }
 
 const STATE_USAGE =
-  'Usage: recade state show [--json] | can-start <phase> | pass <gate> | reset-from <gate> | set <key> <value> (keys: slicing, second_opinion, hotspots, lots, docs_step) [--project <dir>]';
+  'Usage: recade state show [--json] | can-start <phase> | pass <gate> | reset-from <gate> | set <key> <value> (keys: slicing, second_opinion, hotspots, lots, docs_step, budgets, as D1=12000,PLAN=8000) [--project <dir>]';
 
 const localDate = (d) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -2595,7 +2686,7 @@ function parseIndexArgs(args) {
 }
 
 /** Commands that work on a project folder. They accept `--project <dir>` in place of running from inside it. */
-const PROJECT_SCOPED = ['state', 'provisional', 'decision', 'team', 'slices', 'amend', 'github', 'lint-style', 'intake', 'index', 'render', 'claude-md', 'parallel', 'board', 'merge-order', 'cost', 'retro', 'quarantine', 'release-notes', 'harness', 'cases', 'gate', 'repo', 'workspace'];
+const PROJECT_SCOPED = ['state', 'provisional', 'decision', 'team', 'slices', 'amend', 'github', 'lint-style', 'intake', 'index', 'render', 'claude-md', 'parallel', 'board', 'merge-order', 'cost', 'retro', 'quarantine', 'release-notes', 'harness', 'cases', 'gate', 'repo', 'workspace', 'docs'];
 
 /**
  * Run the CLI and return the exit code.

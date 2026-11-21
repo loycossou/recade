@@ -57,7 +57,7 @@ test('every sheet has the title, source line, header row, frozen panes, filter, 
     assert.equal(view.ySplit, 4);
     assert.equal(view.showGridLines, false);
     const head = ws.getCell('A4');
-    assert.equal(head.fill.fgColor.argb, 'FF0F1A22');
+    assert.equal(head.fill.fgColor.argb, 'FF1F3864');
     assert.equal(head.font.color.argb, 'FFFFFFFF');
     assert.equal(head.font.bold, true);
     assert.equal(head.font.name, 'Inter Tight');
@@ -202,7 +202,7 @@ test('Gantt: one column per sprint, fill by conditional format with the accent',
   assert.equal(rules.length, 1);
   assert.equal(rules[0].ref, 'D5:F58');
   assert.equal(rules[0].type, 'expression');
-  assert.equal(fillOf(rules[0]), 'FF17C79A');
+  assert.equal(fillOf(rules[0]), 'FF1F3864');
   assert.match(rules[0].formulae[0], /MATCH\(\$B5,\$D\$4:\$F\$4,0\)/);
   assert.match(rules[0].formulae[0], /MATCH\(\$C5,\$D\$4:\$F\$4,0\)/);
 });

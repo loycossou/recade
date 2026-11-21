@@ -361,9 +361,8 @@ test('bible.md requires G2, writes, reviews, indexes, renders the workbook and p
   const ask = text.indexOf('The BIBLE and the PLAN are ready. Pass G3?');
   assert.ok(ask >= 0 && ask < text.indexOf('recade state pass G3'));
   assert.ok(text.includes('Only on `Yes, pass G3`'));
-  for (const agent of ['`bible-writer`', '`chief-reviewer`', '`security-lead`']) assert.ok(text.includes(agent), agent);
-  assert.ok(text.includes('docs/reviews/BIBLE-chief-reviewer.md') && text.includes('docs/reviews/BIBLE-security-lead.md'));
-  assert.ok(text.includes('reviewers `chief-reviewer` and `security-lead`'));
+  for (const agent of ['`bible-writer`', '`chief-reviewer`']) assert.ok(text.includes(agent), agent);
+  assert.ok(text.includes('docs/reviews/BIBLE-chief-reviewer.md') && text.includes('one reviewer `chief-reviewer`'));
   const checks = stepSection('bible.md', 8);
   assert.ok(checks.indexOf('recade index build') >= 0 && checks.indexOf('recade index build') < checks.indexOf('recade index check'));
   assert.ok(checks.includes('exit 0 with no line of severity `error`'));
@@ -784,7 +783,7 @@ test('bible.md writes in the workspace, never copies private documents into a co
 
 test('slices.md reads the registry, asks for prefixed touches, and Step 6 asks one yes for the workspace, one for auto-push and one for each code repository', () => {
   const step1 = stepSection('slices.md', 1);
-  for (const part of ['recade repo list --json', 'no code repository', 'Step 9 point 11 of `${CLAUDE_PLUGIN_ROOT}/commands/docs.md`']) assert.ok(step1.includes(part), part);
+  for (const part of ['recade repo list --json', 'no code repository', 'the point "Code repositories" of Step 9 of `${CLAUDE_PLUGIN_ROOT}/commands/docs.md`']) assert.ok(step1.includes(part), part);
   const step3 = stepSection('slices.md', 3);
   for (const part of ['the registry of the code repositories', '`<repo>:<glob>`', 'two repositories or more', 'merge_order:']) assert.ok(step3.includes(part), part);
   const step4 = stepSection('slices.md', 4);

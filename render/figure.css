@@ -14,3 +14,10 @@ html, body {
   max-width: 100%;
   height: auto;
 }
+/* Rounded boxes, as in a hand-made diagram. */
+.figure-frame .node rect,
+.figure-frame .node .label-container,
+.figure-frame .cluster rect {
+  rx: 10px;
+  ry: 10px;
+}

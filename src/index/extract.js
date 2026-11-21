@@ -143,7 +143,7 @@ function mask(text, anchored, heading, idTable) {
 }
 
 /** Text of the parenthesis that follows position `from`, or null. */
-function gistAt(masked, original, from) {
+function gistAfter(masked, original, from) {
   const m = /^\s?\(/.exec(masked.slice(from));
   if (!m) return null;
   const open = from + m[0].length;
@@ -153,6 +153,29 @@ function gistAt(masked, original, from) {
     else if (masked[i] === ')' && --depth === 0) return original.slice(open, i).trim() || null;
   }
   return null;
+}
+
+const GIST_WORDS_BEFORE = 6;
+
+/**
+ * The gist written before an ID that stands alone in parentheses: `upload a proof of income (FR-EX-01)`.
+ * It is the last few words of the clause that ends at the parenthesis.
+ */
+function gistBefore(masked, original, start, end) {
+  if (!/^\s*\)/.test(masked.slice(end))) return null;
+  const head = /\(\s*$/.exec(masked.slice(0, start));
+  if (!head) return null;
+  let clause = original.slice(0, head.index);
+  const cut = [...clause.matchAll(/[.!?;:](?=\s|$)|\|/g)].pop();
+  if (cut) clause = clause.slice(cut.index + 1);
+  clause = clause.replace(/^\s*(?:[-*+>]\s+|\d+[.)]\s+|#+\s+)/, '');
+  const words = clause.trim().split(/\s+/).filter(Boolean);
+  return words.length ? words.slice(-GIST_WORDS_BEFORE).join(' ') : null;
+}
+
+/** The gist of the citation at `start..end`, written after the ID or, failing that, before it. */
+function gistAt(masked, original, start, end) {
+  return gistAfter(masked, original, end) ?? gistBefore(masked, original, start, end);
 }
 
 /**
@@ -173,7 +196,7 @@ export function extractCitations(md, file, options = {}) {
         file,
         line,
         column: m.index + 1,
-        gist: gistAt(masked, text, m.index + m[0].length),
+        gist: gistAt(masked, text, m.index, m.index + m[0].length),
         ...(mirror ? { mirror: true } : {}),
       });
     }

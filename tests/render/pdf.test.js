@@ -40,7 +40,7 @@ test('text is escaped: ampersands, angle brackets and quotes never reach the mar
   assert.match(out, /<h1 id="[^"]+">A &amp; B<\/h1>/);
   assert.match(out, /Say &quot;hi&quot; if a &lt; b &gt; c, it&#39;s fine\./);
   assert.match(out, /<th>H &quot;q&quot;<\/th><th>x &lt; y<\/th>/);
-  assert.match(out, /<td>x &amp; y<\/td><td><code>a&lt;b&gt;<\/code><\/td>/);
+  assert.match(out, /<td class="key">x &amp; y<\/td><td><code>a&lt;b&gt;<\/code><\/td>/);
   // A hostile title and project cannot open a tag either.
   const hostile = parseDocument(`${FM.replace('Fernhill Lending, product definition', 'T"><img src=x onerror=alert(1)>')}---\n\n# One\n`.replace('project: Fernhill Lending', 'project: "<b>P</b>"'), 'docs/D1.md');
   const bad = html(hostile);
@@ -117,7 +117,7 @@ test('callouts, code, provisional marks, lists and page breaks', () => {
   const out = html(make('# R\n\n> [!WARNING]\n> Careful.\n\n```js\nconst a = 1 < 2;\n```\n\nThe fee is PROVISIONAL (PRV-03).\n\n- one\n  - nested\n\n1. a\n\n<!-- pagebreak -->\n\nAfter.\n'));
   assert.match(out, /<aside class="callout warning"><p><strong>Warning<\/strong> Careful\.<\/p><\/aside>/);
   assert.match(out, /<pre><code[^>]*>const a = 1 &lt; 2;/);
-  assert.match(out, /<mark class="prv">PROVISIONAL<\/mark>/);
+  assert.match(out, /<mark class="prv">Provisional<\/mark>/);
   assert.match(out, /<mark class="prv">PRV-03<\/mark>/);
   assert.match(out, /<ul><li>one<ul><li>nested<\/li><\/ul><\/li><\/ul>/);
   assert.match(out, /<ol><li>a<\/li><\/ol>/);
@@ -138,7 +138,7 @@ test('figures are data: PNGs, not upscaled beyond their natural width, capped at
   const wide = Number(imgs[1].match(/width="(\d+)"/)[1]);
   assert.ok(wide <= 643 && wide >= 640, `large figure is ${wide}px`);
   assert.match(imgs[1], /alt="Large"/);
-  assert.match(out, /<figcaption>Figure 1: Small<\/figcaption>/);
+  assert.match(out, /<figcaption><span class="fig-label">Figure 1<\/span>: Small<\/figcaption>/);
 });
 
 test('a missing figure image is an error naming file and line', () => {
@@ -148,7 +148,7 @@ test('a missing figure image is an error naming file and line', () => {
 
 test('theme tokens are CSS variables, the stylesheet comes from print.css, fonts are data: URLs', () => {
   const out = html(make('# One\n'));
-  assert.match(out, /:root\{[^}]*--accent:#17C79A/);
+  assert.match(out, /:root\{[^}]*--accent:#1F3864/);
   assert.match(out, /font-family:\s*"Inter Tight",\s*Arial,\s*sans-serif/);
   assert.match(out, /break-before:\s*page/);
   assert.match(out, /break-inside:\s*avoid/);

@@ -80,7 +80,7 @@ test('renderTablesWorkbook styles each sheet like the plan workbook and keeps nu
   assert.ok(String(ws.getCell('A2').value).includes('STACK.md'));
   assert.deepEqual(headerRow(ws), ['Criterion', 'Weight', 'Option one', 'Option two']);
   const head = ws.getCell('A4');
-  assert.equal(head.fill.fgColor.argb, 'FF0F1A22');
+  assert.equal(head.fill.fgColor.argb, 'FF1F3864');
   assert.equal(head.font.bold, true);
   assert.equal(ws.views[0].state, 'frozen');
   assert.equal(ws.views[0].ySplit, 4);

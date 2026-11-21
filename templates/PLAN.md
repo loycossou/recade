@@ -19,11 +19,14 @@ approvals:
 
 <!--
 Writing guide. Delete every comment before the draft goes to the owner.
+Size: the dispatcher gives the word budget of PLAN (code blocks excluded). Write for a busy client, say each idea once, use a table only for real tabular data, and cite other documents instead of restating them.
 This file is the source of the delivery plan workbook (.xlsx). Each H2 below is one sheet.
 The sheet name is the H2 title, the columns are the table header. Do not rename either.
 Cells are plain text. Dates are YYYY-MM-DD. A size is S, M or L (1, 2 or 3 points).
 A backlog ID is the lot code and a number, like LOT-01. The lot codes live in recade/state.yaml.
 Replace every example row. A date or a value you invented is marked PROVISIONAL.
+Required figure, at least one: the phases timeline, a Mermaid `gantt` block with `<!-- caption: ... -->` before it, under the Gantt sheet after its table. Replace the example.
+The headings and the column titles stay as written here: the render shows them in the document language. Open the document with one short sentence in the project voice.
 -->
 
 ## Increments
@@ -110,3 +113,14 @@ Replace every example row. A date or a value you invented is marked PROVISIONAL.
 | Item | First sprint | Last sprint |
 |---|---|---|
 | Walking skeleton | 1 | 1 |
+
+<!-- caption: Phases timeline -->
+```mermaid
+gantt
+  dateFormat YYYY-MM-DD
+  axisFormat %d %b
+  section Build
+  Walking skeleton :active, 2026-12-01, 14d
+  section Release
+  First delivery :milestone, 2026-12-15, 0d
+```

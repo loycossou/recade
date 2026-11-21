@@ -46,7 +46,7 @@ One sentence: what is true when this slice is done, that was not true before.
 
 <!-- IDs with their gist. Each story is covered by exactly one slice. -->
 
-- FR-EX-01 (the user can do the example thing)
+- the user can do the example thing (FR-EX-01)
 
 ## Out of scope
 

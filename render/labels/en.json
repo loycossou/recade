@@ -22,5 +22,7 @@
   "provisional": "Provisional",
   "note": "Note",
   "warning": "Warning",
-  "decision": "Decision"
+  "decision": "Decision",
+  "captionSeparator": ": ",
+  "planTerms": {}
 }

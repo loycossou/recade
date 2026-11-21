@@ -227,7 +227,7 @@ test('each document agent writes only its own documents, and review notes only u
     'ux-designer': ['docs/D1.md', 'docs/reviews/design-direction-ux-designer.md'],
     'ui-designer': ['design/directions/<name>.html', 'design/directions/README.md', 'design/tokens.json', 'design/theme.json', 'docs/reviews/STACK-ui-designer.md'],
     architect: ['docs/D2.md', 'docs/D2.<lang>.md', 'docs/reviews/D1-architect.md', 'docs/reviews/D3-architect.md', 'docs/reviews/PLAN-architect.md', 'docs/reviews/STACK-architect.md'],
-    'security-lead': ['docs/D3.md', 'docs/D3.<lang>.md', 'docs/D2.md', 'docs/reviews/D1-security-lead.md', 'docs/reviews/D2-security-lead.md', 'docs/reviews/BIBLE-security-lead.md', 'docs/reviews/STACK-security-lead.md'],
+    'security-lead': ['docs/D3.md', 'docs/D3.<lang>.md', 'docs/D2.md', 'docs/reviews/D2-security-lead.md', 'docs/reviews/STACK-security-lead.md'],
     'devops-lead': ['docs/D2.md', 'docs/reviews/D3-devops-lead.md', 'docs/reviews/PLAN-devops-lead.md', 'docs/reviews/STACK-devops-lead.md'],
     'domain-expert': ['docs/D1.md', 'docs/reviews/D1-domain-expert.md', 'docs/reviews/STACK-domain-expert.md'],
   };
@@ -373,9 +373,10 @@ test('chief-reviewer is a writer agent that only writes its note on the BIBLE an
   assert.ok(text.includes("single quotes") && text.includes("'\\''"));
 });
 
-test('security-lead reviews the BIBLE with its own note', () => {
+test('security-lead reviews D2 only, and the BIBLE security points moved to the chief reviewer', () => {
   const text = readFileSync(join(agentsDir, 'security-lead.md'), 'utf8');
-  assert.ok(text.includes('the document is D1, D2 or the BIBLE') && text.includes('For the BIBLE, look for a requirement of D3'));
+  assert.ok(text.includes('the document is D2. Look for a boundary that is missing'));
+  assert.equal(text.includes('BIBLE-security-lead'), false);
 });
 
 test('slicer is a writer agent that writes only under slices, loops on the check at most 3 times, and never touches gates', () => {

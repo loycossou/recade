@@ -2,7 +2,8 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync, existsSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { FONT_DIR, PLUGIN_ROOT, RENDER_DIR, chartFill } from './theme.js';
+import { FONT_DIR, PLUGIN_ROOT, RENDER_DIR } from './theme.js';
+import { mermaidSource, mermaidThemeVariables } from './palette.js';
 import { withBrowser as defaultWithBrowser } from './browser.js';
 
 /** @typedef {{png:Buffer, width:number, height:number}} FigureImage */
@@ -10,11 +11,16 @@ import { withBrowser as defaultWithBrowser } from './browser.js';
 /** Mermaid is vendored (render/vendor), so it needs no install and cannot drift from the cache key. */
 const MERMAID_JS = join(RENDER_DIR, 'vendor', 'mermaid.min.js');
 const VIEWPORT_WIDTH = 1200;
+/** The widest a figure is captured, in CSS pixels. A wider one is shrunk to it. Under it, a figure keeps its real width. */
+const MAX_FIGURE_WIDTH = 3200;
 const SCALE = 2;
 const FIGURE_CSS = join(RENDER_DIR, 'figure.css');
 
 /** Version of the vendored Mermaid in render/vendor. Bump it together with the file. */
 export const MERMAID_VERSION = '12.3.0';
+
+/** Bump it when the way a Mermaid figure is prepared changes (palette, classDefs): the cache key carries it. */
+const FIGURE_LOOK = 3;
 
 /**
  * Part of every figure cache key: the plugin version and the vendored Mermaid version. A new release or a new
@@ -160,34 +166,40 @@ async function renderMermaid(browser, fig, doc, theme, projectRoot) {
     await page.setContent('<!doctype html><html><head><meta charset="utf-8"></head><body><div class="figure-frame" id="frame"></div></body></html>');
     await page.addStyleTag({ content: `${fontFaceCss()}\n${readFileSync(FIGURE_CSS, 'utf8')}` });
     await page.addScriptTag({ path: MERMAID_JS });
-    const color = theme.color ?? {};
     const family = `"${theme.font?.family ?? 'Inter Tight'}", ${theme.font?.fallback ?? 'Arial'}, sans-serif`;
     // Layout is measured at render time: the weights must be loaded first or the boxes are sized for a fallback.
     await page.evaluate(() => Promise.all([400, 600, 700].map((w) => document.fonts.load(`${w} 16px "Inter Tight"`))).then(() => undefined));
-    const failure = await page.evaluate(async ({ text, id, vars }) => {
+    const result = await page.evaluate(async ({ text, id, vars }) => {
       /* eslint-disable no-undef */
       try {
-        window.mermaid.initialize({ startOnLoad: false, theme: 'base', securityLevel: 'strict', suppressErrorRendering: true, themeVariables: vars });
+        // useMaxWidth false: the SVG gets its real size in pixels, so a figure is captured at its natural size and not
+        // squeezed into the 300 pixels a width of 100% resolves to in a shrink-to-fit frame.
+        const fixed = { useMaxWidth: false };
+        window.mermaid.initialize({
+          startOnLoad: false, theme: 'base', securityLevel: 'strict', suppressErrorRendering: true, themeVariables: vars,
+          flowchart: fixed, sequence: fixed, state: fixed, gantt: fixed, er: fixed, class: fixed, journey: fixed, timeline: fixed, pie: fixed, mindmap: fixed,
+        });
         const { svg } = await window.mermaid.render(`mermaid-${id}`, text);
         document.getElementById('frame').innerHTML = svg;
-        return null;
+        // The drawing's own width: the frame shrinks it to the viewport, so read it from the viewBox.
+        const drawn = document.querySelector('#frame svg');
+        return { failure: null, width: drawn?.viewBox?.baseVal?.width || Number.parseFloat(drawn?.getAttribute('width')) || 0 };
       } catch (err) {
-        return String(err?.message ?? err);
+        return { failure: String(err?.message ?? err), width: 0 };
       }
     }, {
-      text: fig.source.text,
+      text: mermaidSource(fig.source.text, theme),
       id: fig.id,
-      vars: {
-        primaryColor: `#${chartFill(theme)}`,
-        primaryTextColor: `#${color.ink ?? '0F1A22'}`,
-        lineColor: `#${color.muted ?? '5A6672'}`,
-        fontFamily: family,
-      },
+      vars: mermaidThemeVariables(theme, family),
     });
-    if (failure !== null) {
-      const message = failure.replace(/\s+/g, ' ').trim() || 'render failed';
+    if (result?.failure) {
+      const message = result.failure.replace(/\s+/g, ' ').trim() || 'render failed';
       throw new Error(`${doc.file}:${fig.line}: Mermaid figure ${fig.id}: ${message}`);
     }
+    // A wide diagram is captured at its real width (up to MAX_FIGURE_WIDTH), not shrunk to the viewport: the page then
+    // scales it to the text width, and its text is as sharp as it can be.
+    const wanted = Math.min(MAX_FIGURE_WIDTH, Math.ceil(result?.width ?? 0) + 64);
+    if (wanted > VIEWPORT_WIDTH) await page.setViewportSize({ width: wanted, height: 800 });
     await ready(page);
     return await capture(page.locator('#frame'));
   } finally {
@@ -223,7 +235,7 @@ export async function renderFigures(doc, ctx) {
   const themeJson = JSON.stringify(theme);
   // Everything that changes the pixels: the release, the stylesheet, the scale and the viewport. Assets linked from
   // an HTML figure are not part of the key.
-  const settings = [ctx.cacheVersion ?? RENDER_CACHE_VERSION, readFileSync(FIGURE_CSS, 'utf8'), SCALE, VIEWPORT_WIDTH].join('\n');
+  const settings = [ctx.cacheVersion ?? RENDER_CACHE_VERSION, readFileSync(FIGURE_CSS, 'utf8'), SCALE, VIEWPORT_WIDTH, FIGURE_LOOK].join('\n');
   const results = new Map();
   const pending = [];
 

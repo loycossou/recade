@@ -46,7 +46,7 @@ test('the cover carries the org, project and title', async () => {
   assert.match(xml, /<w:sz w:val="5[45]"\/>/);
 });
 
-test('the cover has the metadata table with the zebra label column, the revision and approval tables', async () => {
+test('the cover has the metadata table with the key-cell label column, the revision and approval tables', async () => {
   const doc = make('# Vision\n', {
     head: 'author: Mara Quill\ncompanions: [D2, STACK]\nrevisions:\n  - {version: "0.1", date: 2026-11-01, author: Mara Quill, change: First draft}\napprovals:\n  - {role: Sponsor, name: Ines Calloway, date: 2026-11-13}\n',
   });
@@ -54,7 +54,7 @@ test('the cover has the metadata table with the zebra label column, the revision
   for (const text of ['Document', 'Project', 'Version', 'Status', 'Author', 'Companion documents', 'D2, STACK']) {
     assert.ok(xml.includes(`>${text}<`), `cover has ${text}`);
   }
-  assert.match(xml, /w:fill="F7F9FA"/);
+  assert.match(xml, /w:fill="DCE6F1"/);
   for (const text of ['Revision history', 'First draft', 'Approval', 'Sponsor', 'Ines Calloway']) {
     assert.ok(xml.includes(`>${text}<`), `cover has ${text}`);
   }
@@ -111,7 +111,7 @@ test('headings carry bookmarks named from their anchor, with the heading styles'
   const h1 = styles.match(/<w:style [^>]*w:styleId="Heading1".*?<\/w:style>/s)[0];
   assert.match(h1, /<w:sz w:val="34"\/>/);
   assert.match(h1, /<w:pageBreakBefore/);
-  assert.match(h1, /w:color="17C79A"/);
+  assert.match(h1, /w:color="1F3864"/);
   const h3 = styles.match(/<w:style [^>]*w:styleId="Heading3".*?<\/w:style>/s)[0];
   assert.match(h3, /w:val="5A6672"/);
 });
@@ -149,11 +149,11 @@ test('tables: header fill, repeated header, zebra, widths, borders, rows that do
   const doc = make('<!-- widths: 20,50,30 -->\n| Role | Duty | Note |\n|---|---|---|\n| Member | Borrows | Card |\n| Volunteer | Desk | None |\n| Admin | Keys | Board |\n');
   const xml = await part(await render(doc), 'word/document.xml');
   const table = xml.split('<w:tbl>').pop();
-  assert.match(table, /<w:tcPr>.*?w:fill="0F1A22"/s);
+  assert.match(table, /<w:tcPr>.*?w:fill="1F3864"/s);
   assert.match(table, /<w:color w:val="FFFFFF"\/>/);
   assert.match(table, /<w:tblHeader/);
   assert.match(table, /<w:cantSplit/);
-  assert.match(table, /w:fill="F7F9FA"/);
+  assert.match(table, /w:fill="F2F2F2"/);
   // 8.5 pt body text.
   assert.match(table, /<w:sz w:val="17"\/>/);
   // 1/2 pt borders in the rule colour.
@@ -250,7 +250,7 @@ test('the header has project, title, version and status and a rule; the footer h
 
 test('provisional runs are shaded', async () => {
   const xml = await part(await render(make('The fee is PROVISIONAL until the vote (PRV-03).\n')), 'word/document.xml');
-  assert.match(xml, /<w:shd [^>]*w:fill="FFF6C2"/);
+  assert.match(xml, /<w:shd [^>]*w:fill="FBEBD7"/);
 });
 
 test('callouts are single-cell tables with a 3 pt accent left border, a fill by kind and a bold label', async () => {
@@ -259,12 +259,12 @@ test('callouts are single-cell tables with a 3 pt accent left border, a fill by 
   const tables = xml.split('<w:tbl>').slice(1);
   const callouts = tables.slice(-3);
   assert.equal(callouts.length, 3);
-  const fills = ['EEF7F4', 'FDF3E1', 'EEF0FD'];
+  const fills = ['DCE6F1', 'FBEBD7', 'DFF1EA'];
   const labels = ['Note', 'Warning', 'Decision'];
   callouts.forEach((t, i) => {
     assert.equal(t.match(/<w:tc>/g).length, 1);
     assert.ok(t.includes(`w:fill="${fills[i]}"`));
-    assert.match(t, /<w:left [^>]*w:sz="24"[^>]*w:color="17C79A"|<w:left [^>]*w:color="17C79A"[^>]*w:sz="24"/);
+    assert.match(t, /<w:left [^>]*w:sz="24"[^>]*w:color="1F3864"|<w:left [^>]*w:color="1F3864"[^>]*w:sz="24"/);
     assert.match(t, new RegExp(`<w:b/>.{0,200}>${labels[i]}<`, 's'));
   });
 });
@@ -273,7 +273,7 @@ test('code blocks are single-cell tables with the zebra fill in Consolas at the 
   const xml = await part(await render(make('```js\nconst a = 1 < 2;\n\n  indented();\n```\n')), 'word/document.xml');
   const t = xml.split('<w:tbl>').pop();
   assert.equal(t.match(/<w:tc>/g).length, 1);
-  assert.match(t, /w:fill="F7F9FA"/);
+  assert.match(t, /w:fill="F2F2F2"/);
   assert.match(t, /w:ascii="Consolas"/);
   assert.match(t, /<w:sz w:val="16"\/>/);
   assert.ok(t.includes('const a = 1 &lt; 2;'));

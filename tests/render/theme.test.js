@@ -19,7 +19,7 @@ test('theme loads defaults', () => {
   assert.equal(t.size.body, 10);
   assert.equal(t.size.table, 8.5);
   assert.equal(t.color.ink, '0F1A22');
-  assert.equal(t.color.accent, '17C79A');
+  assert.equal(t.color.accent, '1F3864');
   assert.deepEqual(t.page, { size: 'A4', marginCm: 2 });
 });
 
@@ -50,7 +50,7 @@ test('loading a project theme does not mutate the defaults', () => {
   const root = projectWith('{"color":{"accent":"FF0000"}}');
   try {
     loadTheme(root);
-    assert.equal(loadTheme(null).color.accent, '17C79A');
+    assert.equal(loadTheme(null).color.accent, '1F3864');
   } finally {
     rmSync(root, { recursive: true });
   }
@@ -77,9 +77,12 @@ test('fr labels have every en key', () => {
   assert.equal(fr.contents, 'Sommaire');
   assert.equal(fr.revisionHistory, 'Historique des révisions');
   for (const [k, v] of Object.entries({ ...en, ...fr })) {
+    if (k === 'planTerms') continue; // a map of the fixed terms of the PLAN, empty in English
     assert.equal(typeof v, 'string', k);
     assert.ok(v.length > 0, k);
   }
+  assert.deepEqual(en.planTerms, {});
+  assert.equal(fr.planTerms.Milestones, 'Jalons');
 });
 
 test('unknown language falls back to en', () => {

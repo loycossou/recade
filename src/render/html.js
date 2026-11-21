@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { RENDER_DIR, normalizeLanguage, themeStyle } from './theme.js';
 import { fontFaceCss } from './figures.js';
 import { bookmarkName, isSafeLink } from './bookmarks.js';
+import { captionSeparator, defaultWidths, isIdHeader, keyColumn, planTerm, provisionalText, splitIds } from './look.js';
 
 const FIGURE_SCALE = 2;
 const PX_PER_CM = 96 / 2.54;
@@ -25,7 +26,7 @@ export function pageGeometry(theme) {
   return { size: page.css, widthCm: page.cm[0], heightCm: page.cm[1], marginCm: Number.isFinite(marginCm) ? marginCm : 2 };
 }
 
-function buildContext(doc, { theme, labels, figures }) {
+function buildContext(doc, { theme, labels, figures, lots }) {
   const lang = normalizeLanguage(doc.meta.language);
   const page = pageGeometry(theme);
   return {
@@ -35,6 +36,7 @@ function buildContext(doc, { theme, labels, figures }) {
     lang,
     page,
     figures: figures ?? new Map(),
+    lots: lots ?? [],
     textWidthPx: (page.widthCm - 2 * page.marginCm) * PX_PER_CM,
     textHeightPx: (page.heightCm - 2 * page.marginCm) * PX_PER_CM,
     ids: new Set(),
@@ -55,9 +57,17 @@ const idAttr = (ctx, id) => (claim(ctx, id) ? ` id="${esc(id)}"` : '');
 // ---------------------------------------------------------------------------------------------------------------
 // Inline
 
-function inline(runs) {
+/** The text of a run, with its IDs in their own small muted span (code and provisional runs are left whole). */
+function runHtml(run, ctx) {
+  if (run.provisional) return esc(provisionalText(run, ctx.labels));
+  const text = (t) => esc(t).replace(/\n/g, '<br>');
+  if (run.code) return text(run.text);
+  return splitIds(run.text, ctx.lots).map((part) => (part.id ? `<span class="id">${esc(part.text)}</span>` : text(part.text))).join('');
+}
+
+function inline(runs, ctx) {
   return (runs ?? []).map((run) => {
-    let out = esc(run.text).replace(/\n/g, '<br>');
+    let out = runHtml(run, ctx);
     if (run.code) out = `<code>${out}</code>`;
     if (run.bold) out = `<strong>${out}</strong>`;
     if (run.italic) out = `<em>${out}</em>`;
@@ -71,7 +81,15 @@ function inline(runs) {
 }
 
 /** Inline runs without their links: contents entries are links themselves, anchors cannot nest. */
-const unlinked = (runs) => inline((runs ?? []).map((r) => ({ ...r, link: undefined })));
+const unlinked = (runs, ctx) => inline((runs ?? []).map((r) => ({ ...r, link: undefined })), ctx);
+
+/** The PLAN's fixed terms (sheet titles, column titles) in the document language; any other runs as they are. */
+function planRuns(ctx, runs) {
+  if (ctx.doc.meta.doc_id !== 'PLAN') return runs;
+  const text = plain(runs);
+  const shown = planTerm(text, ctx.labels);
+  return shown === text ? runs : [{ ...(runs[0] ?? {}), text: shown }];
+}
 
 // ---------------------------------------------------------------------------------------------------------------
 // Tables
@@ -83,16 +101,24 @@ function colgroup(count, widths) {
   return `<colgroup>${weights.map((w) => `<col style="width:${Math.round((w / sum) * 10000) / 100}%">`).join('')}</colgroup>`;
 }
 
-/** One table for the data tables and the cover tables. Rows are padded or cut to the number of columns. */
+/**
+ * One table for the data tables and the cover tables. Rows are padded or cut to the number of columns. The ID column is
+ * narrow and muted (`idcol`), the column that names the row is a key column (`key`).
+ */
 function table(ctx, { header, rows, widths, anchors, className }) {
   const count = header ? header.length : Math.max(1, ...rows.map((r) => r.length));
   const fit = (row) => Array.from({ length: count }, (_, i) => row[i] ?? []);
-  const head = header ? `<thead><tr>${fit(header).map((runs) => `<th>${inline(runs)}</th>`).join('')}</tr></thead>` : '';
+  const idCol = isIdHeader(header);
+  const key = className ? -1 : keyColumn(header, count);
+  // In an ID table the key column holds sentences (a requirement): it keeps the fill and not the bold.
+  const klass = (i) => (idCol && i === 0 ? ' class="idcol"' : i === key ? ` class="key${idCol ? ' plain' : ''}"` : '');
+  const shown = header ? header.map((runs) => planRuns(ctx, runs)) : null;
+  const head = shown ? `<thead><tr>${fit(shown).map((runs) => `<th>${inline(runs, ctx)}</th>`).join('')}</tr></thead>` : '';
   const body = rows.map((row, r) => {
     const id = anchors?.[r] ? idAttr(ctx, bookmarkName(anchors[r])) : '';
-    return `<tr${id}>${fit(row).map((runs) => `<td>${inline(runs)}</td>`).join('')}</tr>`;
+    return `<tr${id}>${fit(row).map((runs, i) => `<td${klass(i)}>${inline(runs, ctx)}</td>`).join('')}</tr>`;
   }).join('');
-  return `<table${className ? ` class="${className}"` : ''}>${colgroup(count, widths)}${head}<tbody>${body}</tbody></table>`;
+  return `<table${className ? ` class="${className}"` : ''}>${colgroup(count, widths ?? defaultWidths(header, count, rows))}${head}<tbody>${body}</tbody></table>`;
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -102,13 +128,14 @@ function heading(ctx, b) {
   const level = Math.min(Math.max(b.level, 1), 4);
   const name = bookmarkName(b.anchor);
   const id = claim(ctx, name) ? name : null;
-  ctx.headings.push({ level, runs: b.runs, id });
-  return `<h${level}${id ? ` id="${esc(id)}"` : ''}>${inline(b.runs)}</h${level}>`;
+  const runs = level === 2 ? planRuns(ctx, b.runs) : b.runs;
+  ctx.headings.push({ level, runs, id });
+  return `<h${level}${id ? ` id="${esc(id)}"` : ''}>${inline(runs, ctx)}</h${level}>`;
 }
 
 function list(ctx, b) {
   const tag = b.ordered ? 'ol' : 'ul';
-  const items = b.items.map((item) => `<li>${inline(item.runs)}${blocks(ctx, item.children)}</li>`).join('');
+  const items = b.items.map((item) => `<li>${inline(item.runs, ctx)}${blocks(ctx, item.children)}</li>`).join('');
   return `<${tag}>${items}</${tag}>`;
 }
 
@@ -138,16 +165,16 @@ function figure(ctx, b) {
   const height = Math.max(1, Math.round(image.height * scale));
   const id = `figure_${b.id.replace(/[^A-Za-z0-9]/g, '_')}`;
   const attr = idAttr(ctx, id);
-  const label = `${esc(ctx.labels.figure)} ${b.number}: `;
-  const caption = `${label}${inline(b.caption)}`;
-  ctx.figureList.push({ id: attr ? id : null, caption: `${label}${unlinked(b.caption)}` });
+  const label = `<span class="fig-label">${esc(ctx.labels.figure)} ${b.number}</span>${esc(captionSeparator(ctx.labels))}`;
+  const caption = `${label}${inline(b.caption, ctx)}`;
+  ctx.figureList.push({ id: attr ? id : null, caption: `${esc(ctx.labels.figure)} ${b.number}${esc(captionSeparator(ctx.labels))}${unlinked(b.caption, ctx)}` });
   const src = `data:image/png;base64,${image.png.toString('base64')}`;
   return `<figure${attr}><img src="${src}" width="${width}" height="${height}" alt="${esc(plain(b.caption))}"><figcaption>${caption}</figcaption></figure>`;
 }
 
 const BLOCKS = {
   heading,
-  paragraph: (ctx, b) => `<p>${inline(b.runs)}</p>`,
+  paragraph: (ctx, b) => `<p>${inline(b.runs, ctx)}</p>`,
   list,
   table: (ctx, b) => table(ctx, { header: b.header, rows: b.rows, widths: b.widths, anchors: b.rowAnchors }),
   callout,
@@ -194,7 +221,7 @@ function cover(ctx) {
   parts.push(
     `<p class="project"${meta.org ? '' : ' style="margin-top:120pt"'}>${esc(meta.project)}</p>`,
     `<p class="title">${esc(meta.title)}</p>`,
-    `<table class="meta">${colgroup(2, [30, 70])}<tbody>${metaRows.map(([l, v]) => `<tr><th>${inline(l)}</th><td>${inline(v)}</td></tr>`).join('')}</tbody></table>`,
+    `<table class="meta">${colgroup(2, [30, 70])}<tbody>${metaRows.map(([l, v]) => `<tr><th>${inline(l, ctx)}</th><td>${inline(v, ctx)}</td></tr>`).join('')}</tbody></table>`,
   );
   if (meta.revisions?.length) {
     parts.push(
@@ -223,7 +250,7 @@ function cover(ctx) {
 /** Contents (levels 1 and 2, links to the heading anchors, no page numbers) and the list of figures. */
 function contents(ctx) {
   const link = (id, text) => (id ? `<a href="#${esc(id)}">${text}</a>` : text);
-  const items = ctx.headings.filter((h) => h.level <= 2).map((h) => `<li class="l${h.level}">${link(h.id, unlinked(h.runs))}</li>`);
+  const items = ctx.headings.filter((h) => h.level <= 2).map((h) => `<li class="l${h.level}">${link(h.id, unlinked(h.runs, ctx))}</li>`);
   let out = `<nav class="contents">\n<p class="toc-title">${esc(ctx.labels.contents)}</p>\n<ul>${items.join('\n')}</ul>\n</nav>`;
   if (ctx.figureList.length > 0) {
     const figs = ctx.figureList.map((f) => `<li>${link(f.id, f.caption)}</li>`);

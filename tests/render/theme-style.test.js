@@ -51,7 +51,7 @@ test('the default theme carries the style keys with the look of before', () => {
 });
 
 test('chartFill falls back to the accent', () => {
-  assert.equal(chartFill(base), '17C79A');
+  assert.equal(chartFill(base), '1F3864');
   assert.equal(chartFill(plain), '5A6672');
   assert.equal(chartFill({ color: { accent: 'F4F5F7' } }), 'F4F5F7');
 });
@@ -100,7 +100,7 @@ test('invalid style values are refused in one line that names the key', () => {
 
 test('DOCX, default theme: H1 rule of 1.5 pt, callout bar of 3 pt, grid tables, middle dot in the header', async () => {
   const { document, styles, header } = await docxParts(base);
-  assert.match(heading1Style(styles), /<w:bottom [^>]*w:sz="12"[^>]*w:color="17C79A"|<w:bottom [^>]*w:color="17C79A"[^>]*w:sz="12"/);
+  assert.match(heading1Style(styles), /<w:bottom [^>]*w:sz="12"[^>]*w:color="1F3864"|<w:bottom [^>]*w:color="1F3864"[^>]*w:sz="12"/);
   assert.match(lastTable(document), /<w:left [^>]*w:sz="24"/);
   assert.match(dataTableXml(document), /<w:insideV [^>]*w:val="single"/);
   assert.ok(header.includes('Fernhill Lending · Fernhill Lending, product definition'));
@@ -154,7 +154,7 @@ test('PLAN workbook: the Gantt bars use chartFill, the sheet titles use the sepa
     const ws = wb.getWorksheet('Gantt');
     return { title: ws.getCell('A1').value, fill: ws.conditionalFormattings[0].rules[0].style.fill.bgColor.argb };
   };
-  assert.deepEqual(await fills(base), { title: 'Fernhill · Gantt', fill: 'FF17C79A' });
+  assert.deepEqual(await fills(base), { title: 'Fernhill · Gantt', fill: 'FF1F3864' });
   assert.deepEqual(await fills({ ...base, color: { ...base.color, accent: 'F4F5F7' } }), { title: 'Fernhill · Gantt', fill: 'FFF4F5F7' });
   assert.deepEqual(await fills(plain), { title: 'Fernhill / Gantt', fill: 'FF5A6672' });
 });

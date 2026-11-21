@@ -20,6 +20,7 @@ approvals:
 
 <!--
 Writing guide. Delete every comment before the draft goes to the owner.
+Size: the dispatcher gives the word budget of STACK (code blocks excluded). Write for a busy client, say each idea once, use a table only for real tabular data, and cite other documents instead of restating them.
 This is an architecture decision, argued like one and settled by the owner (gate G2-stack).
 It comes after D1 (we know what to build) and before D2 (which describes it).
 Criteria come from the project, not from habit: each one cites its source and carries a weight.
