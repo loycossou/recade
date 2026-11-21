@@ -53,7 +53,7 @@ Families to cover: non-functional needs, constraints (hosting, regulation, budge
 
 ## 2. Candidates per layer
 
-<!-- Two or three genuinely different options per layer. At least one outside the reflex choices. -->
+<!-- The finalists of each layer: two or three genuinely different options, the ones that get a spike. At least one outside the reflex choices. The full ranked top 5 of a layer sits in a sub-section 2.n below, so the section numbers 3 to 12 never move. -->
 
 | Layer | Candidate | Why it is on the list |
 |---|---|---|
@@ -61,6 +61,18 @@ Families to cover: non-functional needs, constraints (hosting, regulation, budge
 | Example layer | Option two | Example reason |
 
 Biases declared: fashion, the comfort of the writer, the LLM habit of one stack for everything. What was done against each: example.
+
+### 2.1 Top 5 for Example layer
+
+<!-- One sub-section 2.n for each layer with a real choice, in the order of the layer loop (language, framework, database, data access, hosting, then the rest). Five rows, ranked, the recommended one first. Fewer than five only when fewer real options exist: say so under the table, with the reason. At least one option outside the reflex choices. A layer imposed by the owner or by a source has no sub-section. Why: two plain lines at most, tied to D1 and to the criteria of section 1, for THIS project. Spike: yes for the top 2 or 3 (they are the finalists above), "research only" for the others. The dated sources of every option are rows of section 3. When the owner has chosen the layers before it, re-rank this table against those choices: an option that no longer fits drops out, with the reason under the table, and the next one comes in. Delete this example. -->
+
+| Rank | Option and version | Why it is in this place for this project | Main drawback | Spike |
+|---|---|---|---|---|
+| 1 | Option one 1.2.3 | Example reason, tied to D1 and to a criterion | Example drawback | yes |
+| 2 | Option two 4.5.6 | Example reason | Example drawback | yes |
+| 3 | Option three 7.8.9 | Example reason | Example drawback | research only |
+| 4 | Option four 2.0.1 | Example reason | Example drawback | research only |
+| 5 | Option five 0.9.4 | Example reason | Example drawback | research only |
 
 ## 3. Research
 

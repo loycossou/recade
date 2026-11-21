@@ -492,7 +492,7 @@ test('stack-analyst has the stages of the owner stack choice: layers, layer, dec
   }
   assert.equal(text.includes('and opens one DEC for each layer that has a real choice'), false);
   // `recade decision new` refuses a fourth option: the owner's choice, the recommendation and at most one other finalist.
-  for (const part of ['at most three options', "the owner's option first", 'at most one other finalist', 'The finalists left out', 'option not taken']) assert.ok(text.includes(part), part);
+  for (const part of ['at most three options', "the owner's option first", 'at most one other option, the next best of the top 5 that still fits', 'The options left out', 'option not taken', 'the recommendation plus the next one or two of the top 5 that still fit', 'Never list the same option twice', 'refuses a duplicate label']) assert.ok(text.includes(part), part);
   assert.equal(text.includes('The options are the finalists that still fit; when'), false);
   assert.ok(text.indexOf('- `layers`:') < text.indexOf('- `draft`'));
 });
@@ -507,6 +507,23 @@ test('the stack-selection skill asks the owner layer by layer: announced first, 
     'owner choice', 'option not taken', 'Mode adopt']) {
     assert.ok(part.includes(phrase), phrase);
   }
+});
+
+test('the stack-analyst and the stack-selection skill rank a top 5 for each layer, spike only the top 2 or 3, and keep the DEC at 3 options', () => {
+  const agent = readFileSync(join(agentsDir, 'stack-analyst.md'), 'utf8');
+  const skill = readFileSync(join(repo, 'skills', 'stack-selection', 'SKILL.md'), 'utf8');
+  for (const part of ['a ranked top 5', 'sub-section 2.n', 'never a new top-level section', 'why it is in this place for THIS project', 'two plain lines at most', 'its main drawback',
+    'fewer than 5 only when fewer real options exist', 'at least one option outside the reflex choices', 'has no top 5', 'ranks 4 and 5 included', 'Ranks 4 and 5 are researched and never spiked',
+    're-rank the top 5 of this layer', 'the next best option comes in', 'do not research it again from scratch', '### 2.n Top 5 for <layer>', 'In adopt mode leave out every 2.n', 'has no `### 2.n` sub-section', '3 (the dated research of an option that was just promoted into the top 5)']) {
+    assert.ok(agent.includes(part), `agent: ${part}`);
+  }
+  for (const part of ['rank a top 5', '### 2.n Top 5 for <layer>', 'never move', 'two plain lines at most', 'main drawback', 'Write fewer than 5 only when fewer real options exist', 'outside the reflex choices',
+    'no top 5', 'the top 2 or 3', 'Ranks 4 and 5 are researched and never spiked', 'ranks 1 to 4', 'typing its name in `Other`', 'ranked again against the layers already chosen', 'does not research it again from scratch',
+    'A DEC holds 2 or 3 different options', 'the next one or two of the top 5 that still fit', 'the next best of the top 5', 'ranked top 5 (fewer only with the reason)']) {
+    assert.ok(skill.includes(part), `skill: ${part}`);
+  }
+  assert.equal(skill.includes('2 or 3 candidates'), false);
+  for (const text of [agent, skill]) assert.equal(text.includes('\u2014'), false);
 });
 
 test('architect and devops-lead name the code repositories: one for each deployable, listed in section 2.5 of D2, created by the dispatcher after G2', () => {

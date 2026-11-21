@@ -36,15 +36,15 @@ A criterion with no source is dropped or marked PROVISIONAL.
 
 ### 2. Candidates per layer
 
-List the layers the project needs (for example front end, back end, data, hosting, queue, auth). For each layer, 2 or 3 options that really differ, and at least one outside the reflex choices. Write why each one is on the list. A layer with one possible answer (imposed by the client, the law or the existing system) is stated with its source, and not dressed up as a choice. It gets no spike and no DEC, and its ADR row in section 8 says "imposed by <source>".
+List the layers the project needs (for example front end, back end, data, hosting, queue, auth). For each layer with a real choice, rank a top 5 and write it as a sub-section `### 2.n Top 5 for <layer>` of `STACK.md` (one for each layer, in the order of the layer loop, so the section numbers 3 to 12 never move; in adopt mode there is none). Each row of the top 5 has: the rank, the option with its current version, why it is in this place for THIS project (two plain lines at most, tied to D1 and to the criteria of section 1), its main drawback, and whether it gets a spike. The dated sources are the rows of section 3, as for any candidate. The options must really differ, and at least one is outside the reflex choices. Write fewer than 5 only when fewer real options exist, and say why under the table. The top 2 or 3 are the finalists of the layer, and the table of section 2 lists them. A layer with one possible answer (imposed by the client, the law or the existing system) is stated with its source, and not dressed up as a choice. It gets no top 5, no spike and no DEC, and its ADR row in section 8 says "imposed by <source>". The same holds for a layer the owner imposed.
 
 ### 3. Research, dated
 
-For every candidate: the current version, the support calendar, the licence, flaws of the last 12 months, and field reports at the scale of this project. Search the web and read the pages. Write the date you read each one. Nothing rests on the memory of the model alone: a version or a date without a source and an accessed date is not written.
+For every option of every top 5, the ranks 4 and 5 included: the current version, the support calendar, the licence, flaws of the last 12 months, and field reports at the scale of this project. Search the web and read the pages. Write the date you read each one. Nothing rests on the memory of the model alone: a version or a date without a source and an accessed date is not written.
 
 ### 4. Proof by spike
 
-Take the 2 or 3 finalists of a layer. The analyst writes one real task of this project, from D1, that touches the layers that matter (a form that writes to the data store, an import, a screen with a list and a filter), in `spikes/TASK-<layer>.md`. The task is chosen before any result exists, and its text is the same for every option, with the budget and the measures asked.
+Take the top 2 or 3 of a layer, the finalists. Ranks 4 and 5 are researched and never spiked: a spike costs too much for options that are unlikely to win. The analyst writes one real task of this project, from D1, that touches the layers that matter (a form that writes to the data store, an import, a screen with a list and a filter), in `spikes/TASK-<layer>.md`. The task is chosen before any result exists, and its text is the same for every option, with the budget and the measures asked.
 
 Each spike is run by a fresh `spike-runner` agent that knows nothing of the other options, so that no option gets help from the work done on another. The analyst never runs a spike, never fixes one and never helps one. The dispatcher runs the finalists of a layer one after the other, so that the build times are comparable.
 
@@ -62,7 +62,7 @@ When the matrix and your recommendation disagree, say so and say why.
 
 ### 6. Decision
 
-One multiple-choice question per layer that has a real choice, as a DEC (`recade decision new --doc 'STACK' ...`). The recommended option is first. The question says what the owner gets, what it costs, and what would change the recommendation. The owner answers through the dispatcher. Each answer becomes an `ADR-nn` in section 8 of `STACK.md`.
+One multiple-choice question per layer that has a real choice, as a DEC (`recade decision new --doc 'STACK' ...`). The recommended option is first. A DEC holds 2 or 3 different options: the one the owner chose, the recommendation, and the next best of the top 5 that still fits. When the owner chose the recommendation, the options are the recommendation plus the next one or two of the top 5 that still fit. Never the same option twice. The full top 5 stays in section 2 of `STACK.md`. The question says what the owner gets, what it costs, and what would change the recommendation. The owner answers through the dispatcher. Each answer becomes an `ADR-nn` in section 8 of `STACK.md`.
 
 After the owner's answers, write the sections 8 to 12 of `STACK.md`:
 
@@ -79,9 +79,10 @@ D2 section 12 mirrors the ADRs of section 8. The ids are defined once, in `STACK
 The owner is not an engineer. The questions come in a fixed order and in plain words. Mode adopt asks no layer question: the stack exists.
 
 - **Layers announced first.** The layers are announced before any analysis. List them: language, framework, database, data access, hosting, authentication, CI and test tools, plus any layer that D1 needs (payments, search, mobile, offline). The owner is asked once, in the chat, what is imposed or preferred for each. Each answer is written in section 1 of `STACK.md` as a constraint with source `owner`. A layer the owner imposed is not studied as a choice: it has no spike.
-- **Questions in dependency order.** Language, framework, database, data access, hosting, then the rest. Each answer is given to the analyst before the next question, so the later layers are re-ranked: a finalist that does not fit the layers already chosen is dropped, with the reason.
+- **Questions in dependency order.** Language, framework, database, data access, hosting, then the rest. Each answer is given to the analyst before the next question, so the later layers are re-ranked: the top 5 of a layer is ranked again against the layers already chosen, an option that no longer fits drops out with the reason, and the next one comes in.
+- **The top 5 is shown first.** Before the question, the owner reads the ranked top 5 of the layer in the chat: the rank, the option, why it is in this place, its main drawback, the recommended one first, and a plain word beside every term or ID. The question tool allows at most 4 options, so the options are ranks 1 to 4, and the question says that the 5th can be picked by typing its name in `Other`.
 - **One plain line for each option.** The owner reads one plain line for each option: cost, skills to hire, hosting and lock-in. No jargon without a plain word beside it.
-- **Other.** The owner may answer with an option that is not a finalist. The analyst then runs dated research on it, checks it against the layers already chosen, adds a spike when the layer had spikes (a fresh runner, the same task text as the finalists), and weighs its risks against the recommendation. The owner sees the gap in plain words and answers `Keep my choice` or `Take the recommendation`. When the owner keeps the choice, the ADR says "owner choice" and the recommendation is listed in section 10 as an option not taken.
+- **Other.** The owner may answer with an option that is not a finalist: the 5th of the top 5, or an option of their own. For an option of the top 5 (ranks 4 and 5 have no spike), the dated research is already in section 3, so the analyst does not research it again from scratch: it checks it against the layers already chosen, adds a spike when the layer had spikes, and weighs its risks against the recommendation. For an option that is not in the top 5, the analyst runs dated research on it, checks it against the layers already chosen, adds a spike when the layer had spikes (a fresh runner, the same task text as the finalists), and weighs its risks against the recommendation. The owner sees the gap in plain words and answers `Keep my choice` or `Take the recommendation`. When the owner keeps the choice, the ADR says "owner choice" and the recommendation is listed in section 10 as an option not taken.
 
 ## After the gate
 
@@ -92,7 +93,9 @@ When the stack needs a specialist (a framework or a platform with its own habits
 ## Checks before you report
 
 - Every criterion has a source and a weight, and the weights sum to 100.
-- Every layer has 2 or 3 candidates, one of them outside the reflex choices, or a stated reason why not.
+- Every layer with a real choice has a ranked top 5 (fewer only with the reason), with why and main drawback for each rank, and one option outside the reflex choices. A layer imposed by the owner or by a source has none.
+- Only the top 2 or 3 of a layer have a spike. Ranks 4 and 5 are researched and dated.
+- A DEC holds 2 or 3 different options, and the full top 5 stays in section 2.
 - Every version and date in the text has a source and an accessed date.
 - Every spike has its budget, its measures and its commands, reported by its runner, or says it was not run.
 - Section 7 holds every disagreement of the independent notes, in the contributors' words.

@@ -115,6 +115,7 @@ test('new validates its fields', async () => {
   assert.throws(() => newDecision(root, { ...FIELDS, options: [OPTIONS[0]] }), /two or three options/);
   assert.throws(() => newDecision(root, { ...FIELDS, options: [...OPTIONS, ...OPTIONS] }), /two or three options/);
   assert.throws(() => newDecision(root, { ...FIELDS, options: [OPTIONS[0], { ...OPTIONS[1], cost: '' }] }), /option B cost is required/);
+  assert.throws(() => newDecision(root, { ...FIELDS, options: [OPTIONS[0], { ...OPTIONS[1], label: ` ${OPTIONS[0].label.toUpperCase()} ` }] }), /same option twice/);
   assert.throws(() => newDecision(root, { ...FIELDS, due: 'soon' }), /YYYY-MM-DD/);
   for (const key of ['why', 'known', 'unknown', 'changeMind']) {
     assert.throws(() => newDecision(root, { ...FIELDS, [key]: '' }), new RegExp(`${key} is required`));

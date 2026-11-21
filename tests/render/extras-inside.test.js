@@ -65,6 +65,23 @@ test('a decisions, reviews or design folder that is a link out of the project is
   assert.equal(result.warnings.length, 4);
 });
 
+test('a references.md that is a link out of the project, or sits in a design folder that is one, is read as missing', async (t) => {
+  const { root, outside } = setup(t);
+  const text = '---\ndoc_id: REFERENCES\ntitle: T\nproject: P\nversion: "1.0"\ndate: 2026-11-18\nstatus: Register\n---\n\n## Picks\n\nNone.\n';
+  writeFileSync(join(outside, 'references.md'), text);
+  mkdirSync(join(root, 'design'), { recursive: true });
+  symlinkSync(join(outside, 'references.md'), join(root, 'design', 'references.md'));
+  let result = await renderExtras(root, ['design']);
+  assert.deepEqual(result.outputs, []);
+  rmSync(join(root, 'design'), { recursive: true });
+  mkdirSync(join(outside, 'design'), { recursive: true });
+  writeFileSync(join(outside, 'design', 'references.md'), text);
+  symlinkSync(join(outside, 'design'), join(root, 'design'));
+  result = await renderExtras(root, ['design']);
+  assert.deepEqual(result.outputs, []);
+  assert.equal(existsSync(join(root, 'docs', 'deliverables')), false);
+});
+
 test('a whole docs folder that is a link out of the project is read as missing', async (t) => {
   const { root, outside } = setup(t);
   rmSync(join(root, 'docs'), { recursive: true });

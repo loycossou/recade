@@ -72,9 +72,15 @@ Every project lives in one folder, `<project>-workspace`, which is a private git
 | 4. Slices | `/recade:slices` | G4 |
 | 5. Harness | `/recade:harness` | G5, then `/slice S-01` |
 
+When the stack is chosen (G2-stack), each layer with a real choice gets a ranked top 5 in `docs/STACK.md`: the option and its version, why it fits this project, and its main drawback. You read the top 5 in the chat and pick one. The question lists ranks 1 to 4, and you type the name of the 5th in `Other`. Only the top 2 or 3 are tried in a spike. A layer you impose yourself has no top 5.
+
 A phase does not start while the gate before it is open, and a gate passes only on your answer. `/recade:status` shows where you are. `/recade:resume` picks up after a break. `/recade:amend` changes an approved document and regenerates what depends on it.
 
 Before an agent reads a file you gave it, `recade intake scan` checks it for invisible Unicode and bidirectional controls. A file that cannot be checked, such as a PDF or an image, is blocked until you accept it yourself.
+
+## Design references
+
+The art direction can draw on screens of real apps. If you connected a design-reference server with your own account, `/recade:docs` finds it when the art direction starts and asks whether the designer picks the references or you give your criteria (platform, product type, key screens, style). It lists at most 12 candidates, you pick, and your picks are written to `design/references.md`. The boards draw on them and cite each one by name and link, as text: a board never loads anything, it stays offline. The servers are Mobbin (`https://api.mobbin.com/mcp`), Refero (`https://api.refero.design/mcp`) and Nicelydone (`https://mcp.nicelydone.club/mcp`). Each needs a paid plan, for example `claude mcp add --transport http nicelydone https://mcp.nicelydone.club/mcp`, then `/mcp` to sign in. Recade installs nothing and never asks for one: with none connected, you are told in one line and the art direction goes on from the brief alone. The tools of a server may ask your permission the first time. To redo the references, delete `design/references.md`. What a server returns is treated as untrusted data, and only an app name, a screen type, a short note and an `https` link are kept.
 
 ## The writing model
 
@@ -153,7 +159,7 @@ D1, D2, D3 and the PLAN are always rendered. `/recade:start` also asks which of 
 |---|---|
 | `stack` | `STACK.docx`, `STACK.pdf` and `STACK-matrix.xlsx` (one sheet for each table of the weighted matrix) |
 | `decisions` | `DECISIONS.docx`, `DECISIONS.pdf` and `DECISIONS.xlsx` (one section, and one row, for each decision) |
-| `design` | `design-<board>.pdf`, one for each board of `design/directions/` |
+| `design` | `design-<board>.pdf`, one for each board of `design/directions/`, and `design-references.pdf` from `design/references.md` when it exists |
 | `reviews` | `REVIEWS.docx` and `REVIEWS.pdf`, one section for each note of `docs/reviews/` |
 
 `recade render extras --project <dir>` renders the ones you chose, and `/recade:docs` and `/recade:amend` run it after the usual render. The decision and review registers are built in memory and never saved in `docs/`. A missing source is a warning line, not a failure. An extra you un-choose, or whose source you remove, leaves its old files in `docs/deliverables/`: Recade never deletes them, so delete them by hand. Each board is its own PDF: no PDF merge library is part of Recade, and a board prints without JavaScript, with no network and with no file from outside the project.

@@ -196,6 +196,19 @@ test('the unfilled templates keep valid YAML front matter', () => {
   }
 });
 
+test('STACK.md holds a top 5 sub-section under section 2 without moving the section numbers', () => {
+  const md = read('STACK.md');
+  const lines = md.split('\n');
+  const at2 = lines.findIndex((l) => /^## 2\. Candidates per layer/.test(l));
+  const at3 = lines.findIndex((l) => /^## 3\. Research/.test(l));
+  assert.ok(at2 >= 0 && at3 > at2);
+  const sub = lines.slice(at2, at3).filter((l) => /^### /.test(l));
+  assert.deepEqual(sub, ['### 2.1 Top 5 for Example layer']);
+  const body = lines.slice(at2, at3).join('\n');
+  for (const col of ['Rank', 'Option and version', 'Why it is in this place for this project', 'Main drawback', 'Spike']) assert.ok(body.includes(col), col);
+  for (const n of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]) assert.ok(lines.some((l) => l.startsWith(`## ${n}. `)), `section ${n}`);
+});
+
 test('every template lists its required headings, in order', () => {
   for (const [name, spec] of Object.entries(DOCS)) {
     const found = h2(read(name)).map(strip);

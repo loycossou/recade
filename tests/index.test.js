@@ -359,3 +359,12 @@ test('recade index check takes --project <dir>', async () => {
   assert.equal(await run(['index', 'check', '--project', root], elsewhere.io), 0, elsewhere.stdout() + elsewhere.stderr());
   rmSync(root, { recursive: true, force: true });
 });
+
+test('design/references.md is not scanned: an app name that looks like an ID is neither a citation nor a definition', () => {
+  const root = mkdtempSync(join(tmpdir(), 'recade-index-'));
+  mkdirSync(join(root, 'design'));
+  writeFileSync(join(root, 'design', 'references.md'), '---\ndoc_id: REFERENCES\n---\n\n## Picks\n\n| Source | App | Screen | Why | Link |\n|---|---|---|---|---|\n| mobbin | M1 Finance | Dashboard | Like Q-12 and FR-PAY-99 | https://example.com/a |\n');
+  assert.deepEqual(checkRoot(root).findings, []);
+  assert.deepEqual(buildIndex(root).definitions, []);
+  rmSync(root, { recursive: true, force: true });
+});

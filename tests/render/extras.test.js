@@ -348,6 +348,62 @@ test('design: one PDF for each board, named after it, and nothing for the README
   assert.match(out, /design-ledger-paper\.pdf/);
 });
 
+const REFERENCES = `---
+doc_id: REFERENCES
+title: "Fernhill Lending, design references"
+project: "Fernhill Lending"
+version: "1.0"
+date: "2026-11-18"
+status: Register
+language: "en"
+---
+
+## Mode and criteria
+
+Mode: I give my criteria. Platform: web. Product type: finance.
+
+## Picks
+
+| Source | App | Screen | Why | Link |
+|---|---|---|---|---|
+| mobbin | Ledgerly | Dashboard | Dense table with a quiet header | https://example.com/ledgerly/dashboard |
+`;
+
+test('design: references.md is rendered to design-references.pdf next to the boards, and its absence is not a warning', { skip }, async (t) => {
+  const root = project(t);
+  mkdirSync(join(root, 'design'), { recursive: true });
+  writeFileSync(join(root, 'design', 'references.md'), REFERENCES);
+  const { code, out, err } = await cli(root, ['design'], {}, t);
+  assert.equal(code, 0, err);
+  assert.deepEqual(listDeliverables(root), ['design-ledger-paper.pdf', 'design-night-shift.pdf', 'design-references.pdf']);
+  assert.ok(isPdf(join(deliverables(root), 'design-references.pdf')));
+  assert.match(out, /design-references\.pdf/);
+  assert.equal(existsSync(join(root, 'docs', 'deliverables', 'design-references.docx')), false);
+  const plain = await cli(project(t), ['design'], {}, t);
+  assert.equal(plain.code, 0);
+  assert.equal(plain.err, '');
+});
+
+test('design: references.md alone renders, with the missing-boards warning', { skip }, async (t) => {
+  const root = project(t, { boards: false });
+  mkdirSync(join(root, 'design'), { recursive: true });
+  writeFileSync(join(root, 'design', 'references.md'), REFERENCES);
+  const { code, err } = await cli(root, ['design'], {}, t);
+  assert.equal(code, 0);
+  assert.match(err, /^Warning: no design\/directions\/\*\.html, nothing to render for design\.\n$/);
+  assert.deepEqual(listDeliverables(root), ['design-references.pdf']);
+});
+
+test('design: a references.md that breaks the style rules is refused like any source, and nothing is written', async (t) => {
+  const root = project(t);
+  mkdirSync(join(root, 'design'), { recursive: true });
+  writeFileSync(join(root, 'design', 'references.md'), REFERENCES.replace('quiet header', `quiet ${EM} header`));
+  const { code, err } = await cli(root, ['design'], {}, t);
+  assert.equal(code, 1);
+  assert.match(err, /Not rendered: 1 check failed/);
+  assert.deepEqual(listDeliverables(root), []);
+});
+
 test('design: no board is one warning, exit 0 and no file; a linked board outside the folder is not printed', async (t) => {
   const root = project(t, { boards: false });
   mkdirSync(join(root, 'design', 'directions'), { recursive: true });
@@ -466,4 +522,13 @@ test('recade help lists render extras', async () => {
   const code = await run(['help'], { stdout: { write: (s) => out.push(s) }, stderr: { write() {} }, cwd: tmpdir(), env: process.env });
   assert.equal(code, 0);
   assert.match(out.join(''), /^recade render\s+.*recade render extras --project <dir>/m);
+});
+
+test('design: an app name that looks like an ID in references.md does not block the render', { skip }, async (t) => {
+  const root = project(t);
+  mkdirSync(join(root, 'design'), { recursive: true });
+  writeFileSync(join(root, 'design', 'references.md'), REFERENCES.replace('Ledgerly', 'M1 Finance').replace('Dense table', 'Like Q-12, a dense table'));
+  const { code, err } = await cli(root, ['design'], {}, t);
+  assert.equal(code, 0, err);
+  assert.ok(listDeliverables(root).includes('design-references.pdf'));
 });

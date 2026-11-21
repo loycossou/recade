@@ -4,11 +4,23 @@ This file is curated by hand for each release. At tag time, `recade release-note
 
 ## Unreleased
 
+### A ranked top 5 for each layer
+
+- For each layer of the stack with a real choice, `docs/STACK.md` now holds a ranked top 5: the option and its version, why it fits your project (two plain lines at most), its main drawback and its dated sources. A layer you impose has none.
+- In `/recade:docs`, you read the top 5 of the layer in the chat before the question. The question lists ranks 1 to 4, and you type the name of the 5th in `Other`. After each answer the next layers are ranked again, and an option that no longer fits drops out with the reason.
+- Only the top 2 or 3 are tried in a spike. Ranks 4 and 5 are researched, not spiked. A decision still keeps at most three options.
+
 ### Extra deliverables
 
 - D1, D2, D3 and the PLAN are rendered as before. You can now add four extras for your stakeholders: `stack` (`STACK.docx`, `STACK.pdf` and `STACK-matrix.xlsx`, one sheet for each table of the weighted matrix), `decisions` (`DECISIONS.docx`, `DECISIONS.pdf` and `DECISIONS.xlsx`, one section and one row for each DEC), `design` (one `design-<board>.pdf` for each board of `design/directions/`) and `reviews` (`REVIEWS.docx` and `REVIEWS.pdf`, one section for each note).
 - `/recade:start` asks once which extras you want. The choice is the user config key `deliverables.extras`, empty by default: `recade config set deliverables.extras stack,decisions` changes it, `none` clears it, and a name that is not one of the four is refused. `/recade:setup` and `/recade:help` show it.
 - `recade render extras --project <dir>` renders the chosen extras into `docs/deliverables/`. `/recade:docs` and `/recade:amend` run it after the usual render and list the files. A missing source is a warning line, nothing is written unless every output succeeded, and the registers are built in memory, never saved in `docs/`.
+
+### Design references
+
+- The art direction can draw on screens of real apps. `/recade:docs` (and `/design direction` in a harness) looks for a design-reference server you connected with your own account: Mobbin, Refero or Nicelydone. You choose `The designer picks` or `I give my criteria`, pick from at most 12 candidates, and your picks are written to `design/references.md`. The boards draw on them and cite each by name and link as text, never loaded.
+- Recade installs nothing and never requires a server. With none connected it says so in one line and goes on as before. What a server returns is untrusted data.
+- The `design` extra also renders `design/references.md` to `design-references.pdf` when it exists.
 
 ### Plain words in the chat
 

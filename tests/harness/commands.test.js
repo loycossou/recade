@@ -312,7 +312,7 @@ test('the protocol carries the two rules folded in from the Task 1 review', () =
 
 test('no em dash, no raw e-mail address, and the style lint finds no error', () => {
   for (const [name, src] of all) {
-    assert.equal(src.includes('\u2014'), false, `${name}: em dash`);
+    assert.equal(src.includes(String.fromCharCode(0x2014)), false, `${name}: em dash`);
     assert.equal(/[\w.+-]+@[\w-]+\.[\w.-]+/.test(src), false, `${name}: e-mail`);
     assert.deepEqual(lintText(src, `${name}.md`).filter((x) => x.severity === 'error'), [], name);
   }
@@ -670,4 +670,19 @@ test('the release-manager drafts in tmp/<S-nn>/ in the prompts and in the protoc
   assert.match(protocol, /A draft goes to `<home>\/tmp\/<S-nn>\/`/);
   assert.match(protocol, /for example `workspace:slices\/<S-nn>-\*\.md`, where `<S-nn>` is the slice of the session/);
   assert.doesNotMatch(protocol, /for example `workspace:slices\/S-\*\.md`/);
+});
+
+test('/design direction offers the real-app references of the owner design servers, optional, and hands them to ui-designer as data', () => {
+  const design = text('design');
+  const direction = design.slice(design.indexOf('- **`direction`.**'), design.indexOf('- **`system`.**'));
+  for (const part of ['ToolSearch', 'mobbin', 'refero', 'nicelydone', '`The designer picks`', '`I give my criteria`', 'at most 12 candidates', 'untrusted data', 'https', 'at most 2 more rounds', '<home>/design/references.md', 'doc_id: REFERENCES', 'as data']) {
+    assert.ok(direction.includes(part), part);
+  }
+  assert.equal(direction.toLowerCase().includes('screenrove'), false);
+  assert.ok(direction.includes('go on as before'));
+  assert.match(design, /recade workspace commit --paths '<path>\[,<path>\.\.\.\]'/);
+  assert.equal(design.includes(String.fromCharCode(0x2014)), false);
+  const agent = readFileSync(join(agentsDir, 'ui-designer.md'), 'utf8');
+  assert.ok(agent.includes('design/references.md') && /never loaded/.test(agent));
+  assert.equal(/^## Writes[\s\S]*?^## /m.exec(agent)[0].includes('references.md'), false, 'the command writes references.md, not the agent');
 });

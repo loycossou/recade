@@ -291,7 +291,8 @@ export async function printBoard(browser, file, root) {
  * failure. One browser serves the figures and every PDF, started only when something needs it.
  * - `stack`: STACK.docx, STACK.pdf and STACK-matrix.xlsx (one sheet for each table of section 5).
  * - `decisions`: DECISIONS.docx, DECISIONS.pdf and DECISIONS.xlsx, from a register built in memory.
- * - `design`: one `design-<board>.pdf` for each HTML board of `design/directions/`.
+ * - `design`: one `design-<board>.pdf` for each HTML board of `design/directions/`, and `design-references.pdf` from
+ *   `design/references.md` when it exists.
  * - `reviews`: REVIEWS.docx and REVIEWS.pdf, from the notes of `docs/reviews/`, built in memory.
  * @param {string} root project folder
  * @param {string[]} extras names among `stack`, `decisions`, `design`, `reviews`
@@ -379,6 +380,18 @@ export async function renderExtras(root, extras, options = {}) {
         if (notes.length === 0) { if (skipped.length === 0) missing('docs/reviews/*.md', name); continue; }
         generatedJob('REVIEWS', reviewRegisterMarkdown(notes, meta()), join(root, 'docs', 'reviews'));
       } else {
+        // The references the owner picked from the design servers are optional: no file is no warning.
+        const references = join(root, 'design', 'references.md');
+        if (isFile(references, root)) {
+          const text = readFileSync(references, 'utf8');
+          let doc;
+          try {
+            doc = parseDocument(text, 'design/references.md', { lots });
+          } catch (err) {
+            throw fail(new RenderError(oneLine(err)));
+          }
+          real.push({ file: references, root, rel: 'design/references.md', doc, wanted: ['pdf'], base: join(outDir, 'design-references'), text });
+        }
         const dir = join(root, 'design', 'directions');
         const boards = filesOf(dir, /\.html$/i, root);
         if (boards.length === 0) { missing('design/directions/*.html', name); continue; }

@@ -32,6 +32,9 @@ function checkOptions(options) {
   if (!Array.isArray(options) || options.length < 2 || options.length > LETTERS.length) {
     throw new Error('A decision has two or three options.');
   }
+  const labels = options.map((o) => String(o?.label ?? '').trim().toLowerCase());
+  const dup = labels.find((l, i) => l && labels.indexOf(l) !== i);
+  if (dup) throw new Error(`A decision cannot list the same option twice: "${dup}".`);
   return options.map((o, i) => ({
     label: required(o?.label, `option ${LETTERS[i]} label`),
     cost: required(o?.cost, `option ${LETTERS[i]} cost`),
