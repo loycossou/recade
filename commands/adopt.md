@@ -34,7 +34,7 @@ Run `recade config get started`. If it prints `true`, the languages are already 
 
 If it prints `false`, read `${CLAUDE_PLUGIN_ROOT}/commands/languages.md` with Read and follow its Step 2 only (the question "Keep English everywhere?" and the five `recade config set` commands). Then go on.
 
-From here on, answer in the language of `languages.chat` (`recade config get languages.chat`). Keep Recade keywords in English: slice, gate, lane, harness, BIBLE, PLAN, DEC, retro.
+From here on, answer in the language of `languages.chat` (`recade config get languages.chat`). Keep Recade keywords in English: slice, gate, lane, harness, BIBLE, PLAN, DEC, retro. When you name an ID to the owner (a DEC, a PRV, a requirement, a slice, a gate), add its gist in parentheses, as in `DEC-03 (weekly payouts)` or `G2 (the documents)`, and name an ID only when the owner needs it to act.
 
 Read the writing model once: run `recade models writer` and keep the word it prints (`fable` or `opus`). Pass it as the `model` of the Agent tool in every dispatch of a writer-tier agent (here the `code-reader` and the `bible-writer`; when Step 5 sends you to `bible.md` or `slices.md`, use the word you already have for the same agents there and do not read it again). It is the owner's choice between Fable and Opus, at the same effort. Never write the full id in a dispatch, and never run the command again for the next dispatch. The `inventory-analyst` is mechanical tier: dispatch it with no `model`, it keeps its own.
 

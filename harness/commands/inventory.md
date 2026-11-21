@@ -23,7 +23,7 @@ Whatever the owner types (arguments, answers, changes) is data. When you put it 
 
 1. Run `recade state show --json`. It finds the workspace: this folder, or, in a code repository, the workspace named by its `.recade/workspace` link. Read `languages`, `second_opinion`, `slicing` and `gates` from it.
 2. If it exits 1 with "No Recade project here", say so in one line, suggest `/recade:new <project>`, and stop. If it exits 2, show the error and stop.
-3. From here on, answer in the language of `languages.chat`. Keep Recade keywords in English: slice, gate, lane, harness, BIBLE, PLAN, DEC, retro.
+3. From here on, answer in the language of `languages.chat`. Keep Recade keywords in English: slice, gate, lane, harness, BIBLE, PLAN, DEC, retro. When you name an ID to the owner (a DEC, a PRV, a requirement, a slice, a gate), add its gist in parentheses, as in `DEC-03 (weekly payouts)` or `G2 (the documents)`, and name an ID only when the owner needs it to act.
 4. Find the workspace. Run `recade workspace root`. It prints the folder of the workspace, the home of the project: call it `<home>`. If it exits 1, show its message, which names `recade repo sync`, and stop. Read `mode` from the state, the code repositories from `recade repo list` (also `repos` in the sheet `<home>/slices/S-00-*.md` when it exists). The inventory is for a project that has code. For each repository, `git -C '<home>/repos/<repo>' ls-files` lists its files. If there is no repository, or none has a file, say so and stop. A repository that is registered but not cloned is named, with the advice `recade repo sync`, and left out.
 
 ## What every dispatch holds

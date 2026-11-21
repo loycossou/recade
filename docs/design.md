@@ -26,7 +26,7 @@ Every project lives in one folder, the **workspace**, which is a private git rep
 ## 2. Principles
 
 1. **One source for each fact.** Markdown is the source. The `.docx`, `.pdf`, `.xlsx` and `INDEX.md` files are generated and marked "do not edit". Progress lives in `STATUS.md` and on the board, never copied into the BIBLE or `CLAUDE.md`.
-2. **Cite an ID with what it says, never a line number.** For example `FR-PAY-03 (refund only within 24 h)`. The ID keeps the citation stable. The gist makes it readable. `recade index --check` refuses an unknown ID and flags a gist that no longer matches the title.
+2. **Cite an ID with what it says, never a line number.** For example `FR-PAY-03 (refund only within 24 h)`. The ID keeps the citation stable. The gist makes it readable. `recade index --check` refuses an unknown ID and flags a gist that no longer matches the title. The same holds in the chat: a command that names an ID to the owner adds its gist, and names as few IDs as it can.
 3. **Explicit human gates.** Each phase ends at a gate. Decisions are asked as multiple-choice questions, with the stakes, the options, a recommendation and a default.
 4. **A gate that was not run is not a gate.** Every "green" comes with the raw output and a stamp tied to the exact state of the tree.
 5. **Ceremony in proportion to risk.** Three lanes: `sensitive`, `standard`, `no-code`.

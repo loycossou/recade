@@ -24,7 +24,7 @@ Never merge, never enable auto-merge, never close a pull request and never push 
 ## Step 1. The project
 
 1. Run `recade state show --json`. If it exits 1 with "No Recade project here", say so in one line, suggest `/recade:new <project>`, and stop. If it exits 2, show the error and stop. Read `languages` and `hotspots`. The required gates are not in the state: each code repository has its own, in its `.claude/recade.yaml`, and Step 4 reads them in the folder of the rebase.
-2. From here on, answer in the language of `languages.chat`. Keep Recade keywords in English: slice, gate, lane, harness, hotspot, worktree, BIBLE, PLAN, DEC.
+2. From here on, answer in the language of `languages.chat`. Keep Recade keywords in English: slice, gate, lane, harness, hotspot, worktree, BIBLE, PLAN, DEC. When you name an ID to the owner (a DEC, a PRV, a requirement, a slice, a gate), add its gist in parentheses, as in `DEC-03 (weekly payouts)` or `G2 (the documents)`, and name an ID only when the owner needs it to act.
 3. Find the workspace. Run `recade workspace root`. It prints the folder of the workspace, the home of the project: call it `<home>`. If it exits 1, show its message, which names `recade repo sync`, and stop. Run `git rev-parse --show-toplevel`. If it does not print `<home>`, say that /merge-order runs from the workspace (`<home>`), and stop.
 4. Read the code repositories with `recade repo list --json`: each entry has a `name` and a `remote`. For each one, run `git -C '<home>/repos/<name>' fetch origin`. If one fails, show the error and stop.
 

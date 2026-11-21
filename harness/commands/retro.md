@@ -25,7 +25,7 @@ Never merge, never push to `main`, never close a pull request. This command only
 
 1. Check the first word of the arguments. It must match `INC-` followed by digits. If it does not, say "Usage: /retro INC-n. Run /status to see the increments." and stop. Never put a value that did not match into a command. Call it `<INC-n>` from now on.
 2. Run `recade state show --json`. If it exits 1 with "No Recade project here", say so in one line, suggest `/recade:new <project>`, and stop. If it exits 2, show the error and stop. Read `languages`.
-3. From here on, answer in the language of `languages.chat`, and write the retro in `languages.work`. Keep Recade keywords in English: slice, gate, lane, harness, DORA, retro, increment.
+3. From here on, answer in the language of `languages.chat`, and write the retro in `languages.work`. Keep Recade keywords in English: slice, gate, lane, harness, DORA, retro, increment. When you name an ID to the owner (a DEC, a PRV, a requirement, a slice, a gate), add its gist in parentheses, as in `DEC-03 (weekly payouts)` or `G2 (the documents)`, and name an ID only when the owner needs it to act.
 4. Find the workspace. Run `recade workspace root`. It prints the folder of the workspace, the home of the project: call it `<home>`. If it exits 1, show its message, which names `recade repo sync`, and stop. Run `git rev-parse --show-toplevel`. If it does not print `<home>`, say that /retro runs from the workspace (`<home>`), and stop.
 5. Run `git fetch origin`. If it fails, say so and go on with the local history.
 

@@ -13,7 +13,7 @@ Run `node "${CLAUDE_PLUGIN_ROOT}/bin/recade.js" version`. If it prints a version
 
 ## Step 1. Read the state
 
-From here on, answer in the language of `languages.chat` (`recade config get languages.chat`). If it is not set, use English. Keep Recade keywords in English: slice, gate, lane, harness, BIBLE, PLAN, DEC, retro.
+From here on, answer in the language of `languages.chat` (`recade config get languages.chat`). If it is not set, use English. Keep Recade keywords in English: slice, gate, lane, harness, BIBLE, PLAN, DEC, retro. When you name an ID to the owner (a DEC, a PRV, a requirement, a slice, a gate), add its gist in parentheses, as in `DEC-03 (weekly payouts)` or `G2 (the documents)`, and name an ID only when the owner needs it to act.
 
 Run `recade state show --json` in the current folder. It looks for `recade/state.yaml` in this folder and in the folders above it, and, in a code repository, through its link to its workspace.
 

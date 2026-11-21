@@ -4,6 +4,10 @@ This file is curated by hand for each release. At tag time, `recade release-note
 
 ## Unreleased
 
+### Plain words in the chat
+
+- When a command names an ID to you (a DEC, a provisional value, a requirement, a slice, a gate), it adds what that ID says in parentheses, as in `DEC-03 (weekly payouts)`, and it names an ID only when you need it to act.
+
 ### The writing model
 
 - You choose the model of the agents that write and review your documents: Fable (the default) or the latest Opus, at the same high effort. `/recade:start` asks it once, `recade config set models.writer opus` changes it, `/recade:setup` and `/recade:help` show it.
