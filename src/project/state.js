@@ -52,7 +52,26 @@ export const DECISIONS = Object.freeze(['ask', 'trust']);
 export const DOCS_STEPS = Object.freeze(['d1', 'direction', 'stack', 'd2', 'd3', 'plan', 'gate', 'done']);
 /** How long the framing is. `full` is the default; `short` halves the budgets and trims the framing (docs/design.md, section 6.7). */
 export const TRACKS = Object.freeze(['full', 'short']);
-export const SETTINGS = Object.freeze(['slicing', 'second_opinion', 'hotspots', 'lots', 'docs_step', 'budgets', 'decisions', 'track']);
+/**
+ * Where the code lives and is reviewed. `github`: private repositories, a board, issues and pull requests. `local`: git on
+ * this machine only, the board is `slices/STATUS.md` and a slice ends with a local review request (docs/design.md, section
+ * 6.16). A state without the key is `github`, so an older project does not change.
+ */
+export const FORGES = Object.freeze(['github', 'local']);
+/**
+ * The owner's answer about the spikes of the stack step: `run` or `none` (decide from the research). `/recade:docs`
+ * records it when the owner answers. A state without the key has no answer yet, so an older project does not change.
+ */
+export const SPIKES = Object.freeze(['run', 'none']);
+export const SETTINGS = Object.freeze(['slicing', 'second_opinion', 'hotspots', 'lots', 'docs_step', 'budgets', 'decisions', 'track', 'forge', 'spikes']);
+
+/**
+ * The forge of `state`: `local` when its `forge` key says so, `github` otherwise (a missing or unknown key). The key is
+ * written only by `recade state set forge`, so the state file of an older project stays as it was.
+ * @param {object} state
+ * @returns {'github'|'local'}
+ */
+export const forgeOf = (state) => (state?.forge === 'local' ? 'local' : 'github');
 
 /**
  * The decisions mode of `state`: its `decisions` key, or `ask` when the key is missing or unknown. The key is written
@@ -213,8 +232,8 @@ export function resetFrom(state, gate) {
 export function setSetting(state, key, value) {
   if (!SETTINGS.includes(key)) throw new Error(`Cannot set ${key}. Use ${SETTINGS.join(', ')}.`);
   const next = fill(state);
-  if (key === 'slicing' || key === 'second_opinion' || key === 'decisions' || key === 'track') {
-    const allowed = { slicing: SLICING, second_opinion: SECOND_OPINION, decisions: DECISIONS, track: TRACKS }[key];
+  if (key === 'slicing' || key === 'second_opinion' || key === 'decisions' || key === 'track' || key === 'forge' || key === 'spikes') {
+    const allowed = { slicing: SLICING, second_opinion: SECOND_OPINION, decisions: DECISIONS, track: TRACKS, forge: FORGES, spikes: SPIKES }[key];
     if (!allowed.includes(value)) throw new Error(`Invalid ${key}: ${value}. Use ${allowed.join(', ')}.`);
     next[key] = value;
     return next;

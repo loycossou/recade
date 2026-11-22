@@ -1,5 +1,9 @@
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { loadState } from '../state.js';
+import { forgeOf } from '../project/state.js';
+import { listSliceBranches } from './conflicts.js';
+import { findMerge, localMerges, mergedBranches, reviewPath, revParse } from './localforge.js';
 import { checkSlices, globsOverlap, sliceRepoOrder } from '../project/slices.js';
 import { parseTouch, registryNames } from '../project/touches.js';
 import { defaultExec } from './stamps.js';
@@ -47,6 +51,42 @@ function listPulls(repo, base, exec) {
       files: new Set(files), lines: Number.isFinite(lines) ? lines : 0, slice: sliceOf(p.headRefName),
     };
   });
+}
+
+/**
+ * The open pull requests of the local forge (docs/design.md, section 6.8): each local slice branch that has a review
+ * request in the workspace (`slices/reviews/<S-nn>.md` of `root`) and is not merged into `base` yet. Same shape as
+ * `listPulls`, with `number` a position in the sorted list and `local: true`. Files and lines come from
+ * `git diff <base>...<branch>`. Only git runs.
+ */
+function listLocalPulls(root, repo, base, exec) {
+  const merges = localMerges(exec, repo, base);
+  const out = [];
+  for (const branch of listSliceBranches(repo, exec)) {
+    const slice = sliceOf(branch);
+    const tip = revParse(exec, repo, `refs/heads/${branch}`);
+    if (slice === null || tip === null || !BRANCH.test(branch) || findMerge(merges, { tip }) !== null) continue;
+    if (!existsSync(join(root, reviewPath(slice)))) continue;
+    const names = exec(['git', '-c', 'core.quotepath=off', 'diff', '--name-only', `${base}...${branch}`, '--'], { cwd: repo });
+    const stat = exec(['git', 'diff', '--numstat', `${base}...${branch}`, '--'], { cwd: repo });
+    if (names.code !== 0 || stat.code !== 0) throw new Error(`git diff ${base}...${branch} failed: ${firstLine(names.stderr || stat.stderr)}`);
+    const lines = stat.stdout.split('\n').map((l) => l.split('\t')).reduce((n, [a, d]) => n + (Number(a) || 0) + (Number(d) || 0), 0);
+    out.push({ number: out.length + 1, title: slice, branch, draft: false, files: new Set(names.stdout.split('\n').filter((f) => f !== '')), lines, slice, local: true });
+  }
+  return out;
+}
+
+/**
+ * The slices whose branch is merged into `base` on the local forge, by the one rule of the board and the retro
+ * (`mergedBranches`): a merge commit has the tip of the branch as a parent, or the `merged:` record of its sheet names one.
+ * `rows` are the sheets, `name` the repository (absent for a project with no registry).
+ */
+function mergedLocalSlices(repo, base, exec, rows = [], name = undefined) {
+  const entries = [
+    ...rows.map((r) => ({ branch: r.branch, recorded: (name === undefined ? Object.values(r.merged ?? {})[0] : r.merged?.[name]) ?? null })),
+    ...listSliceBranches(repo, exec).map((branch) => ({ branch })),
+  ];
+  return new Set(mergedBranches(exec, repo, base, entries).map((m) => sliceOf(m.branch)).filter((id) => id !== null));
 }
 
 /** The hotspots of the project. With `name`, only the ones of that repository, as globs with no prefix. */
@@ -99,14 +139,20 @@ const sample = (names, max = 3) => (names.length <= max ? names.join(', ') : `${
  */
 export function mergeOrder(repo, { exec = defaultExec, base } = {}) {
   if (base !== undefined && !BRANCH.test(base)) throw new Error(`Invalid base branch: ${JSON.stringify(base)}.`);
-  const registry = registryNames(loadState(repo) ?? {});
-  if (registry.length === 0) return orderPulls(repo, repo, { exec, base: base ?? 'main' }).map(({ slice, ...placed }) => placed);
-  return orderAcrossRepos(repo, registry, { exec, base });
+  const state = loadState(repo) ?? {};
+  // The local forge reads the slice branches and their review requests from git: no gh call (docs/design.md, section 6.8).
+  const local = forgeOf(state) === 'local';
+  const registry = registryNames(state);
+  if (registry.length === 0) return orderPulls(repo, repo, { exec, base: base ?? 'main', local }).map(({ slice, order, ...placed }) => placed);
+  return orderAcrossRepos(repo, registry, { exec, base, local });
 }
 
 /** Open pull requests of one folder in order: `dir` is where gh runs, `root` the project folder that holds the sheets. */
-function orderPulls(root, dir, { exec, base, name, registry = [] }) {
-  const pulls = listPulls(dir, base, exec);
+function orderPulls(root, dir, { exec, base, name, registry = [], local = false }) {
+  const pulls = local ? listLocalPulls(root, dir, base, exec) : listPulls(dir, base, exec);
+  /** How a pull request is named in a reason: its number, or its branch on the local forge. */
+  const ref = (p) => (local ? p.branch : `#${p.number}`);
+  const refOf = (n) => ref(pulls.find((p) => p.number === n));
   const rows = new Map(checkSlices(root).status.map((r) => [r.id, r]));
   const bySlice = new Map(pulls.filter((p) => p.slice !== null).map((p) => [p.slice, p]));
   const hotspots = hotspotsOf(root, name);
@@ -134,7 +180,7 @@ function orderPulls(root, dir, { exec, base, name, registry = [] }) {
       if (status === undefined) waiting.set(p.number, `waits for ${dep}, which has no sheet`);
       else if (status === 'ready-to-merge') {
         // No open PR is not proof of a merge: a PR closed unmerged looks the same. Ask for the merged PRs, once.
-        merged ??= mergedSlices(dir, base, exec);
+        merged ??= local ? mergedLocalSlices(dir, base, exec, [...rows.values()], name) : mergedSlices(dir, base, exec);
         if (!merged.has(dep)) waiting.set(p.number, `waits for ${dep} (ready-to-merge), which has no open or merged pull request`);
       } else if (status !== 'done') waiting.set(p.number, `waits for ${dep} (${status}), which is not merged and has no open pull request`);
       if (waiting.has(p.number)) break;
@@ -147,7 +193,7 @@ function orderPulls(root, dir, { exec, base, name, registry = [] }) {
       if (waiting.has(p.number)) continue;
       const blocker = after.get(p.number).find((q) => waiting.has(q.number));
       if (blocker !== undefined) {
-        waiting.set(p.number, `waits for #${blocker.number} (${blocker.slice}), which waits`);
+        waiting.set(p.number, `waits for ${ref(blocker)} (${blocker.slice}), which waits`);
         changed = true;
       }
     }
@@ -181,27 +227,28 @@ function orderPulls(root, dir, { exec, base, name, registry = [] }) {
     const { p, shared } = scored[0];
     const parts = [];
     const deps = after.get(p.number);
-    if (deps.length > 0) parts.push(`after ${deps.map((q) => `#${q.number} (${q.slice})`).join(', ')}, which it depends on`);
+    if (deps.length > 0) parts.push(`after ${deps.map((q) => `${ref(q)} (${q.slice})`).join(', ')}, which it depends on`);
     parts.push(plural(p.files.size, 'file'));
     if (shared.files.length > 0) {
-      parts.push(`shares ${sample(shared.files)} with ${shared.prs.map((n) => `#${n}`).join(', ')}, which then rebase once`);
+      parts.push(`shares ${sample(shared.files)} with ${shared.prs.map(refOf).join(', ')}, which then rebase once`);
     } else if (sharedWith(p, everyone).files.length === 0) {
       parts.push('shares no file with the others');
     } else {
-      parts.push(`no file left in common with the others once ${placed.map((q) => `#${q.number}`).slice(-3).join(', ')} merged`);
+      parts.push(`no file left in common with the others once ${placed.map(ref).slice(-3).join(', ')} merged`);
     }
     const hot = hotspots.find((h) => [...p.files].some((f) => globsOverlap(f, h)));
     if (hot !== undefined) parts.push(`touches the hotspot "${hot}"`);
-    out.push({ pr: p.number, reason: parts.join('; '), waiting: false, slice: p.slice });
+    out.push({ pr: local ? null : p.number, ...(local ? { branch: p.branch, review: reviewPath(p.slice) } : {}), reason: parts.join('; '), waiting: false, slice: p.slice, order: p.number });
     unplaced.delete(p.number);
     placed.push(p);
   }
   // What is left waits: with a reason, or caught in a cycle. Ordered by number.
   for (const n of [...unplaced].sort((a, b) => a - b)) {
-    const reason = waiting.get(n) ?? `dependency cycle with ${after.get(n).filter((q) => unplaced.has(q.number)).map((q) => `#${q.number}`).join(', ')}`;
-    out.push({ pr: n, reason, waiting: true, slice: byNumber.get(n).slice });
+    const reason = waiting.get(n) ?? `dependency cycle with ${after.get(n).filter((q) => unplaced.has(q.number)).map(ref).join(', ')}`;
+    const p = byNumber.get(n);
+    out.push({ pr: local ? null : n, ...(local ? { branch: p.branch, review: reviewPath(p.slice) } : {}), reason, waiting: true, slice: p.slice, order: n });
   }
-  return out;
+  return out.map(({ order, ...placed }) => (local ? { ...placed, order } : placed));
 }
 
 /** The entries of the registry whose names make a folder under `repos/`. */
@@ -211,7 +258,7 @@ function registryEntries(root) {
 }
 
 /** Order the pull requests of every code repository, then of each slice across them. */
-function orderAcrossRepos(root, registry, { exec, base }) {
+function orderAcrossRepos(root, registry, { exec, base, local = false }) {
   const defaults = new Map(registryEntries(root).map((e) => [e.name, e.default_branch]));
   const rows = new Map(checkSlices(root).status.map((r) => [r.id, r]));
   /** @type {Placed[]} */
@@ -220,11 +267,11 @@ function orderAcrossRepos(root, registry, { exec, base }) {
   const waiting = [];
   for (const name of registry) {
     const own = base ?? (typeof defaults.get(name) === 'string' && BRANCH.test(defaults.get(name)) ? defaults.get(name) : 'main');
-    for (const placed of orderPulls(root, join(root, 'repos', name), { exec, base: own, name, registry })) {
+    for (const placed of orderPulls(root, join(root, 'repos', name), { exec, base: own, name, registry, local })) {
       (placed.waiting ? waiting : ready).push({ ...placed, repo: name });
     }
   }
-  const tag = (p) => `${p.repo} #${p.pr}`;
+  const tag = (p) => (local ? `${p.repo} ${p.branch}` : `${p.repo} #${p.pr}`);
   /** The pull requests of the slice of `p` in the repositories before the one of `p`, nearest first. */
   const before = (p) => {
     if (p.slice === null || !rows.has(p.slice)) return [];
@@ -259,6 +306,6 @@ function orderAcrossRepos(root, registry, { exec, base }) {
     const earlier = before(p).filter((q) => !q.waiting);
     if (earlier.length > 0) p.reason += `; after ${earlier.map(tag).join(', ')}, the repositories of ${p.slice} that merge first`;
   }
-  waiting.sort((a, b) => registry.indexOf(a.repo) - registry.indexOf(b.repo) || a.pr - b.pr);
-  return [...ready, ...waiting];
+  waiting.sort((a, b) => registry.indexOf(a.repo) - registry.indexOf(b.repo) || (local ? a.order - b.order : a.pr - b.pr));
+  return [...ready, ...waiting].map(({ order, ...placed }) => placed);
 }

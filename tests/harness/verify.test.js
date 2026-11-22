@@ -284,3 +284,17 @@ test('a slice command that does not dispatch with the sensitive values is caught
   const msgs = errors(await verify(root, { pluginRoot: plugin, only: ['models'] }), 'models').map((f) => f.message).join('\n');
   assert.match(msgs, /slice\.md does not dispatch with sensitive_model/);
 });
+
+test('the second-opinion choice: an install with fable puts the copy on Fable 5.2, verify reads it from the copy and warns no more', async () => {
+  const root = makeProject();
+  install(root, { pluginRoot: plugin, secondOpinion: 'fable' });
+  const copy = read(root, '.claude/agents/second-opinion.md');
+  assert.match(copy, /^model: claude-fable-5-2$/m);
+  assert.doesNotMatch(read(join(plugin, 'harness'), 'agents/second-opinion.md'), /claude-fable-5-2/, 'the plugin keeps the table');
+  const fable = (await verify(root, { pluginRoot: plugin, only: ['models'] })).findings.filter((f) => f.check === 'models');
+  assert.deepEqual(fable, [], 'another family: no error and no warning');
+  const opus = (await verify(installed(), { pluginRoot: plugin, only: ['models'] })).findings.filter((f) => f.check === 'models');
+  assert.ok(opus.length > 0 && opus.every((f) => f.severity === 'warn' && /same model family/.test(f.message)), 'opus keeps the warning of today');
+  write(root, '.claude/agents/second-opinion.md', copy.replace(/^model: claude-fable-5-2$/m, 'model: sonnet'));
+  assert.equal(errors(await verify(root, { pluginRoot: plugin, only: ['models'] }), 'models').length, 1, 'any other model is drift');
+});

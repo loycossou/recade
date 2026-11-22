@@ -164,7 +164,7 @@ test('a board that reaches for the network or for a file outside the project sti
 <script>fetch('http://127.0.0.1:${port}/f'); new WebSocket('ws://127.0.0.1:${port}/w');</script></body></html>`;
   writeFileSync(join(root, 'design', 'directions', 'x.html'), html);
   const out = await renderExtras(root, ['design']);
-  assert.deepEqual(out.outputs.map((f) => f.split('/').at(-1)), ['design-x.pdf']);
+  assert.deepEqual(out.outputs.map((f) => f.split('/').at(-1)), ['DESIGN_X.pdf']);
   assert.equal(readFileSync(out.outputs[0]).subarray(0, 5).toString(), '%PDF-');
   await new Promise((r) => setTimeout(r, 200));
   assert.equal(hits, 0);
@@ -185,7 +185,7 @@ test('two boards whose names differ only by case are refused with a clear messag
   writeFileSync(join(root, 'design', 'directions', 'X.HTML'), BOARD('X'));
   await assert.rejects(
     renderExtras(root, ['design']),
-    (err) => /^design\/directions holds x\.html and X\.HTML, which would both write design-x\.pdf\. Rename one\.$/.test(err.message),
+    (err) => /^design\/directions holds x\.html and X\.HTML, which would both write DESIGN_X\.pdf\. Rename one\.$/.test(err.message),
   );
   assert.equal(existsSync(join(root, 'docs', 'deliverables')), false);
 });

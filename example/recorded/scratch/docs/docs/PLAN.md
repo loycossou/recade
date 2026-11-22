@@ -24,6 +24,15 @@ approvals:
 | INC-1 | Desk loop | A volunteer registers a loan and a return on the test desk | M1 |
 | INC-2 | Full shift | The desk runs a Saturday shift with the late fee and the report | M2 |
 
+## Lots
+
+| Code | Lot | Goal |
+|---|---|---|
+| CAT | Catalogue | The desk knows every tool and its state |
+| MEM | Members | The desk finds a member by name |
+| LOAN | Loans | A volunteer lends a tool and takes it back |
+| REP | Reports | The chair sees what is late |
+
 ## Summary
 
 | Item | Value |
@@ -45,6 +54,14 @@ approvals:
 | LOAN-02 | Loans | Register a return | S | 1 | LOAN-01 | 1 | Build | Backlog | |
 | LOAN-03 | Loans | Late fee | S | 1 | LOAN-02 | 2 | Build | Backlog | Waits on DEC-02 |
 | REP-01 | Reports | Overdue report | M | 2 | LOAN-02 | 2 | Build | Backlog | |
+
+### Story LOAN-01 Register a loan
+
+A volunteer registers a loan at the desk, so that the library knows who has the tool and until when.
+
+Acceptance criteria:
+- The loan names the member, the tool and the return date, 7 days later.
+- A tool in repair or already out cannot be lent.
 
 ## Sprints
 

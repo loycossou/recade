@@ -1,11 +1,11 @@
 import { spawnSync } from 'node:child_process';
-import { appendFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
+import { appendFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { REPO_NAME, WORKSPACE_PREFIX, parseTouch, registryNames, reposOf } from '../project/touches.js';
-import { PROTECTED_BRANCHES, checkBash, checkRestrictedShell, tokenize } from './shellscan.js';
+import { PROTECTED_BRANCHES, checkBash, checkRefWrites, checkRestrictedShell, tokenize } from './shellscan.js';
 
-export { PROTECTED_BRANCHES, checkBash, tokenize };
+export { PROTECTED_BRANCHES, checkBash, checkRefWrites, tokenize };
 
 /*
  * The decision function of the PreToolUse hook, and the small I/O layer around it. Only `node:` builtins and
@@ -203,8 +203,8 @@ export function protectedWrite(abs, rel, tool, input) {
     // A new file.
   }
   if (rel === null) return null;
-  if (rel === '.recade' || /^\.recade\/(stamps|guard\.log$|plugin-root$|workspace$|guard-snapshot)/.test(rel)) {
-    return `${rel} holds the gate stamps, the guard log, the plugin folder or the workspace link. Only \`recade gate run\`, the guard, the install and \`recade repo sync\` write there.`;
+  if (rel === '.recade' || /^\.recade\/(stamps|guard\.log$|plugin-root$|workspace$|guard-snapshot|sessions(\/|$)|installed\.json$)/.test(rel)) {
+    return `${rel} holds the gate stamps, the guard log, the plugin folder, the workspace link, the install record or the slice of a session. Only \`recade gate run\`, the guard, the install and \`recade repo sync\` write there.`;
   }
   if (rel === '.claude/hooks' || rel.startsWith('.claude/hooks/')) return `${rel} launches the guard of the harness. ${human}`;
   if (/^\.claude\/(agents|commands)(\/|$)/.test(rel)) return `${rel} is an agent or a command of the harness. Only \`recade harness install\` or a human changes it.`;
@@ -233,7 +233,12 @@ export function protectedWrite(abs, rel, tool, input) {
 export function decide({ agentType = null, tool, input, allow, deny = {}, root = process.cwd() }) {
   if (tool === 'Bash') {
     const command = String(input?.command ?? '');
-    const reason = checkBash(command, deny) ?? (allow ? checkRestrictedShell(command, allow, root, matchGlob, () => null, null, 0, agentType ?? 'the agent') : null);
+    // An agent never moves the default branch, nor the branch of another slice: only the one it works on.
+    const refs = agentType === null ? null : checkRefWrites(command, {
+      own: typeof deny.currentBranch === 'string' && SLICE_BRANCH.test(deny.currentBranch) ? [deny.currentBranch] : [],
+      currentBranch: deny.currentBranch ?? null, branchAt: deny.branchAt,
+    });
+    const reason = checkBash(command, deny) ?? refs ?? (allow ? checkRestrictedShell(command, allow, root, matchGlob, () => null, null, 0, agentType ?? 'the agent') : null);
     return reason ? { allow: false, reason } : { allow: true };
   }
   if (!WRITE_TOOLS.has(tool)) return { allow: true };
@@ -254,6 +259,9 @@ export function decide({ agentType = null, tool, input, allow, deny = {}, root =
   }
   if (allow === null || allow === undefined) return { allow: true };
   const who = agentType ?? 'this agent';
+  if (rel === null && typeof target === 'string' && target !== '' && realPath(target) === realPath(root)) {
+    return { allow: false, reason: `${target} is the whole checkout: ${who} writes or removes only ${allow.globs.join(', ') || 'no file'} in it.` };
+  }
   if (rel === null) return { allow: false, reason: `${who} writes only inside the project. ${target ?? '(no path)'} is outside it.` };
   if (allow.globs.some((g) => matchGlob(g, rel))) return { allow: true };
   const why = allow.unresolved.length > 0 ? ` ${allow.unresolved.join('. ')}.` : '';
@@ -262,6 +270,16 @@ export function decide({ agentType = null, tool, input, allow, deny = {}, root =
 }
 
 /* ---------- hook I/O ---------- */
+
+/**
+ * The branch checked out in a folder given to `git -C`, read from `cwd`: its name, null when HEAD is detached, undefined
+ * when the folder does not exist (the scan then refuses a merge there, since it cannot say where it lands).
+ */
+const branchAtFrom = (cwd) => (folder) => {
+  const abs = resolve(cwd, folder);
+  if (!existsSync(abs)) return undefined;
+  return run(abs, ['symbolic-ref', '--short', '-q', 'HEAD']);
+};
 
 const run = (cwd, args) => {
   const r = spawnSync('git', args, { cwd, encoding: 'utf8' });
@@ -376,18 +394,23 @@ const WORKSPACE_THRESHOLDS = [join('recade', 'state.yaml'), join('.claude', 'rec
  * @param {{cwd?: string, pluginRoot?: string}} [options]
  * @returns {Promise<string>}
  */
-export async function handleHook(stdin, { cwd = process.cwd(), pluginRoot, home = homedir(), tmp = [tmpdir(), '/tmp'] } = {}) {
+export async function handleHook(stdin, { cwd = process.cwd(), pluginRoot, home = homedir(), tmp = [tmpdir(), '/tmp'], env = process.env } = {}) {
   const event = JSON.parse(stdin);
   if (event === null || typeof event !== 'object' || Array.isArray(event)) throw new Error('The hook input is not an object.');
   if (typeof event.tool_name !== 'string' || event.tool_name === '') throw new Error('The hook input names no tool.');
   const dir = typeof event.cwd === 'string' && event.cwd !== '' ? event.cwd : cwd;
   const tool = String(event.tool_name ?? '');
   const input = event.tool_input ?? {};
-  const sessionRoot = run(dir, ['rev-parse', '--show-toplevel']) ?? dir;
+  let sessionRoot = run(dir, ['rev-parse', '--show-toplevel']) ?? dir;
+  // A session started at the root of a workspace stays a workspace session when its shell moved into a slice worktree:
+  // Claude Code names the folder the session started in.
+  const project = typeof env?.CLAUDE_PROJECT_DIR === 'string' && env.CLAUDE_PROJECT_DIR !== '' ? realPath(resolve(env.CLAUDE_PROJECT_DIR)) : null;
+  if (project !== null && mayBeWorkspace(project) && inside(project, realPath(sessionRoot))) sessionRoot = project;
   const rawType = event.agent_type ?? event.subagent_type;
   const kind = sessionKind(sessionRoot);
   if (kind !== null) {
-    const out = await handleWorkspaceHook({ kind, dir, tool, input, agentType: typeof rawType === 'string' && rawType !== '' ? rawType : null, sessionRoot, pluginRoot, home, temps: tmp });
+    const sessionId = typeof event.session_id === 'string' && SESSION_ID.test(event.session_id) ? event.session_id : null;
+    const out = await handleWorkspaceHook({ kind, dir, cwdGiven: dir === event.cwd, tool, input, agentType: typeof rawType === 'string' && rawType !== '' ? rawType : null, sessionRoot, sessionId, pluginRoot, home, temps: tmp });
     if (out !== null) return out;
   }
   // A write belongs to the repository of its target: a merge worktree or a slice worktree may sit beside the session
@@ -420,7 +443,7 @@ export async function handleHook(stdin, { cwd = process.cwd(), pluginRoot, home 
     }
   }
   const isTracked = (path) => run(dir, ['ls-files', '--error-unmatch', '--', path]) !== null;
-  const decision = decide({ agentType, tool, input, allow, deny: { thresholdFiles: thresholds.files, thresholdError: thresholds.error, currentBranch: branch, isTracked }, root });
+  const decision = decide({ agentType, tool, input, allow, deny: { thresholdFiles: thresholds.files, thresholdError: thresholds.error, currentBranch: branch, isTracked, branchAt: branchAtFrom(dir) }, root });
   if (decision.allow) return '';
   logGuard(root, `deny ${tool} ${agentType ?? '-'}: ${decision.reason}`);
   return denyJson(decision.reason);
@@ -449,6 +472,9 @@ function mainRepo(dir) {
   const common = run(dir, ['rev-parse', '--path-format=absolute', '--git-common-dir']);
   return common !== null && basename(common) === '.git' ? dirname(common) : null;
 }
+
+/** The folder of the slice worktrees in a workspace. */
+const WORKTREES = 'worktrees';
 
 /** Is `path` inside `dir` (or `dir` itself)? Both are real paths. */
 const inside = (dir, path) => {
@@ -504,9 +530,10 @@ export function rootOf(abs, { ws, registry }) {
   } catch {
     d = existingDir(target);
   }
+  // The code repositories and the slice worktrees sit inside the workspace folder, but belong to other repositories.
   const inRepos = (root) => {
     const rel = toProjectPath(root, target);
-    return rel === 'repos' || (rel !== null && rel.startsWith('repos/'));
+    return rel !== null && /^(repos|worktrees)(\/|$)/.test(rel);
   };
   const top = run(d, ['rev-parse', '--show-toplevel']);
   const common = run(d, ['rev-parse', '--path-format=absolute', '--git-common-dir']);
@@ -558,8 +585,11 @@ export function physicallyAt(ws, name, main) {
  * @param {string[]} lines
  * `<S-nn>` is the slice of the session: the one whose sheet names the branch (`ctx.sliceOf`), else the one in the name of a
  * `slice/S-nn-...` branch. With no slice (a session started in the workspace) it stands for any slice when `ctx.anySlice` is set.
- * @param {{branch: () => string|null, touches: (id: string) => string[]|null, conflicted: () => string[]|null, registry?: string[], sliceOf?: (branch: string) => string|string[]|null, anySlice?: boolean}} ctx
- * @returns {{entries: {repo: string|null, glob: string}[], unresolved: string[], sliceRepos: string[]}}
+ * `ctx.slice`, when given, is the slice of the session itself (a session at the root of the workspace that runs
+ * `/slice`): it wins over the branch. `ctx.noSlice` is the reason given when no slice is known.
+ * A `<conflicted-files>` entry carries `conflicted: true`.
+ * @param {{branch: () => string|null, touches: (id: string) => string[]|null, conflicted: () => string[]|null, registry?: string[], sliceOf?: (branch: string) => string|string[]|null, anySlice?: boolean, slice?: string|null, noSlice?: string}} ctx
+ * @returns {{entries: {repo: string|null, glob: string, conflicted?: true}[], unresolved: string[], sliceRepos: string[]}}
  */
 export function resolveEntries(lines, ctx) {
   const registry = ctx.registry ?? [];
@@ -570,13 +600,15 @@ export function resolveEntries(lines, ctx) {
       return null;
     }
   };
-  const branch = safe(ctx.branch);
+  const own = typeof ctx.slice === 'string' ? ctx.slice : null;
+  const branch = own !== null ? null : safe(ctx.branch);
   const m = branch ? SLICE_BRANCH.exec(branch) : null;
   let named = branch && ctx.sliceOf ? safe(ctx.sliceOf, branch) : null;
   // Two sheets that name the branch: the guard picks neither.
   const twins = Array.isArray(named) ? named : null;
   if (twins !== null) named = null;
-  const id = twins !== null ? null : (named ?? (m ? m[1].toUpperCase() : null));
+  const id = own ?? (twins !== null ? null : (named ?? (m ? m[1].toUpperCase() : null)));
+  const noSlice = ctx.noSlice ?? 'the branch is not slice/S-nn-...';
   let touches;
   const touchList = () => {
     if (touches === undefined) touches = id === null ? null : safe(ctx.touches, id);
@@ -589,7 +621,7 @@ export function resolveEntries(lines, ctx) {
     const { repo, glob } = parseTouch(line);
     if (glob === '<touches>') {
       if (repo !== null) unresolved.push(`${line} cannot be resolved: <touches> carries its own repositories`);
-      else if (id === null) unresolved.push('<touches> cannot be resolved: the branch is not slice/S-nn-...');
+      else if (id === null) unresolved.push(`<touches> cannot be resolved: ${noSlice}`);
       else {
         const list = touchList();
         if (!list || list.length === 0) unresolved.push(`<touches> cannot be resolved: the sheet of ${id} was not found or its touches: list is empty`);
@@ -606,12 +638,12 @@ export function resolveEntries(lines, ctx) {
       const list = safe(ctx.conflicted);
       if (list === null) unresolved.push('<conflicted-files> cannot be resolved: git could not list the conflicted files');
       else if (list.length === 0) unresolved.push('<conflicted-files> is empty: git lists no conflicted file');
-      else entries.push(...list.map((f) => ({ repo, glob: f.replace(/[*?{}[\]]/g, '\\$&') })));
+      else entries.push(...list.map((f) => ({ repo, glob: f.replace(/[*?{}[\]]/g, '\\$&'), conflicted: true })));
     } else if (glob.includes('<S-nn>')) {
       if (twins !== null) unresolved.push(`${line} cannot be resolved: two sheets name the branch ${branch}: ${twins.join(', ')}`);
       else if (id !== null) entries.push({ repo, glob: glob.replaceAll('<S-nn>', id) });
       else if (ctx.anySlice === true) entries.push({ repo, glob: glob.replaceAll('<S-nn>', 'S-*') });
-      else unresolved.push(`${line} cannot be resolved: the branch is not slice/S-nn-...`);
+      else unresolved.push(`${line} cannot be resolved: ${noSlice}`);
     } else entries.push({ repo, glob });
   }
   const list = id === null ? null : touchList();
@@ -621,18 +653,52 @@ export function resolveEntries(lines, ctx) {
 
 /**
  * The globs of `resolved` that hold for a write at `where`, from a session at `session`:
- * - in a code repository, the lines prefixed with its name, and the unprefixed lines when it is the repository of the
- *   session or a repository of the slice;
- * - in the workspace, the lines prefixed with `workspace:`, and the unprefixed lines when the session runs in the workspace.
+ * - in a code repository, from a session of a code repository: the lines prefixed with its name, and the unprefixed
+ *   lines when it is the repository of the session or a repository of the slice;
+ * - in a code repository, from a session at the root of the workspace: only in a worktree of the slice of the session
+ *   (`place` is `slice`), the lines prefixed with its name and the unprefixed lines; in a merge worktree (`merge`), the
+ *   conflicted files only; anywhere else (the main checkout, the worktree of another slice), nothing;
+ * - in the workspace, the lines prefixed with `workspace:`, and the unprefixed lines when the session runs in the
+ *   workspace and runs no slice.
  */
-function scopedGlobs({ entries, sliceRepos }, where, session) {
+function scopedGlobs({ entries, sliceRepos }, where, session, { place = null, running = [] } = {}) {
   return entries.filter((e) => {
-    if (where.kind === 'workspace') return e.repo === WORKSPACE_PREFIX || (e.repo === null && session.kind === 'workspace');
+    if (where.kind === 'workspace') return e.repo === WORKSPACE_PREFIX || (e.repo === null && session.kind === 'workspace' && running.length === 0);
     if (where.kind !== 'repo') return false;
+    if (session.kind === 'workspace') {
+      if (e.repo !== null && e.repo !== where.name) return false;
+      if (place === 'merge') return e.conflicted === true;
+      return place === 'slice' && sliceRepos.includes(where.name);
+    }
     if (e.repo !== null) return e.repo === where.name;
     return session.kind === 'repo' && (where.name === session.name || sliceRepos.includes(where.name));
   }).map((e) => e.glob);
 }
+
+/** A session ID of Claude Code, as the hook input gives it. */
+const SESSION_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
+/**
+ * Where the slices each session at the root of the workspace runs are recorded: `.recade/sessions/<session id>`, one
+ * slice ID per line. Only `recade slices open` writes it, once the slice is open, with the session ID of the shell that
+ * runs it (CLAUDE_CODE_SESSION_ID): the guard only reads it, and no agent writes there.
+ */
+export const SESSIONS_DIR = join('.recade', 'sessions');
+
+/** The slices a session at the root of the workspace runs, from `.recade/sessions/<id>`: an empty list when there is none. */
+export function runningSlices(ws, sessionId) {
+  if (typeof sessionId !== 'string' || !SESSION_ID.test(sessionId)) return [];
+  try {
+    return [...new Set(readFileSync(join(ws, SESSIONS_DIR, sessionId), 'utf8').split('\n').map((l) => l.trim()).filter((l) => /^S-\d{2}[a-z]?$/.test(l)))];
+  } catch {
+    return [];
+  }
+}
+
+/** The slice a session at the root of the workspace runs first (the one of /slice), or null. */
+export const runningSlice = (ws, sessionId) => runningSlices(ws, sessionId)[0] ?? null;
+
+/** Does a shell command set the session ID of Claude Code, which ties a session to its slices? */
+const SETS_SESSION_ID = /(^|[^$\w{])CLAUDE_CODE_SESSION_ID['"]?[ \t]*\+?=|\$\{CLAUDE_CODE_SESSION_ID:?=|-v[ \t]+['"]?CLAUDE_CODE_SESSION_ID\b|\bread\b[^;&|\n]*[ \t'"]CLAUDE_CODE_SESSION_ID\b/;
 
 /**
  * Is this Bash command exactly `node <plugin>/bin/recade.js repo sync [--project <workspace>]`, the way out of a bad
@@ -659,7 +725,7 @@ function syncCommand(command, pluginRoot, ws) {
  * The Recade commands that only the main session runs, as the pair of words that names them, with the reason given to
  * an agent: `repo sync|add` rewrite the links, `workspace commit` commits under the commit lock, `workspace auto-push`
  * records the owner's consent, `harness specialise` writes the agent and command files, `guard snapshot` writes the
- * evidence the audit reads.
+ * evidence the audit reads, `slices merge` is the owner's merge on the local forge.
  */
 const MAIN_SESSION_ONLY = [
   [['repo', 'sync'], '`recade repo sync` and `recade repo add` rewrite the links of the code repositories: only the main session runs them.'],
@@ -668,6 +734,8 @@ const MAIN_SESSION_ONLY = [
   [['workspace', 'auto-push'], '`recade workspace auto-push` records the owner\'s consent to push the workspace: only the main session runs it.'],
   [['harness', 'specialise'], '`recade harness specialise` writes the agent and command files of the harness: only the main session runs it.'],
   [['guard', 'snapshot'], '`recade guard snapshot` writes the evidence the audit reads: only the main session runs it.'],
+  [['slices', 'merge'], '`recade slices merge` is the owner\'s merge of a slice on the local forge: no agent merges, only the main session runs it after the owner\'s yes.'],
+  [['slices', 'open'], '`recade slices open` opens the worktrees of a slice and ties it to the session: only the main session runs it, from /slice.'],
 ];
 /**
  * The reason a shell command runs a main-session-only Recade command, or null. The words are read after the shell
@@ -700,8 +768,9 @@ function mainSessionOnly(command) {
  * @param {string} command
  * @param {{dir: string, ws: string, registry: string[], sessionRoot: string}} ctx
  */
-function destroysShared(command, { dir, ws, registry, sessionRoot }) {
-  const kept = [ws, join(ws, 'repos'), join(ws, '.git'), ...registry.map((n) => join(ws, 'repos', n))].map(realPath);
+function destroysShared(command, { dir, ws, registry, sessionRoot, sliceTrees = [] }) {
+  const kept = [ws, join(ws, 'repos'), join(ws, '.git'), join(ws, WORKTREES), ...registry.map((n) => join(ws, 'repos', n)), ...registry.map((n) => join(ws, WORKTREES, n))].map(realPath);
+  const trees = realPath(join(ws, WORKTREES));
   const repos = registry.map((n) => realPath(join(ws, 'repos', n)));
   const own = realPath(sessionRoot);
   const why = (what, where) => `${what} on ${where} is refused for an agent: it would destroy the workspace or a registered repository, which the audit cannot bring back. Ask the main session.`;
@@ -754,6 +823,8 @@ function destroysShared(command, { dir, ws, registry, sessionRoot }) {
         if (folder === null) continue;
         const top = realPath(run(folder, ['rev-parse', '--show-toplevel']) ?? folder);
         if (top === realPath(ws) || (repos.includes(top) && top !== own)) return why(`git ${sub === 'clean' ? 'clean' : 'reset --hard'}`, top);
+        // From the root of the workspace, a worktree that is not one of the slice of the session is someone else's work.
+        if (own === realPath(ws) && inside(trees, top) && top !== trees && !sliceTrees.includes(top)) return why(`git ${sub === 'clean' ? 'clean' : 'reset --hard'}`, top);
       }
     }
   }
@@ -802,7 +873,7 @@ const claudeNotes = (target, home) => typeof home === 'string' && home !== '' &&
  *   it is judged against the lines of the agent for that repository, with the protected paths and threshold files of
  *   that checkout; in the workspace, against the `workspace:` lines.
  */
-async function handleWorkspaceHook({ kind, dir, tool, input, agentType, sessionRoot, pluginRoot, home, temps }) {
+async function handleWorkspaceHook({ kind, dir, cwdGiven = true, tool, input, agentType, sessionRoot, sessionId = null, pluginRoot, home, temps }) {
   if (!WRITE_TOOLS.has(tool) && tool !== 'Bash') return '';
   const layout = await import('../workspace/layout.js');
   const { loadState } = await import('../state.js');
@@ -830,15 +901,28 @@ async function handleWorkspaceHook({ kind, dir, tool, input, agentType, sessionR
   if (kind === 'workspace' && (found?.via !== 'self' || realPath(found.dir) !== realPath(sessionRoot))) return null;
   if (found === null) return refuse(sessionRoot, `No workspace was found for ${sessionRoot}, so every write is refused. Run \`${layout.SYNC_ADVICE}\` from the workspace.`);
   const ws = realPath(found.dir);
-  const registry = registryNames(loadState(ws)).filter((n) => REPO_NAME.test(n) && n !== WORKSPACE_PREFIX);
+  const wsState = loadState(ws);
+  const registry = registryNames(wsState).filter((n) => REPO_NAME.test(n) && n !== WORKSPACE_PREFIX);
+  /** The default branches no agent moves: main, master and the default branch of each repository of the registry. */
+  const defaultBranches = [...new Set([...PROTECTED_BRANCHES, ...(Array.isArray(wsState?.repos) ? wsState.repos : []).map((e) => e?.default_branch).filter((b) => typeof b === 'string' && b !== '')])];
   const ctx = { ws, registry };
   const session = rootOf(sessionRoot, ctx);
   if (session.kind === 'outside') {
     return refuse(sessionRoot, `${sessionRoot} is neither the workspace ${ws} nor a code repository of its registry (${registry.join(', ') || 'empty'}), so every write is refused. Run \`recade repo check\` in the workspace.`);
   }
 
+  // A session at the root of the workspace runs its slice: `/slice` ties it with `recade slices open`, which writes the
+  // record once the slice is open, and the agents of the session write only the worktrees of that slice, under
+  // worktrees/<repo>/<S-nn> (and of a slice /review or /merge-order adds to it).
+  if (tool === 'Bash' && SETS_SESSION_ID.test(command)) {
+    return refuse(session.root, 'CLAUDE_CODE_SESSION_ID names the session of Claude Code that `recade slices open` ties to a slice. No command sets it.');
+  }
+  const running = session.kind === 'workspace' ? runningSlices(ws, sessionId) : [];
+  const sliceTrees = running.flatMap((id) => registry.map((n) => realPath(join(ws, WORKTREES, n, id))));
+  const runs = running.length === 0 ? 'no slice is open in this session (/slice <S-nn> opens one)' : `this session runs ${running.join(', ')}`;
+
   if (agentType !== null && tool === 'Bash') {
-    const destroys = destroysShared(command, { dir, ws, registry, sessionRoot: session.root });
+    const destroys = destroysShared(command, { dir: cwdGiven ? dir : session.root, ws, registry, sessionRoot: session.root, sliceTrees });
     if (destroys !== null) return refuse(session.root, destroys);
   }
 
@@ -865,32 +949,86 @@ async function handleWorkspaceHook({ kind, dir, tool, input, agentType, sessionR
     if (found.length > 1) return found;
     return found[0] ?? null;
   };
+  /** The branch of the sheet of a slice (its `branch:` header, else `slice/<file name>`), or null with no sheet. */
+  const sheetBranch = (id) => {
+    const slices = join(ws, 'slices');
+    if (!existsSync(slices)) return null;
+    const sheet = readdirSync(slices).find((f) => f.toUpperCase().startsWith(`${id.toUpperCase()}-`) && f.endsWith('.md'));
+    if (sheet === undefined) return null;
+    const head = /^---\r?\n([\s\S]*?)\r?\n---/.exec(readFileSync(join(slices, sheet), 'utf8'))?.[1] ?? '';
+    const named = /^[ \t]*(['"]?)(.*?)\1[ \t]*(?:#.*)?$/.exec(/^branch:(.*)$/m.exec(head)?.[1] ?? '')?.[2] ?? '';
+    return named !== '' ? named : `slice/${sheet.replace(/\.md$/, '')}`;
+  };
   const sheetTouches = (id) => {
     const slices = join(ws, 'slices');
     if (!existsSync(slices)) return null;
     const sheet = readdirSync(slices).find((f) => f.toUpperCase().startsWith(`${id}-`) && f.endsWith('.md'));
     return sheet ? parseTouches(readFileSync(join(slices, sheet), 'utf8')) : null;
   };
+  /**
+   * Where a checkout of a code repository stands for a session at the root of the workspace: `slice` for the worktree
+   * of a slice the session runs (`worktrees/<repo>/<S-nn>`), `merge` for the rebase worktree of such a slice
+   * (`worktrees/<repo>/merge-<S-nn>`), `other` for the worktree of another slice, `other-merge` for a merge worktree of
+   * another slice (or of none), `main` for the main checkout under repos/, `odd` for any other worktree. `id` is the slice.
+   */
+  const placeOf = (where) => {
+    if (where.kind !== 'repo') return null;
+    if (where.root === realPath(join(ws, 'repos', where.name))) return { place: 'main' };
+    const m = /^worktrees\/([^/]+)\/([^/]+)$/.exec(toProjectPath(ws, where.root) ?? '');
+    if (m === null || m[1] !== where.name) return { place: 'odd' };
+    if (m[2].startsWith('merge-')) {
+      const id = /^merge-(S-\d{2}[a-z]?)$/.exec(m[2])?.[1] ?? null;
+      return id !== null && running.includes(id) ? { place: 'merge', id } : { place: 'other-merge', id };
+    }
+    return running.includes(m[2]) ? { place: 'slice', id: m[2] } : { place: 'other', id: m[2] };
+  };
   const allowFor = (where) => {
     if (writes === null) return null;
     // The slice comes from the branch of the checkout written to; the workspace is on its own branch, so a write
-    // there takes the slice of the session.
+    // there takes the slice of the session. A session at the root of the workspace takes the slice it runs.
     const branch = where.kind === 'repo' ? branchOf(where.root) : sessionBranch;
-    const resolved = resolveEntries(writes, {
+    const at = session.kind === 'workspace' ? placeOf(where) : null;
+    // The slice a write takes: the one of the worktree it lands in, else (the workspace) each slice the session runs.
+    const ids = session.kind !== 'workspace' ? [undefined] : at?.id && running.includes(at.id) ? [at.id] : running.length > 0 ? running : [null];
+    const parts = ids.map((id) => resolveEntries(writes, {
       branch: () => branch,
       sliceOf: sheetOfBranch,
-      // A session started in the workspace is on its default branch and has no slice: <S-nn> then stands for any slice.
-      anySlice: session.kind === 'workspace',
+      ...(session.kind === 'workspace' ? { slice: id, noSlice: 'no slice is open in this session (/slice <S-nn> opens one)' } : {}),
+      // A session started in the workspace with no slice: <S-nn> then stands for any slice.
+      anySlice: session.kind === 'workspace' && running.length === 0,
       touches: sheetTouches,
       conflicted: () => {
         const out = run(where.root, ['diff', '--name-only', '--diff-filter=U']);
         return out === null ? null : out.split('\n').filter((l) => l !== '');
       },
       registry,
-    });
-    return { globs: scopedGlobs(resolved, where, session), unresolved: resolved.unresolved, sliceRepos: resolved.sliceRepos };
+    }));
+    const resolved = {
+      entries: parts.flatMap((p) => p.entries),
+      unresolved: [...new Set(parts.flatMap((p) => p.unresolved))],
+      sliceRepos: [...new Set(parts.flatMap((p) => p.sliceRepos))],
+    };
+    return { globs: scopedGlobs(resolved, where, session, { place: at?.place ?? null, running }), unresolved: resolved.unresolved, sliceRepos: resolved.sliceRepos };
   };
   const who = agentType ?? 'This session';
+
+  /** Why an agent of a session at the root of the workspace may not write in this checkout of a code repository, or null. */
+  const notThisSlice = (where, target) => {
+    const at = placeOf(where);
+    const rel = `${toProjectPath(ws, where.root) ?? where.root}`;
+    const slice = runs;
+    if (at.place === 'main') return `${who} never writes the main checkout repos/${where.name}: a slice works in its worktree, worktrees/${where.name}/<S-nn>, and ${slice}. ${toProjectPath(ws, target) ?? target} is refused.`;
+    if (at.place === 'other') return `${rel} is the worktree of ${at.id}, and ${slice}: ${who} writes only the worktrees of the slice of its session. ${toProjectPath(ws, target) ?? target} is refused.`;
+    if (at.place === 'other-merge') return `${rel} is a merge worktree${at.id === null ? ' with no slice in its name (worktrees/<repo>/merge-<S-nn>)' : ` of ${at.id}`}, and ${slice}: ${who} writes only the merge worktree of the slice of its session. ${toProjectPath(ws, target) ?? target} is refused.`;
+    if (at.place === 'odd') return `${rel} is not a slice worktree of the workspace (worktrees/${where.name}/<S-nn>): ${who} does not write there. ${toProjectPath(ws, target) ?? target} is refused.`;
+    if (at.place === 'slice') {
+      const branch = branchOf(where.root);
+      const named = branch === null ? null : sheetOfBranch(branch);
+      const fromName = branch === null ? null : SLICE_BRANCH.exec(branch)?.[1]?.toUpperCase() ?? null;
+      if ((typeof named === 'string' ? named : fromName) !== at.id) return `${rel} is on ${branch ?? 'a detached HEAD'}, not on the branch of ${at.id}, so ${who} does not write there.`;
+    }
+    return null;
+  };
 
   /** The reason a write of `target` (a real path) is refused, or null. */
   const judge = (target, judged, judgedInput) => {
@@ -903,14 +1041,21 @@ async function handleWorkspaceHook({ kind, dir, tool, input, agentType, sessionR
       if (inTemp(target, temps) && !inside(ws, target)) return null;
       return `${who} writes only in the workspace ${ws}, its code repositories (${registry.join(', ') || 'none'}) and the temp folder. ${target} is outside them.`;
     }
-    if (narrow && !(where.kind === 'repo' && session.kind === 'repo' && where.name === session.name)) {
-      return `${who} has no Writes section, so it writes only the touches of ${session.kind === 'repo' ? session.name : 'its own repository'}. ${target} is refused.`;
+    if (session.kind === 'workspace' && where.kind === 'repo' && agentType !== null) {
+      const why = notThisSlice(where, target);
+      if (why !== null) return why;
+    }
+    if (narrow && !(where.kind === 'repo' && session.kind === 'repo' && where.name === session.name) && !(where.kind === 'repo' && session.kind === 'workspace' && placeOf(where).place === 'slice')) {
+      return `${who} has no Writes section, so it writes only the touches of ${session.kind === 'repo' ? session.name : 'the slice of its session'}. ${target} is refused.`;
     }
     const allow = allowFor(where);
+    if (allow !== null && session.kind === 'workspace' && where.kind === 'repo' && placeOf(where).place === 'slice' && !allow.sliceRepos.includes(where.name)) {
+      return `${who} works on ${placeOf(where).id}, which touches ${allow.sliceRepos.join(', ') || 'no code repository'}: ${where.name} is not a repository of this slice, so ${toProjectPath(where.root, target) ?? toProjectPath(ws, target) ?? target} in ${where.name} is refused.`;
+    }
     if (allow !== null && where.kind === 'repo' && session.kind === 'repo' && where.name !== session.name && !allow.sliceRepos.includes(where.name) && allow.globs.length === 0) {
       const slice = allow.sliceRepos.length > 0 ? `the slice touches ${allow.sliceRepos.join(', ')}` : 'no slice of this branch touches it';
       const why = allow.unresolved.length > 0 ? ` ${allow.unresolved.join('. ')}.` : '';
-      return `${who} works in ${session.name}: ${where.name} is not a repository of this slice (${slice}), so ${toProjectPath(where.root, target)} in ${where.name} is refused.${why}`;
+      return `${who} works in ${session.name}: ${where.name} is not a repository of this slice (${slice}), so ${toProjectPath(where.root, target) ?? toProjectPath(ws, target) ?? target} in ${where.name} is refused.${why}`;
     }
     const thresholds = thresholdsOf(where.root, WORKSPACE_THRESHOLDS);
     const decision = decide({
@@ -928,14 +1073,29 @@ async function handleWorkspaceHook({ kind, dir, tool, input, agentType, sessionR
     return reason === null ? '' : refuse(session.root, reason);
   }
 
+  // The shell runs in the folder of the hook input: a relative path starts there, and a bare git command works on the
+  // branch checked out there (a slice worktree, when the session moved into one). Without it, at the session root.
+  const start = cwdGiven ? dir : session.root;
+  const startTop = start === session.root ? null : run(start, ['rev-parse', '--show-toplevel']);
+  const currentBranch = startTop === null ? sessionBranch : branchOf(start);
   const thresholds = thresholdsOf(session.root, WORKSPACE_THRESHOLDS);
-  const isTracked = (path) => run(dir, ['ls-files', '--error-unmatch', '--', path]) !== null;
-  let reason = checkBash(command, { thresholdFiles: thresholds.files, currentBranch: sessionBranch, isTracked });
+  const isTracked = (path) => run(start, ['ls-files', '--error-unmatch', '--', path]) !== null;
+  let reason = checkBash(command, { thresholdFiles: thresholds.files, currentBranch, isTracked, branchAt: branchAtFrom(start) });
+  if (reason === null && agentType !== null) {
+    // On the local forge no branch protection stands behind the guard: an agent writes no default branch and no branch
+    // of a slice that is not its own (the slices of its session, or the branch of the repository it was opened in).
+    const own = session.kind === 'workspace'
+      ? running.map(sheetBranch).filter((b) => b !== null)
+      : typeof sessionBranch === 'string' && SLICE_BRANCH.test(sessionBranch) ? [sessionBranch] : [];
+    reason = checkRefWrites(command, { protectedBranches: defaultBranches, own, currentBranch, branchAt: branchAtFrom(start) });
+  }
   const allow = allowFor(session);
   if (reason === null && allow !== null) {
     // From a workspace session, a shell write under `repos/` is refused: the code repositories are written with the
     // write tools, which judge each repository, or from a session of that repository.
     const match = session.kind === 'workspace' ? (g, p) => !/^repos(\/|$)/.test(p) && matchGlob(g, p) : matchGlob;
+    // A path under worktrees/ is in a slice worktree, another repository: it is judged like a write tool there.
+    const nested = session.kind === 'workspace' ? (abs) => /^worktrees\//.test(toProjectPath(ws, realPath(abs)) ?? '') : null;
     const shellAllow = { globs: allow.globs, unresolved: allow.unresolved };
     /** A folder the shell moves to or works in: the session checkout, or a checkout the agent may write. */
     const folder = (abs) => {
@@ -945,12 +1105,19 @@ async function handleWorkspaceHook({ kind, dir, tool, input, agentType, sessionR
         const inTempDir = temps.some((t) => inside(realPath(t), real));
         return inTempDir && !inside(ws, real) ? null : `The shell of ${who} may not work in ${real}: it is outside the workspace and its code repositories.`;
       }
-      if (where.root === session.root && !(session.kind === 'workspace' && /^repos(\/|$)/.test(toProjectPath(where.root, real) ?? ''))) return null;
+      if (where.root === session.root && !(session.kind === 'workspace' && /^(repos|worktrees)(\/|$)/.test(toProjectPath(where.root, real) ?? ''))) return null;
+      // From the root of the workspace, an agent works in the worktrees of its slice (to run the tests, git, a build),
+      // also when it writes nothing there: each write is still judged on its own. The merge-keeper works in a merge worktree.
+      if (session.kind === 'workspace' && where.kind === 'repo') {
+        const at = placeOf(where).place;
+        if (at === 'slice' && notThisSlice(where, real) === null) return null;
+        if (at === 'merge' && (writes ?? []).includes('<conflicted-files>')) return null;
+      }
       if (narrow) return `The shell of ${who} works only in ${session.root}.`;
       const there = allowFor(where);
       return there !== null && there.globs.length > 0 && where.root !== session.root ? null : `The shell of ${who} may not work in ${real}: it writes nothing there.`;
     };
-    reason = checkRestrictedShell(command, shellAllow, session.root, match, (abs) => judge(realPath(abs), 'Write', {}), folder, 0, who);
+    reason = checkRestrictedShell(command, shellAllow, session.root, match, (abs) => judge(realPath(abs), 'Write', {}), folder, 0, who, nested, start);
   }
   return reason === null ? '' : refuse(session.root, reason);
 }

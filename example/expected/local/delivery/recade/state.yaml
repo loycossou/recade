@@ -1,0 +1,64 @@
+version: 1
+kind: workspace
+mode: scratch
+phase: 5
+gates:
+  G0:
+    passed: 2026-11-18
+    by: owner
+  G1:
+    passed: 2026-11-18
+    by: owner
+  G2-stack:
+    passed: 2026-11-18
+    by: owner
+  G2:
+    passed: 2026-11-18
+    by: owner
+  G3:
+    passed: 2026-11-18
+    by: owner
+  G4:
+    passed: 2026-11-18
+    by: owner
+  G5:
+    passed: 2026-11-18
+    by: owner
+next_action: The project is set up. Run /status in the project (G5 passed on 2026-11-18).
+voice: randall-munroe
+languages:
+  chat: en
+  work: en
+  deliverables:
+    - en
+  code: en
+  product_ui:
+    - en
+lots:
+  - CAT
+  - LOAN
+  - MEM
+  - REP
+slicing: mixed
+started: 2026-11-18
+second_opinion: sensitive
+hotspots:
+  - api:src/store/**
+docs_step: done
+repos:
+  - name: api
+    path: repos/api
+    remote: none
+    default_branch: main
+    role: The desk server
+    visibility: private
+  - name: web
+    path: repos/web
+    remote: none
+    default_branch: main
+    role: The desk web application
+    visibility: private
+forge: local
+harness:
+  wip_limit: 3
+first_slice_done: 2026-11-18

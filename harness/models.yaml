@@ -4,10 +4,12 @@
 # second-opinion model from another family than the reviewer, unless `second_opinion.same_family` says `warn`.
 # ui-designer: raise it to opus for the art direction phase in the project copy of this file.
 # The owner's choice between Fable and Opus (`models.writer`, `recade models writer`) covers the plugin's writing
-# agents, not this table. The owner decided on 2026-11-21 that no agent runs on Fable: the second-opinion runs on
-# Opus 5.5, the same family as the reviewer. `second_opinion.same_family: warn` allows it, and `recade harness models`
-# and `recade harness verify` print a warning instead of refusing. The second opinion keeps its other independence:
-# it reads the PR, the sheet and the requirements, never the reports of the other agents.
+# agents, not this table. In this table no agent runs on Fable: the second-opinion runs on Opus 5.5, the same family
+# as the reviewer. `second_opinion.same_family: warn` allows it, and `recade harness models` and `recade harness verify`
+# print a warning instead of refusing. The second opinion keeps its other independence: it reads the PR, the sheet and
+# the requirements, never the reports of the other agents. The owner chooses it in /recade:start
+# (`models.second_opinion` of the user config): `opus` keeps this table, `fable` puts the project copy of the agent on
+# claude-fable-5-2, another family, at `recade harness install` and `recade harness models --dir .claude/agents`.
 agents:
   spec-writer:
     standard: { model: opus, effort: high }

@@ -303,6 +303,28 @@ test('syncRepos skips a missing repository with no remote, a failed clone, and a
   assert.equal(existsSync(join(ws, 'repos', 'remote')), false);
 });
 
+test('syncRepos repairs the slice worktrees under worktrees/<repo>/ of a moved workspace, and repo check says old layout for the old place', async () => {
+  const parent = tmp();
+  const ws = await workspace(parent);
+  await addRepo(ws, 'api', { new: true }, { exec: defaultExec });
+  const repo = join(ws, 'repos', 'api');
+  must(git(repo, 'commit', '-q', '--allow-empty', '-m', 'chore: start'));
+  const wt = join(ws, 'worktrees', 'api', 'S-01');
+  must(git(repo, 'worktree', 'add', '-q', '-b', 'slice/s-01-x', wt));
+  assert.equal(checkRepos(ws).findings.some((f) => f.problem === 'old layout'), false);
+  const moved = join(parent, 'Moved Root-workspace');
+  renameSync(ws, moved);
+  const movedWt = join(moved, 'worktrees', 'api', 'S-01');
+  assert.deepEqual(checkLink(movedWt), { ok: false, reason: 'not a git repository' });
+  const r = await syncRepos(moved, { exec: defaultExec });
+  assert.deepEqual(r.repaired, ['api']);
+  assert.deepEqual(checkLink(movedWt), { ok: true });
+  assert.equal(must(git(movedWt, 'rev-parse', '--abbrev-ref', 'HEAD')).stdout.trim(), 'slice/s-01-x');
+  // A slice worktree at the old place is the old layout.
+  must(git(join(moved, 'repos', 'api'), 'worktree', 'add', '-q', '-b', 'slice/s-02-y', join(moved, 'repos', 'api', '.claude', 'worktrees', 'S-02')));
+  assert.ok(checkRepos(moved).findings.some((f) => f.repo === 'api' && f.problem === 'old layout'));
+});
+
 test('syncRepos runs git worktree repair after the workspace moved, so a slice worktree is found again', async () => {
   const parent = tmp();
   const ws = await workspace(parent);

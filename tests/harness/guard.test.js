@@ -1262,7 +1262,9 @@ test('git config bypasses, round 1: backtick subcommand, section rename, variabl
 
 /**
  * A workspace with two linked code repositories, `api` and `web`, each with a worktree of slice S-01 under
- * `repos/<name>/.claude/worktrees/S-01`. The sheet `slices/S-01-orders.md` of the workspace holds `touches`.
+ * `worktrees/<name>/S-01` of the workspace. The sheet `slices/S-01-orders.md` of the workspace holds `touches`.
+ * The tests that start a session in a worktree hold a session opened by hand there; the sessions at the root of the
+ * workspace, the way `/slice` runs, are further down.
  */
 function makeWorkspace({ touches = ['api:src/**', 'web:src/**'], parent } = {}) {
   const base = parent ?? mkdtempSync(join(tmpdir(), 'recade-ws-'));
@@ -1270,10 +1272,10 @@ function makeWorkspace({ touches = ['api:src/**', 'web:src/**'], parent } = {}) 
   const ws = join(base, 'fern-workspace');
   mkdirSync(join(ws, 'recade'), { recursive: true });
   mkdirSync(join(ws, 'slices'));
-  writeFileSync(join(ws, '.gitignore'), 'repos/\nartifacts/\ntmp/\n.recade/\n');
+  writeFileSync(join(ws, '.gitignore'), 'repos/\nworktrees/\nartifacts/\ntmp/\n.recade/\n');
   writeFileSync(join(ws, 'recade', 'state.yaml'), 'version: 1\nkind: workspace\nrepos:\n  - name: api\n    path: repos/api\n  - name: web\n    path: repos/web\n');
   writeFileSync(join(ws, 'BIBLE.md'), '# Bible\n');
-  writeFileSync(join(ws, 'slices', 'S-01-orders.md'), `---\nid: S-01\ntouches:\n${touches.map((t) => `  - "${t}"\n`).join('')}---\n# S-01\n`);
+  writeFileSync(join(ws, 'slices', 'S-01-orders.md'), `---\nid: S-01\nbranch: slice/S-01-orders\ntouches:\n${touches.map((t) => `  - "${t}"\n`).join('')}---\n# S-01\n`);
   git(ws, 'init', '-q', '-b', 'main');
   git(ws, 'add', '.');
   git(ws, 'commit', '-q', '-m', 'chore: start');
@@ -1289,7 +1291,8 @@ function makeWorkspace({ touches = ['api:src/**', 'web:src/**'], parent } = {}) 
     git(repo[name], 'add', '.');
     git(repo[name], 'commit', '-q', '-m', 'chore: start');
     linkRepo(ws, repo[name]);
-    wt[name] = join(repo[name], '.claude', 'worktrees', 'S-01');
+    wt[name] = join(ws, 'worktrees', name, 'S-01');
+    mkdirSync(join(ws, 'worktrees', name), { recursive: true });
     git(repo[name], 'worktree', 'add', '-q', '-b', 'slice/S-01-orders', wt[name], 'main');
   }
   return { ws: realpathSync(ws), repo, wt };
@@ -1383,7 +1386,7 @@ test('guard: <S-nn> in a workspace: Writes line is the slice of the session, fou
   denied(await write(wt.api, 'spec-writer', join(ws, 'design', 'ux', 'S-03', 'a.md')));
   // The slice of a session is the one whose sheet names its branch, whatever the branch is called.
   writeFileSync(join(ws, 'slices', 'S-04-odd.md'), '---\nid: S-04\nbranch: work/odd\ntouches:\n  - "api:src/**"\n---\n# S-04\n');
-  const odd = join(repo.api, '.claude', 'worktrees', 'S-04');
+  const odd = join(ws, 'worktrees', 'api', 'S-04');
   git(repo.api, 'worktree', 'add', '-q', '-b', 'work/odd', odd, 'main');
   agents(odd);
   assert.equal(await write(odd, 'spec-writer', join(ws, 'slices', 'S-04-odd.md')), '');
@@ -1555,7 +1558,7 @@ test('guard: a slice worktree of a moved workspace is held, not judged as a plai
   const { ws, wt } = makeWorkspace();
   const moved = `${ws}-moved`;
   renameSync(ws, moved);
-  const stale = join(moved, 'repos', 'api', '.claude', 'worktrees', 'S-01');
+  const stale = join(moved, 'worktrees', 'api', 'S-01');
   assert.ok(existsSync(join(stale, '.git')));
   for (const agent of [null, 'implementer']) {
     assert.match(denied(await write(stale, agent, join(stale, 'src', 'a.ts'))), /recade repo sync/);
@@ -1631,7 +1634,7 @@ test('I1: the shell of an agent cannot reach a repository outside its slice thro
   symlinkSync(join(ws, 'recade'), join(A, 'src', 'wsrecade'));
   symlinkSync(join(repo.api, '.recade'), join(A, 'src', 'dotrecade'));
   for (const c of [
-    'cd ../../../../web && echo x > src/a.ts',
+    'cd ../../../repos/web && echo x > src/a.ts',
     `cd ${repo.web} && echo x > src/a.ts`,
     `cd ${repo.web}; sed -i s/a/b/ src/a.ts`,
     `(cd ${repo.web} && cp ${join(A, 'src', 'a.ts')} src/a.ts)`,
@@ -1672,8 +1675,9 @@ test('I1: the shell of an agent cannot reach a repository outside its slice thro
     `cp src/a.ts ${join(two.wt.web, 'src', 'b.ts')}`,
     `git -C ${two.wt.web} add src/a.ts && git -C ${two.wt.web} commit -m "feat(web): a"`,
   ]) assert.equal(await sh(two.wt.api, 'implementer', c), '', c);
-  // cd into a slice worktree is refused by the shell scan (its path holds .claude); git -C is the way, and it holds.
+  // cd into the web worktree of the slice is followed, and the write there is held to the globs of web.
   denied(await sh(two.wt.api, 'implementer', `cd ${two.wt.web} && echo x > README.md`));
+  assert.equal(await sh(two.wt.api, 'implementer', `cd ${two.wt.web} && echo x > src/c.ts`), '');
   denied(await sh(two.wt.api, 'implementer', `git -C ${join(two.repo.web)} checkout -- README.md`));
   // From the workspace: a symlink into a code repository and git -C are refused.
   mkdirSync(join(ws, '.claude', 'agents'), { recursive: true });
@@ -1920,6 +1924,8 @@ test('final A, I1, M1, M2: the main-session-only commands are refused for an age
     `${cli} workspace auto-push on`,
     `${cli} work''space auto-push off`,
     `cd src && ${cli} guard snapshot --slice S-01`,
+    `${cli} slices merge S-01`,
+    `${cli} sli''ces merge S-01 --dry-run`,
   ];
   for (const [cwd, agent] of [[wt.api, 'implementer'], [ws, 'spec-writer'], [wt.api, 'general-purpose']]) {
     for (const c of commands) denied(await sh(cwd, agent, c));
@@ -1927,6 +1933,12 @@ test('final A, I1, M1, M2: the main-session-only commands are refused for an age
   // The main session runs them, and an agent may still run the audit and read the root.
   assert.equal(await sh(wt.api, null, `${cli} guard snapshot --slice S-01`), '');
   assert.equal(await sh(ws, null, `${cli} workspace auto-push on`), '');
+  // The owner's merge on the local forge is the main session's, never an agent's; a raw git merge into main stays refused.
+  assert.equal(await sh(ws, null, `${cli} slices merge S-01 --dry-run`), '');
+  denied(await sh(ws, null, `git -C ${join(ws, 'repos', 'api')} merge --no-ff slice/s-01-x`));
+  // From a slice worktree, `git -C` on the main checkout lands on main: refused too, for the main session and an agent.
+  for (const agent of [null, 'implementer']) denied(await sh(wt.api, agent, `git -C '${join(ws, 'repos', 'api')}' merge --no-ff slice/S-01-orders`));
+  assert.equal(await sh(wt.api, null, `git -C '${wt.web}' merge --ff-only main`), '', 'a merge into a slice branch is not a merge into main');
   assert.equal(await sh(wt.api, 'implementer', `${cli} guard audit --since /tmp/x.json`), '');
   assert.equal(await sh(wt.api, 'implementer', `${cli} workspace root`), '');
 });
@@ -1950,8 +1962,12 @@ test('final A, residual: an agent cannot remove or reset the workspace or anothe
   }
   // The session's own checkout keeps its ordinary commands.
   assert.equal(await sh(wt.api, 'implementer', 'git reset --hard HEAD'), '');
-  assert.equal(await sh(wt.api, 'implementer', 'git clean -fd'), '');
+  assert.equal(await sh(wt.api, 'implementer', 'git clean -fd src'), '');
+  assert.equal(await sh(wt.api, 'implementer', 'git clean -n'), '');
   assert.equal(await sh(wt.api, 'implementer', 'rm -rf src/tmp'), '');
+  // A removal is held to the touches like a write: the whole checkout is not among them.
+  denied(await sh(wt.api, 'implementer', 'git clean -fd'));
+  denied(await sh(wt.api, 'implementer', 'rm -rf README.md'));
   // The main session is not held by this floor.
   assert.equal(await sh(ws, null, `git -C ${ws} reset --hard HEAD`), '');
 });
@@ -2010,4 +2026,392 @@ test('final B #2: with only the plugin root missing, the main session may resume
   mkdirSync(join(repo, '.recade'), { recursive: true });
   writeFileSync(join(repo, '.recade', 'plugin-root'), `${broken}\n`);
   deny(runLauncher(repo, ev(allowed[0])), allowed[0]);
+});
+
+/* ---------- one entry point: every session starts at the root of the workspace ---------- */
+
+/**
+ * The workspace of `makeWorkspace` with the session at its root, the way `/slice` runs. `bind` ties a session to a slice
+ * the way /slice does it: the main session runs `recade slices open <S-nn>`, which writes the record once the slice is
+ * open, with the session ID of its shell (CLAUDE_CODE_SESSION_ID).
+ */
+const atRoot = (ws, session = 'sess-a') => ({
+  write: (agent, file, extra = {}) => hook(ws, { session_id: session, ...(agent ? { agent_type: agent } : {}), tool_name: 'Write', tool_input: { file_path: file, content: 'x' }, ...extra }),
+  edit: (agent, file) => hook(ws, { session_id: session, ...(agent ? { agent_type: agent } : {}), tool_name: 'Edit', tool_input: { file_path: file, old_string: 'a', new_string: 'b' } }),
+  sh: (agent, command, extra = {}) => hook(ws, { session_id: session, ...(agent ? { agent_type: agent } : {}), tool_name: 'Bash', tool_input: { command }, ...extra }),
+});
+const openCmd = (id, extra = '') => `node "${plugin}/bin/recade.js" slices open ${id}${extra}`;
+/** Run `recade slices open` the way the shell of a session of Claude Code runs it. */
+async function openSliceCli(ws, args, { session = 'sess-a', cwd = ws } = {}) {
+  const out = [];
+  const err = [];
+  const code = await run(['slices', 'open', ...args], { stdout: { write: (x) => out.push(x) }, stderr: { write: (x) => err.push(x) }, cwd, env: session === null ? {} : { CLAUDE_CODE_SESSION_ID: session } });
+  return { code, stdout: out.join(''), stderr: err.join('') };
+}
+async function bind(ws, id, session = 'sess-a', extra = []) {
+  assert.equal(await atRoot(ws, session).sh(null, openCmd(id)), '');
+  const r = await openSliceCli(ws, [id, ...extra], { session });
+  assert.equal(r.code, 0, r.stdout + r.stderr);
+}
+const record = (ws, session) => {
+  try {
+    return readFileSync(join(ws, '.recade', 'sessions', session), 'utf8');
+  } catch {
+    return null;
+  }
+};
+/** A second slice with its own sheet and its own worktree in `repo`, as `recade slices open` makes it. */
+function otherSlice(ws, repo, id, touches) {
+  writeFileSync(join(ws, 'slices', `${id}-other.md`), `---\nid: ${id}\nbranch: slice/${id}-other\ntouches:\n${touches.map((t) => `  - "${t}"\n`).join('')}---\n# ${id}\n`);
+  for (const name of new Set(touches.map((t) => t.split(':')[0]))) {
+    const tree = join(ws, 'worktrees', name, id);
+    git(repo[name], 'worktree', 'add', '-q', '-b', `slice/${id}-other`, tree, 'main');
+  }
+}
+
+test('root: recade slices open ties the session to its slice once the slice is open, and only then', async () => {
+  const { ws, repo } = makeWorkspace();
+  const s = atRoot(ws);
+  // The hook no longer writes anything: allowing the command ties nothing.
+  assert.equal(await s.sh(null, openCmd('S-01')), '');
+  assert.equal(record(ws, 'sess-a'), null);
+  // The command ties the session of its shell, once every worktree is open.
+  let r = await openSliceCli(ws, ['S-01', '--project', ws]);
+  assert.equal(r.code, 0, r.stderr);
+  assert.match(r.stdout, /session {2}this session runs S-01/);
+  assert.equal(record(ws, 'sess-a'), 'S-01\n');
+  // A slice with no sheet, or one that fails to open, ties nothing and leaves the session as it was.
+  r = await openSliceCli(ws, ['S-09']);
+  assert.equal(r.code, 1);
+  assert.equal(record(ws, 'sess-a'), 'S-01\n');
+  writeFileSync(join(ws, 'slices', 'S-04-bad.md'), '---\nid: S-04\nbranch: slice/S-04-elsewhere\ntouches:\n  - "api:src/**"\n---\n# S-04\n');
+  assert.equal((await openSliceCli(ws, ['S-04'])).code, 1);
+  assert.equal(record(ws, 'sess-a'), 'S-01\n');
+  // A command run from outside the workspace it opens, or with no session of Claude Code, ties nothing.
+  otherSlice(ws, repo, 'S-02', ['api:src/**']);
+  const elsewhere = mkdtempSync(join(tmpdir(), 'recade-elsewhere-'));
+  r = await openSliceCli(elsewhere, ['S-02', '--project', ws], { session: 'sess-x' });
+  assert.equal(r.code, 0, r.stderr);
+  assert.match(r.stdout, /this session is not tied to S-02: the command runs from .*outside the workspace/);
+  assert.equal(record(ws, 'sess-x'), null);
+  r = await openSliceCli(ws, ['S-02'], { session: null });
+  assert.match(r.stdout, /not tied to S-02: no session of Claude Code/);
+  // /parallel opens without tying; /review adds its slice and keeps the one of /slice.
+  assert.equal((await openSliceCli(ws, ['S-02', '--no-session'], { session: 'sess-c' })).code, 0);
+  assert.equal(record(ws, 'sess-c'), null);
+  r = await openSliceCli(ws, ['S-02', '--keep-session']);
+  assert.match(r.stdout, /this session runs S-01, S-02: S-02 is added/);
+  assert.equal(record(ws, 'sess-a'), 'S-01\nS-02\n');
+  // A plain open replaces them.
+  assert.equal((await openSliceCli(ws, ['S-01'])).code, 0);
+  assert.equal(record(ws, 'sess-a'), 'S-01\n');
+  // --tie-only opens nothing and adds the slice; it still needs a sheet.
+  writeFileSync(join(ws, 'slices', 'S-05-later.md'), '---\nid: S-05\nbranch: slice/S-05-later\ntouches:\n  - "api:src/**"\n---\n# S-05\n');
+  assert.equal((await openSliceCli(ws, ['S-05', '--tie-only'])).code, 0);
+  assert.equal(existsSync(join(ws, 'worktrees', 'api', 'S-05')), false);
+  assert.equal(record(ws, 'sess-a'), 'S-01\nS-05\n');
+  assert.equal((await openSliceCli(ws, ['S-08', '--tie-only'])).code, 1);
+  assert.equal((await openSliceCli(ws, ['S-05', '--tie-only', '--no-session'])).code, 2);
+  // No agent opens a slice, nor writes the record by hand, and no command sets the session ID.
+  assert.match(denied(await s.sh('implementer', openCmd('S-01'))), /recade slices open/);
+  denied(await s.write('implementer', join(ws, '.recade', 'sessions', 'sess-a')));
+  denied(await s.write(null, join(ws, '.recade', 'sessions', 'sess-a')));
+  denied(await s.sh('implementer', `echo S-09 > ${join(ws, '.recade', 'sessions', 'sess-a')}`));
+  for (const c of [`CLAUDE_CODE_SESSION_ID=sess-b ${openCmd('S-02')}`, 'export CLAUDE_CODE_SESSION_ID=sess-b', 'env CLAUDE_CODE_SESSION_ID=x node a.js', 'read -r CLAUDE_CODE_SESSION_ID < f', ': ${CLAUDE_CODE_SESSION_ID:=x}']) {
+    assert.match(denied(await s.sh(null, c)), /CLAUDE_CODE_SESSION_ID/, c);
+  }
+  assert.equal(await s.sh(null, 'echo "$CLAUDE_CODE_SESSION_ID"'), '');
+});
+
+test('root: /review adds its slice to the session, so the agents of /slice keep their worktrees', async () => {
+  const { ws, repo, wt } = makeWorkspace({ touches: ['api:src/**'] });
+  otherSlice(ws, repo, 'S-02', ['api:lib/**']);
+  const s = atRoot(ws);
+  await bind(ws, 'S-01');
+  await bind(ws, 'S-02', 'sess-a', ['--keep-session']);
+  // The implementer of S-01 still writes its worktree, and the reviewer of S-02 writes the touches of S-02 in its own.
+  assert.equal(await s.write('implementer', join(wt.api, 'src', 'a.ts')), '');
+  assert.equal(await s.write('reviewer', join(ws, 'worktrees', 'api', 'S-02', 'lib', 'a.ts')), '');
+  // Each worktree keeps the touches of its own slice.
+  denied(await s.write('implementer', join(ws, 'worktrees', 'api', 'S-02', 'src', 'a.ts')));
+  denied(await s.write('implementer', join(wt.api, 'lib', 'a.ts')));
+  // The workspace lines take each slice of the session, and no other.
+  assert.equal(await s.write('implementer', join(ws, 'tmp', 'S-01', 'journal.md')), '');
+  assert.equal(await s.write('implementer', join(ws, 'tmp', 'S-02', 'journal.md')), '');
+  denied(await s.write('implementer', join(ws, 'tmp', 'S-03', 'journal.md')));
+});
+
+test('root: an agent writes the worktrees of the slice of its session, within the touches mapped to worktrees/<repo>/<S-nn>', async () => {
+  const { ws, wt } = makeWorkspace();
+  const s = atRoot(ws);
+  await bind(ws, 'S-01');
+  // api:src/** is worktrees/api/S-01/src/**, web:src/** is worktrees/web/S-01/src/**.
+  assert.equal(await s.write('implementer', join(wt.api, 'src', 'deep', 'a.ts')), '');
+  assert.equal(await s.write('implementer', join(wt.web, 'src', 'a.ts')), '');
+  assert.match(denied(await s.write('implementer', join(wt.api, 'lib', 'a.ts'))), /src\/\*\*/);
+  // A relative path is read from the root of the workspace.
+  assert.equal(await s.write('implementer', 'worktrees/api/S-01/src/b.ts'), '');
+  // The unprefixed lines hold in each worktree of the slice, and no longer in the workspace.
+  assert.equal(await s.write('test-engineer', join(wt.web, 'tests', 'a.test.ts')), '');
+  denied(await s.write('test-engineer', join(ws, 'tests', 'a.test.ts')));
+  // The workspace: lines, with <S-nn> the slice of the session.
+  assert.equal(await s.write('implementer', join(ws, 'tmp', 'S-01', 'journal.md')), '');
+  denied(await s.write('implementer', join(ws, 'tmp', 'S-02', 'journal.md')));
+  assert.equal(await s.write('spec-writer', join(ws, 'slices', 'S-01-orders.md')), '');
+  denied(await s.write('spec-writer', join(ws, 'slices', 'S-02-other.md')));
+  // An agent with no Writes section writes only the touches of the slice.
+  assert.equal(await s.write('general-purpose', join(wt.api, 'src', 'c.ts')), '');
+  denied(await s.write('general-purpose', join(wt.api, 'README.md')));
+  denied(await s.write('general-purpose', join(ws, 'BIBLE.md')));
+  // The protected files of a worktree stay protected.
+  denied(await s.write('implementer', join(wt.api, '.claude', 'settings.json')));
+  denied(await s.write(null, join(wt.api, '.recade', 'stamps.json')));
+});
+
+test('root: the main checkout, another repository, another slice and no slice at all are refused', async () => {
+  const { ws, repo, wt } = makeWorkspace({ touches: ['api:src/**'] });
+  const s = atRoot(ws);
+  await bind(ws, 'S-01');
+  // The main checkout under repos/ is never written by an agent.
+  assert.match(denied(await s.write('implementer', join(repo.api, 'src', 'a.ts'))), /main checkout repos\/api/);
+  assert.match(denied(await s.edit('test-engineer', join(repo.api, 'tests', 'a.test.ts'))), /main checkout/);
+  // The worktree of a repository the slice does not touch.
+  assert.match(denied(await s.write('implementer', join(wt.web, 'src', 'a.ts'))), /web is not a repository of this slice/);
+  denied(await s.write('test-engineer', join(wt.web, 'tests', 'a.test.ts')));
+  // The worktree of another slice, even within the globs that slice gives.
+  otherSlice(ws, repo, 'S-02', ['api:src/**']);
+  assert.match(denied(await s.write('implementer', join(ws, 'worktrees', 'api', 'S-02', 'src', 'a.ts'))), /worktree of S-02, and this session runs S-01/);
+  // A folder under worktrees/ that is no worktree is no root of the workspace either.
+  mkdirSync(join(ws, 'worktrees', 'api', 'S-07'), { recursive: true });
+  denied(await s.write('implementer', join(ws, 'worktrees', 'api', 'S-07', 'src', 'a.ts')));
+  denied(await s.write(null, join(ws, 'worktrees', 'api', 'S-07', 'src', 'a.ts')));
+  // A session with no slice, or a hook input with no session, writes no worktree.
+  assert.match(denied(await atRoot(ws, 'sess-none').write('implementer', join(wt.api, 'src', 'a.ts'))), /no slice is open in this session/);
+  assert.match(denied(await hook(ws, { agent_type: 'implementer', tool_name: 'Write', tool_input: { file_path: join(wt.api, 'src', 'a.ts'), content: 'x' } })), /no slice is open/);
+  // The other session, tied to S-02, writes S-02 and not S-01.
+  await bind(ws, 'S-02', 'sess-b');
+  assert.equal(await atRoot(ws, 'sess-b').write('implementer', join(ws, 'worktrees', 'api', 'S-02', 'src', 'a.ts')), '');
+  denied(await atRoot(ws, 'sess-b').write('implementer', join(wt.api, 'src', 'a.ts')));
+  // A worktree at the place of the slice but on another branch is not the slice.
+  git(wt.api, 'checkout', '-q', '-b', 'slice/S-09-stray');
+  assert.match(denied(await s.write('implementer', join(wt.api, 'src', 'a.ts'))), /not on the branch of S-01/);
+});
+
+test('root: the shell of an agent is held the same way, and the deny list holds from the root', async () => {
+  const { ws, repo, wt } = makeWorkspace({ touches: ['api:src/**'] });
+  otherSlice(ws, repo, 'S-02', ['api:src/**']);
+  const s = atRoot(ws);
+  await bind(ws, 'S-01');
+  for (const c of [
+    'echo x > worktrees/api/S-01/src/a.ts',
+    'cd worktrees/api/S-01 && echo x > src/b.ts',
+    `git -C ${wt.api} add src/a.ts`,
+    `git -C ${wt.api} status`,
+    `echo x >> ${join(ws, 'tmp', 'S-01', 'journal.md')}`,
+    'npm --prefix worktrees/api/S-01 test 2>&1 | tail -5',
+  ]) assert.equal(await s.sh('implementer', c), '', c);
+  for (const c of [
+    'echo x > worktrees/api/S-01/README.md',
+    'echo x > worktrees/api/S-02/src/a.ts',
+    'cd worktrees/api/S-02 && echo x > src/a.ts',
+    'echo x > worktrees/web/S-01/src/a.ts',
+    'echo x > repos/api/src/a.ts',
+    `cp a.ts ${join(repo.api, 'src')}/`,
+    `git -C ${join(ws, 'worktrees', 'api', 'S-02')} reset --hard`,
+    'rm -rf worktrees/api',
+    'rm -rf worktrees',
+    `git -C ${wt.api} push origin main`,
+    `git -C ${wt.api} commit --no-verify -m x`,
+    'gh pr merge 3 --squash',
+    `git -C ${repo.api} merge slice/S-01-orders`,
+  ]) denied(await s.sh('implementer', c));
+  // An agent that writes nothing may still run the tests and git in the worktree of its slice, and nowhere else.
+  for (const c of [`cd ${wt.api} && npm test`, `git -C ${wt.api} log --oneline -3`]) assert.equal(await s.sh('test-runner', c), '', c);
+  denied(await s.sh('test-runner', `cd ${wt.api} && echo x > src/a.ts`));
+  denied(await s.sh('test-runner', `cd ${join(ws, 'worktrees', 'api', 'S-02')} && npm test`));
+  // The main session keeps its deny list: no push to main, no --no-verify, no merge into main.
+  for (const c of [`git -C ${wt.api} push origin main`, `git -C ${wt.api} commit --no-verify -m x`, `git -C ${repo.api} merge slice/S-01-orders`]) denied(await s.sh(null, c));
+});
+
+test('root: the merge-keeper writes the conflicted files of a merge worktree under worktrees/<repo>/, and nothing else', async () => {
+  const { ws, repo } = makeWorkspace({ touches: ['api:src/**'] });
+  writeFileSync(join(repo.api, 'src', 'a.ts'), 'main\n');
+  git(repo.api, 'commit', '-qam', 'chore: main');
+  const merge = join(ws, 'worktrees', 'api', 'merge-S-01');
+  git(repo.api, 'worktree', 'add', '-q', '--detach', merge, 'slice/S-01-orders');
+  writeFileSync(join(merge, 'src', 'a.ts'), 'side\n');
+  git(merge, 'commit', '-qam', 'chore: side');
+  gitRaw(merge, 'merge', 'main'); // stops on the conflict
+  const s = atRoot(ws, 'sess-merge');
+  // A session tied to no slice writes no merge worktree: /merge-order ties it to the slice it rebases.
+  assert.match(denied(await s.edit('merge-keeper', join(merge, 'src', 'a.ts'))), /merge worktree of S-01, and no slice is open/);
+  await bind(ws, 'S-01', 'sess-merge', ['--tie-only']);
+  assert.equal(await s.edit('merge-keeper', join(merge, 'src', 'a.ts')), '');
+  denied(await s.edit('merge-keeper', join(merge, 'README.md')));
+  denied(await s.edit('merge-keeper', join(repo.api, 'src', 'a.ts')));
+  denied(await s.edit('implementer', join(merge, 'src', 'a.ts')));
+  // The merge worktree of another slice, or one with no slice in its name, is refused to a session tied to S-01.
+  for (const name of ['merge-S-05', 'merge-12']) {
+    const other = join(ws, 'worktrees', 'api', name);
+    git(repo.api, 'worktree', 'add', '-q', '--detach', other, 'slice/S-01-orders');
+    writeFileSync(join(other, 'src', 'a.ts'), 'side\n');
+    git(other, 'commit', '-qam', 'chore: side');
+    gitRaw(other, 'merge', 'main');
+    assert.match(denied(await s.edit('merge-keeper', join(other, 'src', 'a.ts'))), /is a merge worktree/, name);
+    denied(await s.sh('merge-keeper', `cd ${other} && git add src/a.ts`));
+  }
+  assert.equal(await s.sh('merge-keeper', `cd ${merge} && git add src/a.ts`), '');
+});
+
+test('root: a session whose shell moved into a worktree stays a session of the workspace (CLAUDE_PROJECT_DIR)', async () => {
+  const { ws, repo, wt } = makeWorkspace();
+  otherSlice(ws, repo, 'S-02', ['api:src/**']);
+  await bind(ws, 'S-01');
+  const env = { CLAUDE_PROJECT_DIR: ws };
+  const inTree = (file) => hook(wt.api, { session_id: 'sess-a', agent_type: 'implementer', tool_name: 'Write', tool_input: { file_path: file, content: 'x' } }, { env });
+  assert.equal(await inTree(join(wt.web, 'src', 'a.ts')), '');
+  assert.match(denied(await inTree(join(ws, 'worktrees', 'api', 'S-02', 'src', 'a.ts'))), /worktree of S-02/);
+  // Without the variable, the session is judged as a session opened by hand in that worktree, as before.
+  assert.equal(await hook(wt.api, { agent_type: 'implementer', tool_name: 'Write', tool_input: { file_path: join(wt.web, 'src', 'a.ts'), content: 'x' } }), '');
+});
+
+test('root: a relative path of the shell starts in the folder of the hook input, a worktree the session moved into', async () => {
+  const { ws, repo, wt } = makeWorkspace({ touches: ['api:src/**'] });
+  otherSlice(ws, repo, 'S-02', ['api:src/**']);
+  await bind(ws, 'S-01');
+  const env = { CLAUDE_PROJECT_DIR: ws };
+  const sh = (cwd, agent, command) => hook(cwd, { session_id: 'sess-a', agent_type: agent, tool_name: 'Bash', tool_input: { command } }, { env });
+  // From worktrees/api/S-01, src/a.ts is the file of the slice, inside its touches.
+  assert.equal(await sh(wt.api, 'implementer', 'echo x > src/a.ts'), '');
+  assert.equal(await sh(wt.api, 'implementer', 'echo x > ./src/deep/b.ts'), '');
+  // tmp/S-01/tracking.md lands in the worktree, not in the workspace: it is judged there, outside the touches.
+  assert.match(denied(await sh(wt.api, 'implementer', 'echo x > tmp/S-01/tracking.md')), /tmp\/S-01\/tracking\.md/);
+  assert.equal(existsSync(join(wt.api, 'tmp')), false);
+  // From the root, the same relative path is the workspace one, which the implementer writes.
+  assert.equal(await sh(ws, 'implementer', 'echo x > tmp/S-01/tracking.md'), '');
+  // From another slice worktree, a relative write lands there and is refused.
+  assert.match(denied(await sh(join(ws, 'worktrees', 'api', 'S-02'), 'implementer', 'echo x > src/a.ts')), /worktree of S-02/);
+  // A relative path climbing out of the worktree is judged where it lands.
+  assert.match(denied(await sh(wt.api, 'implementer', 'echo x > ../../../repos/api/src/a.ts')), /repos\/api|main checkout/);
+  // With no folder in the hook input, the shell starts at the session root.
+  const noCwd = JSON.stringify({ session_id: 'sess-a', agent_type: 'implementer', tool_name: 'Bash', tool_input: { command: 'echo x > tmp/S-01/tracking.md' } });
+  assert.equal(await handleHook(noCwd, { pluginRoot: plugin, env, cwd: wt.api }), '');
+});
+
+test('root: an agent moves no default branch and no branch of another slice, in any of the git forms that write a ref', async () => {
+  const { ws, repo, wt } = makeWorkspace({ touches: ['api:src/**'] });
+  otherSlice(ws, repo, 'S-02', ['api:lib/**']);
+  const s = atRoot(ws);
+  await bind(ws, 'S-01');
+  const other = join(ws, 'worktrees', 'api', 'S-02');
+  for (const c of [
+    `git -C ${wt.api} update-ref refs/heads/main HEAD`,
+    `git -C ${wt.api} update-ref main HEAD`,
+    `git -C ${wt.api} update-ref -d refs/heads/main`,
+    `git -C ${wt.api} update-ref refs/heads/slice/S-02-other HEAD`,
+    `git -C ${wt.api} update-ref --stdin < refs.txt`,
+    `git -C ${wt.api} fetch . slice/S-01-orders:main`,
+    `git -C ${wt.api} fetch . +HEAD:refs/heads/main`,
+    `git -C ${wt.api} fetch . HEAD:slice/S-02-other`,
+    `git -C ${wt.api} fetch origin 'refs/heads/*:refs/heads/*'`,
+    `git -C ${wt.api} push . HEAD:main`,
+    `git -C ${wt.api} push . HEAD:slice/S-02-other`,
+    `git -C ${wt.api} push origin slice/S-02-other`,
+    `git -C ${wt.api} push origin --delete slice/S-02-other`,
+    `git -C ${wt.api} branch -f main HEAD`,
+    `git -C ${wt.api} branch -f slice/S-02-other HEAD`,
+    `git -C ${wt.api} branch -D slice/S-02-other`,
+    `git -C ${wt.api} branch -d main`,
+    `git -C ${wt.api} branch -M main`,
+    `git -C ${wt.api} branch -m slice/S-02-other gone`,
+    `git -C ${wt.api} branch -c slice/S-01-orders main`,
+    `git -C ${wt.api} branch slice/S-03-new`,
+    `git -C ${wt.api} checkout -B main`,
+    `git -C ${wt.api} checkout -b slice/S-03-new`,
+    `git -C ${wt.api} switch -C main`,
+    `git -C ${wt.api} switch slice/S-02-other`,
+    `git -C ${wt.api} symbolic-ref HEAD refs/heads/main`,
+    `git -C ${wt.api} rebase main slice/S-02-other`,
+    `git -C ${repo.api} reset --hard slice/S-01-orders`,
+    `git -C ${repo.api} commit --allow-empty -m x`,
+    `cd ${wt.api} && git update-ref refs/heads/main HEAD`,
+  ]) denied(await s.sh('implementer', c), c);
+  // The refusal names the reason.
+  assert.match(denied(await s.sh('implementer', `git -C ${wt.api} update-ref refs/heads/main HEAD`)), /writes main, the default branch/);
+  assert.match(denied(await s.sh('implementer', `git -C ${wt.api} branch -D slice/S-02-other`)), /the branch of another slice/);
+  // The branch of its own slice stays the agent's to write, and the reads stay open.
+  for (const c of [
+    `git -C ${wt.api} commit --allow-empty -m x`,
+    `git -C ${wt.api} rebase main`,
+    `git -C ${wt.api} reset --hard HEAD`,
+    `git -C ${wt.api} reset HEAD -- src/a.ts`,
+    `git -C ${wt.api} update-ref refs/heads/slice/S-01-orders HEAD`,
+    `git -C ${wt.api} branch -f slice/S-01-orders HEAD`,
+    `git -C ${wt.api} branch --list 'slice/*'`,
+    `git -C ${wt.api} branch --show-current`,
+    `git -C ${wt.api} branch -v`,
+    `git -C ${wt.api} symbolic-ref --short HEAD`,
+    `git -C ${wt.api} checkout main -- src/a.ts`,
+    `git -C ${wt.api} fetch origin`,
+    `git -C ${wt.api} fetch origin main`,
+    `git -C ${wt.api} push origin slice/S-01-orders`,
+    `git -C ${wt.api} log main..slice/S-02-other`,
+  ]) assert.equal(await s.sh('implementer', c), '', c);
+  // From the worktree of the other slice, nothing changes: the session runs S-01.
+  denied(await s.sh('implementer', `git -C ${other} commit --allow-empty -m x`));
+  // The main session keeps its own path: /board removes the local branch of a merged slice.
+  assert.equal(await s.sh(null, `git -C ${repo.api} branch -D slice/S-02-other`), '');
+  // A default branch other than main, from the registry, is held the same way.
+  writeFileSync(join(ws, 'recade', 'state.yaml'), 'version: 1\nkind: workspace\nrepos:\n  - name: api\n    path: repos/api\n    default_branch: trunk\n  - name: web\n    path: repos/web\n');
+  assert.match(denied(await s.sh('implementer', `git -C ${wt.api} branch -f trunk HEAD`)), /trunk, the default branch/);
+});
+
+test('root: a removal is judged like a write: only in the worktree of the slice, within its touches, and the Writes', async () => {
+  const { ws, repo, wt } = makeWorkspace({ touches: ['api:src/**'] });
+  otherSlice(ws, repo, 'S-02', ['api:lib/**']);
+  const s = atRoot(ws);
+  await bind(ws, 'S-01');
+  const other = join(ws, 'worktrees', 'api', 'S-02');
+  for (const c of [
+    'rm -rf worktrees/api/S-02',
+    `rm -rf ${other}/lib`,
+    'rm -rf repos/api/src',
+    `rm ${repo.api}/src/a.ts`,
+    'rm -rf worktrees/api/S-01',
+    `rm ${wt.api}/README.md`,
+    `rm -rf ${wt.web}/src`,
+    'rm slices/S-01-orders.md',
+    'rmdir worktrees/api/S-02/lib',
+    `unlink ${repo.api}/src/a.ts`,
+    `mv ${other}/lib ${wt.api}/src/lib`,
+    `mv ${repo.api}/src/a.ts ${wt.api}/src/b.ts`,
+    `find ${other} -name '*.ts' -delete`,
+    `find ${repo.api}/src -delete`,
+    `git -C ${other} clean -fdx`,
+    `git -C ${wt.api} clean -fd`,
+    `git -C ${wt.api} rm README.md`,
+    `git -C ${wt.api} worktree remove --force ${other}`,
+    `rm -rf ${wt.api}/*`,
+    `rm -rf $TARGET`,
+  ]) denied(await s.sh('implementer', c), c);
+  for (const c of [
+    `rm ${wt.api}/src/a.ts`,
+    `rm -rf ${wt.api}/src/tmp`,
+    `rm -f ${wt.api}/src/*.tmp`,
+    `mv ${wt.api}/src/a.ts ${wt.api}/src/b.ts`,
+    `find ${wt.api}/src -name '*.orig' -delete`,
+    `git -C ${wt.api} clean -fd src`,
+    `git -C ${wt.api} rm --cached README.md`,
+    `git -C ${wt.api} rm src/a.ts`,
+    'rm tmp/S-01/journal.md',
+    `cd ${wt.api} && rm src/a.ts`,
+  ]) assert.equal(await s.sh('implementer', c), '', c);
+  // From the worktree of the slice, a relative removal lands there.
+  const env = { CLAUDE_PROJECT_DIR: ws };
+  const inTree = (command) => hook(wt.api, { session_id: 'sess-a', agent_type: 'implementer', tool_name: 'Bash', tool_input: { command } }, { env });
+  assert.equal(await inTree('rm -rf src/tmp'), '');
+  denied(await inTree('rm README.md'));
+  denied(await inTree('rm -rf ../S-02'));
+  // The main session is not held to the touches.
+  assert.equal(await s.sh(null, `rm -rf ${wt.api}/src/tmp`), '');
 });

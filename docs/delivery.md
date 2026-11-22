@@ -10,7 +10,7 @@ flowchart TD
   G0 --> B["/recade:team<br/>project lead, roster, one doctrine per role"]:::info --> G1{{G1}}:::warm
   G1 --> C["/recade:docs<br/>D1, art direction, stack, D2, D3, PLAN"]:::info --> G2{{"G2-stack, then G2"}}:::warm
   G2 --> D["/recade:bible<br/>the rules every agent applies"]:::info --> G3{{G3}}:::warm
-  G3 --> E["/recade:slices<br/>slice sheets and the GitHub board"]:::info --> G4{{G4}}:::warm
+  G3 --> E["/recade:slices<br/>slice sheets, then GitHub or local"]:::info --> G4{{G4}}:::warm
   G4 --> F["/recade:harness<br/>agents, commands, hooks and CI in the project"]:::info --> G5{{G5}}:::warm
   G5 --> S["Delivery, slice by slice"]:::system
   classDef info fill:#DCE6F1,stroke:#1F3864,color:#1F3864
@@ -22,18 +22,18 @@ flowchart TD
 |---|---|---|
 | Intake | A questionnaire, the brief, and the gaps: each blocking gap is set apart, each other gap gets a provisional value. | `intake-analyst`; in adopt mode `inventory-analyst` (the repositories in place) and `code-reader` (the rules the code already follows) |
 | Team | The owner picks the project lead, then approves the team. Each role gets a doctrine drawn from a real expert. | `recruiter`, `doctrine-writer` |
-| Documents | D1 (what the product does), the art direction, the stack (a ranked top 5 per layer, finalists tried in real spikes), D2 (architecture), D3 (security), the PLAN. One reviewer per document, one revise round, a word budget per document. | `project-lead`, `ux-designer`, `domain-expert`, `ui-designer`, `stack-analyst`, `spike-runner`, `architect`, `devops-lead`, `security-lead` |
+| Documents | D1 (what the product does), the art direction, the stack (a ranked top 5 per layer, finalists tried in real spikes), D2 (architecture), D3 (security), the PLAN. One reviewer per document, one revise round, a word budget per document. Rendered to Word and Excel in `docs/deliverables/`, each file named in the language of its document (`D1_Functional-Specifications.docx`). | `project-lead`, `ux-designer`, `domain-expert`, `ui-designer`, `stack-analyst`, `spike-runner`, `architect`, `devops-lead`, `security-lead` |
 | Rules | The BIBLE: the rules, written so that agents apply them without interpretation. | `bible-writer`, `chief-reviewer` |
-| Slices | The PLAN is cut into slices, each with a file scope, a lane and a definition of done. | `slicer` |
+| Slices | The PLAN is cut into slices, each with a file scope, a lane and a definition of done. The owner says where the code lives: GitHub (repositories, board, issues) or local only. | `slicer` |
 | Harness | The project gets its agents, commands, guards and CI, specialised by the team. | the project agents |
 
-A project picks its track at intake. The short track halves the word budgets, trims the reviews, the art direction, the stack study, the BIBLE and the team, and makes S-01 a walking skeleton; every gate stays (design, section 6.7). `/recade:status` and the retro show how many days the first slice took.
+A project picks its track at intake. The short track halves the word budgets, trims the reviews, the art direction, the stack study (no spike unless the owner asks), the BIBLE and the team, makes S-01 a walking skeleton, and writes sheets for the first increment only, 6 at most, with the later slices in `slices/BACKLOG.md`; every gate stays (design, section 6.7). `/recade:status` and the retro show how many days the first slice took.
 
 During framing the team settles the small, reversible questions itself and lists them at each gate, where the owner can challenge any of them. The owner answers the questions that cost money, bind the client or cannot be undone, up to four at a time. A project in trust mode (`decisions: trust`) goes further: before a decision is asked, the team takes its recommended option when it costs nothing, binds no one and can be undone, and records it as a team decision. The gate then shows what the team decided, one line each, what the owner must answer, and the details on request. The owner still passes every gate. `/recade:amend` changes an approved document: it shows what cites it and takes the project back to the gate that must be passed again.
 
 ## 2. Delivery: one slice at a time
 
-Each slice has a sheet, a file scope (`touches:`) and its own worktree. `/slice` delivers one, `/parallel` runs three to five whose scopes do not overlap. The chain depends on the lane of the slice.
+Each slice has a sheet, a file scope (`touches:`) and its own worktree. Every session starts at the root of the workspace, where every command and every agent is installed: you type `/slice <S-nn>` there, and it opens the worktree of each code repository the slice touches, under `worktrees/<repo>/<S-nn>` of the workspace, on the branch of the slice. You never choose a folder, and a `no-code` slice opens none. `/parallel` opens three to five slices whose scopes do not overlap, each run then from its own session at the root. The chain depends on the lane of the slice.
 
 ```mermaid
 flowchart TD
@@ -81,7 +81,7 @@ When in doubt between two lanes, the stricter one wins.
 | `design-reviewer` | The screens against the art direction, with screenshots. `ON_DIRECTION` or `FIX`. |
 | `product-reviewer` | Looks at the finished screen as its users would, never at the code. |
 | `doc-writer` | The guides and the API reference of the slice. |
-| `release-manager` | Prepares the pull request: body, human actions, rebase check. Never merges. |
+| `release-manager` | Prepares the pull request (on the local forge, the review request): body, human actions, rebase check. Never merges. |
 | `second-opinion` | Reviews the pull request with fresh eyes, on Opus 5.5: it reads the PR, the sheet and the requirements, never the reports of the other agents. `CONCURS`, `CONCERNS` or `BLOCKING`. |
 | `merge-keeper` | Proposes the merge order, rebases the next pull requests, re-runs the gates. Never merges. |
 | `board-keeper` | Summarises what `/board` would move on the GitHub board. |
@@ -93,8 +93,24 @@ When in doubt between two lanes, the stricter one wins.
 ### The rules that keep it honest
 
 - Loops are bounded: `FIX` goes back to the implementer at most twice, then to the owner. `REOPEN` goes back to the sheet, and to gate-1 in the sensitive lane. `BLOCKING` goes to the owner as written.
-- No agent merges, pushes to `main`, skips a git hook or deletes a test. The hooks guard each write against the file scope of the slice. GitHub branch protection is the last barrier.
+- No agent merges, pushes to `main`, skips a git hook or deletes a test. The hooks guard each write against the file scope of the slice: an agent writes only the worktrees of the slice its session runs, within `touches:` (`api:src/**` is `worktrees/api/<S-nn>/src/**`), never a main checkout under `repos/` or the worktree of another slice. GitHub branch protection is the last barrier; on the local forge the owner is.
 - A slice across several repositories has one pull request per repository, and is `done` only when all of them are merged.
 - `/status` shows every slice, `/board` keeps the GitHub board in step after each merge, `/retro` closes an increment with its delivery metrics.
+- The board holds one epic for each lot of the PLAN, with its stories and slices as sub-issues. `/board` closes an epic when every slice that serves its lot is done, and reopens it when a new slice comes. When the PLAN or the slices change, `/recade:amend` and a new cut of `/recade:slices` offer `recade github sync`, which renames, moves, adds and closes epics to match, after your yes. All of this only when the project uses GitHub (`forge: github`).
+
+### On the local forge
+
+When the owner answers `Local only` at the slices (`forge: local` in `recade/state.yaml`), the chain is the same, gates and guards included, with no GitHub at all.
+
+| Step | On GitHub | On the local forge |
+|---|---|---|
+| End of a slice | `release-manager` opens a pull request in each repository | `release-manager` writes the same body into `slices/reviews/<S-nn>.md` of the workspace, one section for each repository; the branch stays in its worktree |
+| Second opinion | `/second-opinion <PR>` comments on the pull request | `/second-opinion <S-nn>` reviews the diff of the branch and writes its verdict into the review request |
+| The merge | the owner merges on GitHub | `/board` shows `git -C '<repo>' merge --no-ff <branch>` for each repository and runs `recade slices merge <S-nn>` only after the owner's yes; or the owner runs the commands in a terminal |
+| `/board` | reads the pull requests, moves the board, closes the issue | reads the merge commits from git, writes `merged:`, moves the slice to `done` in `STATUS.md`, removes the worktree and the branch |
+| `/merge-order` | orders the open pull requests | orders the slice branches that have a review request, and moves a rebased branch only after the owner's yes |
+| What is skipped | nothing | branch protection, the conflicts and second-opinion workflows and their secrets, dependabot |
+
+No agent merges on either forge: the guard refuses `recade slices merge` to every agent, and `git merge` into `main` to everyone. No command calls `gh`. `recade state set forge github` moves the project to GitHub later.
 
 The full rules, statuses and report blocks are in [harness/protocol.md](../harness/protocol.md), and the reasons behind them in [design.md](design.md).

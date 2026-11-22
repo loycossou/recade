@@ -9,8 +9,9 @@ language: "en"
 ---
 
 <!--
-The intake questionnaire. Ask in the chat language, a few questions at a time, as multiple choice when
-the answers are few. Write each answer in the table. Rate each unanswered question:
+The intake questionnaire. Ask in the chat language, a few questions at a time, each as a multiple choice:
+2 or 3 likely answers, the most likely first, plus Not known yet. Ask it open only when the answer is free
+text by nature (a name, a date). Write each answer in the table. Rate each unanswered question:
 blocking means we would build the wrong thing without it (the problem, the users, the scope): ask the owner
 and wait. replaceable means we generate a provisional value and go on: log it in intake/provisionals.md.
 -->

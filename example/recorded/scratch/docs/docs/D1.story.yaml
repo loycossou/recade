@@ -1,0 +1,31 @@
+kicker: Functional specifications · first draft
+lede: A desk screen that tells the volunteers, every Saturday, which tool is where and who has it.
+facts:
+  - { label: Members, value: about 300 }
+  - { label: Tools, value: about 180 }
+  - { label: Modules, value: "4" }
+  - { label: Phase 1 ready, value: 2026-12-28 }
+recap:
+  - "**The problem is lost tools.** One tool in ten disappears each year, because a loan lives on a sheet of paper."
+  - "**One screen, at the desk.** Volunteers use it on Saturdays. Members have no account."
+  - "**A tool is never lent twice** (PRI-01). The record of a tool always says where it is."
+  - "**A loan lasts 7 days** (PAR-01). A late day costs a small fee (PAR-02), whose amount is still provisional."
+  - "**The overdue report** lists every late tool on its due day, with its member."
+  - "**Personal data stays home** (PRI-02): a name and a phone number, on the library's own server."
+decisions:
+  - decision: No online booking in phase 1
+    why: The desk works on paper today. The first step is to make the desk reliable, not to add a second channel.
+  - decision: Only a name and a phone number per member
+    why: The library promised its members to keep as little as it can.
+sections:
+  - section: 3
+    image: "A library card catalogue has one card per book, and the card is either in the drawer or with the loan slip. It cannot be in both places."
+  - section: 7
+    image: "Think of the cloakroom of a theatre: one ticket per coat, the ticket says which hook, and a coat without a ticket does not leave."
+    stats:
+      - { value: "7", label: requirements }
+      - { value: "6", label: MUST }
+      - { value: "1", label: SHOULD }
+    before_after:
+      - { before: A loan on a sheet of paper, after: A loan record with a due date }
+      - { before: Late tools found by chance, after: An overdue report every Saturday }

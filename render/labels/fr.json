@@ -24,6 +24,29 @@
   "warning": "Attention",
   "decision": "Décision",
   "captionSeparator": "\u00a0: ",
+  "registers": {
+    "decisions": "registre des décisions",
+    "reviews": "notes de revue"
+  },
+  "dossier": {
+    "recap": "Le récap en {n} phrases",
+    "recapSub": "De quoi tenir tout le document en cinq minutes.",
+    "image": "L’image",
+    "real": "Le vrai",
+    "before": "Avant",
+    "after": "Après",
+    "decisions": "Les décisions qui comptent",
+    "decision": "Décision",
+    "why": "Pourquoi",
+    "howToReadLead": "Comment lire.",
+    "howToRead": "Chaque idée difficile vient deux fois : d’abord une image du quotidien, puis le vrai, avec ses vrais noms.",
+    "about": "À propos de ce document",
+    "index": "Index",
+    "theme": "Clair ou sombre",
+    "indexKicker": "Les documents du projet",
+    "indexLede": "Chaque document en dossier à lire, avec son fichier Word ou Excel à côté.",
+    "read": "Lire le dossier"
+  },
   "planTerms": {
     "Increments": "Incréments",
     "Summary": "Synthèse",

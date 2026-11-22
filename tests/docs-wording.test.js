@@ -24,12 +24,12 @@ test('new.md creates the code repositories after G2, as docs.md and harness.md d
   assert.ok(text.includes('The code repositories are created later, after G2 (`/recade:docs`)'));
 });
 
-test('design.md lists the six main-session-only commands, recade workspace commit included', () => {
+test('design.md lists the eight main-session-only commands, recade workspace commit, recade slices merge and recade slices open included', () => {
   const text = read('docs/design.md');
   assert.equal(text.includes('`recade repo sync`, `recade repo add` and `recade harness specialise` (which writes'), false);
   assert.equal(text.includes('the guard refuses all three'), false);
   assert.ok(text.includes('`recade repo sync`, `recade repo add`, `recade harness specialise` (which writes the specialisation of an agent or command file), `recade workspace commit`'));
-  assert.ok(text.includes('`recade workspace commit`, `recade workspace auto-push` or `recade guard snapshot`: the guard refuses all six'));
+  assert.ok(text.includes('`recade workspace commit`, `recade workspace auto-push`, `recade guard snapshot`, `recade slices merge` or `recade slices open`: the guard refuses all eight'));
 });
 
 test('CHANGELOG says what adopt writes in a code repository, as README and adopt.md do', () => {

@@ -176,7 +176,7 @@ test('/slice follows the sheet, the dependencies, the ledger and the caps of the
   assert.match(slice, /always `implementer-critical`/);
   assert.match(slice, /A third `FIX` is the end/);
   assert.match(slice, /REOPEN/);
-  assert.match(slice, /Rebase on the default branch, in each worktree: `git rebase '<base>'`/);
+  assert.match(slice, /Rebase on the default branch, in each worktree: `git -C '<worktree>' rebase '<base>'`/);
   assert.doesNotMatch(slice, /git rebase main/);
   assert.match(slice, /`git add` each path by name \(never `git add -A` or `git add \.`\)/);
   assert.match(slice, /tell the owner to read the pull request and merge it, then run `\/board`/i);
@@ -189,11 +189,11 @@ test('/slice asks for the second opinion by the rule of second_opinion, through 
   assert.match(s, /With `always`, it runs for every pull request/);
   assert.match(s, /With `sensitive` \(the default\), it runs when the lane is `sensitive` or when the pull request changes more than 400 lines/);
   assert.equal(/off. does not turn it off/.test(s), false);
-  assert.match(s, /gh pr view '<PR>' --json additions,deletions/);
-  assert.match(s, /run `\/second-opinion <PR>`/);
+  assert.match(s, /gh pr view '<PR>' --repo '<remote>' --json additions,deletions/);
+  assert.match(s, /run `\/second-opinion <PR> --repo '<repo>'`/);
   assert.match(s, /Run \/second-opinion <PR> when available\./);
   assert.match(s, /Do not invent a verdict/);
-  assert.match(s, /git diff --quiet '<recorded commit>' HEAD/);
+  assert.match(s, /git -C '<worktree>' diff --quiet '<recorded commit>' HEAD/);
   assert.match(s, /do not run it again: show the recorded verdict/);
 });
 
@@ -208,16 +208,18 @@ test('/slice moves a status only when the slice is not already in it, so a resum
   assert.match(step(slice, 'Audit'), /When resuming at `audit`, skip this/);
 });
 
-test('/slice runs only in the worktree of the slice, sends --set to the main checkout and ignores STATUS.md in the clean-tree check', () => {
+test('/slice runs from the root of the workspace, opens the worktrees itself, and sends --set to the workspace', () => {
   const slice = text('slice');
   const one = step(slice, 'The project, the sheet and the dependencies');
-  assert.match(one, /Unless the lane is `no-code`, check where you are: run `git rev-parse --show-toplevel`\. It must print the worktree of the first repository, `<home>\/repos\/<first repo>\/\.claude\/worktrees\/<S-nn>`/);
-  assert.match(one, /If it prints `<home>`, or the main checkout of a repository, say that \/slice runs only in the worktree of the slice, started in the first repository of `touches:`/);
-  assert.match(one, /runs only in the worktree of the slice/);
-  assert.match(one, /and stop\./);
+  assert.match(one, /Check where you are: run `git rev-parse --show-toplevel`\. It must print `<home>`\. If it prints the folder of a code repository or of a worktree, say that \/slice runs from the root of the workspace, in a session started at `<home>`, and stop/);
+  // The owner never chooses a folder: /slice opens the worktrees from touches: and ties the session to the slice.
+  assert.match(one, /run `recade slices open '<S-nn>' --project '<home>'`, exactly that way, as its own command\. It reads `touches:` and opens the worktree of each repository it names, `<home>\/worktrees\/<repo>\/<S-nn>`, on the branch of the sheet/);
+  assert.match(one, /tells the guard that this session runs `<S-nn>`/);
+  assert.match(one, /The owner never chooses a folder\. A `no-code` slice opens no worktree\./);
+  assert.doesNotMatch(slice, /\/add-dir|\.claude\/worktrees|first repo>/);
   assert.match(one, /--project '<home>'/);
   const three = step(slice, 'Branch, ledger and cost');
-  assert.match(three, /git status --porcelain --untracked-files=all -- \. ':\(exclude\)slices\/STATUS\.md'/);
+  assert.match(three, /`git -C '<worktree>' status --porcelain --untracked-files=all` prints nothing, in each worktree of the slice/);
   assert.equal(/git switch -c|Create the branch/.test(slice), false, 'the branch is made by the worktree, not here');
   for (const line of slice.split('\n').filter((l) => /recade slices status --set/.test(l))) {
     for (const m of line.matchAll(/recade slices status --set '[^']+' [a-z0-9-]+(?: --note '[^']*')?( --project '<home>')?/g)) {
@@ -323,17 +325,16 @@ test('/parallel opens worktrees on the branch of the sheet, case-insensitively c
   const src = text('parallel');
   const tools = frontmatter(src)['allowed-tools'];
   const git = [...tools.matchAll(/Bash\((git[^)]*)\)/g)].map((m) => m[1]);
-  assert.deepEqual(git, ['git -C * worktree add *', 'git -C * worktree list*', 'git -C * branch --list *', 'git -C * branch --show-current', 'git -C * status --porcelain*']);
+  assert.deepEqual(git, ['git -C * worktree list*']);
   assert.equal(git.some((g) => /^git (push|merge|rev-parse)/.test(g)), false);
-  assert.match(step(src, 'The worktrees'), /git -C '<home>\/repos\/<repo>' status --porcelain` prints nothing/);
   const pick = step(src, 'The owner picks');
   assert.match(pick, /\^slice\/\[A-Za-z0-9\._-\]\+\$/);
   assert.match(pick, /without regard to letter case/);
   assert.match(pick, /slice\/s-03-payout/);
   assert.match(pick, /exactly as the sheet writes it/);
   const open = step(src, 'The worktrees');
-  assert.match(open, /git -C '<home>\/repos\/<repo>' worktree add \.claude\/worktrees\/<S-nn> -b '<branch>'/);
-  assert.equal(/git (rev-parse|check-ignore|push|merge)/.test(src), false);
+  assert.match(open, /run `recade slices open '<S-nn>' --no-session --project '<home>'`/);
+  assert.equal(/git (rev-parse|check-ignore|push|merge)|worktree add/.test(src), false);
 });
 
 /* ---------- fix wave: red tests, gates before commits, sensitive models, worktrees ---------- */
@@ -352,12 +353,12 @@ test('/slice keeps the red tests uncommitted until Step 9, with the red run and 
   assert.match(impl, /sha256/);
   assert.match(impl, /unless the ledger records why/);
   assert.doesNotMatch(slice, /git stash/);
-  assert.match(impl, /\.recade\/slices\/<S-nn>\/red\//);
+  assert.match(impl, /<home>\/\.recade\/slices\/<S-nn>\/red\/<repo>\//);
   assert.match(impl, /copy them back/);
   assert.doesNotMatch(slice, /delete the cop/);
   assert.match(impl, /The copies stay[\s\S]*next task commit overwrites them/);
   assert.match(three, /missing[\s\S]*copy[\s\S]*recorded hash[\s\S]*restored first/);
-  for (const at of [three, tests]) assert.match(at, /git status --porcelain --untracked-files=all/);
+  for (const at of [three, tests]) assert.match(at, /git -C '<worktree>' status --porcelain --untracked-files=all/);
   assert.match(tests, /Nothing is committed at this step/);
   assert.match(three, /resuming at `implementation`[\s\S]*`Red tests:`/);
   const two = step(slice, 'What every dispatch holds');
@@ -379,8 +380,8 @@ test('/design runs every mode from the workspace, and only the screenshots of a 
   assert.match(design, /All five modes run from the workspace\./);
   assert.match(design, /a session started in the workspace may write the folder of any slice/);
   assert.match(design, /Only the screenshots of a running screen need the worktree of a slice/);
-  assert.match(design, /If it is not, say that the review of the running screens is made in the worktree of the slice[\s\S]*and go on without it\./);
-  assert.match(design, /git branch --show-current/);
+  assert.match(design, /If it is not, say that the review of the running screens is made when the slice has code[\s\S]*and go on without it\./);
+  assert.match(design, /run `recade slices open '<S-nn>' --keep-session --project '<home>'`, exactly that way/);
   assert.doesNotMatch(design, /and stop\. `direction` and `system`/);
 });
 
@@ -449,7 +450,7 @@ test('the release-manager refuses to open a UI pull request without a demo, neve
   assert.match(src, /do not open the PR: report BLOCKING with the sentence `UI demo missing`/);
   assert.match(src, /Demo: not applicable, no screens/);
   const writes = /## Writes\n\n([\s\S]*?)\n\n## /.exec(src)[1].split('\n');
-  assert.deepEqual(writes, ['- `workspace:artifacts/*/<S-nn>/**`', '- `workspace:tmp/<S-nn>/**`']);
+  assert.deepEqual(writes, ['- `workspace:artifacts/*/<S-nn>/**`', '- `workspace:tmp/<S-nn>/**`', '- `workspace:slices/reviews/<S-nn>.md`']);
   assert.equal(src.includes(String.fromCharCode(0x2014)), false);
 });
 
@@ -487,13 +488,19 @@ test('<home> is the workspace, found by `recade workspace root`, and no command 
   }
 });
 
-test('the project commands run from the workspace, the slice commands from the worktree of the slice', () => {
+test('every command runs from the workspace: the slice commands from the root of the workspace, where the session starts', () => {
   for (const name of ['status', 'board', 'parallel', 'merge-order', 'retro', 'slice-write', 'slice-check', 'decision', 'inventory', 'design', 'amend']) {
     assert.match(text(name), /Run it exactly that way, from the workspace folder\./, name);
   }
   for (const name of ['slice', 'review', 'second-opinion', 'explain']) {
-    assert.match(text(name), /Run it exactly that way, from the worktree of the slice, or from the code repository\./, name);
+    assert.match(text(name), /Run it exactly that way, from the root of the workspace, where this session starts\./, name);
+    assert.doesNotMatch(text(name), /from the worktree of the slice, or from the code repository/, name);
   }
+  // The pointer of a code repository sends a session opened there to the workspace, and does nothing else.
+  const pointer = readFileSync(join(repo, 'harness', 'pointer', 'slice.md'), 'utf8');
+  assert.match(pointer, /start a new Claude Code session at `<home>`, the root of the workspace, and type `\/slice <S-nn>` there/);
+  assert.match(pointer, /There is no folder to choose\./);
+  assert.match(pointer, /It writes no file and runs no agent\./);
 });
 
 test('/slice takes the guard snapshot at the start and audits before each gate, and a BLOCKING line stops the slice', () => {
@@ -506,26 +513,26 @@ test('/slice takes the guard snapshot at the start and audits before each gate, 
   assert.match(two, /when `recade guard audit` prints a `BLOCKING:` line/);
   assert.match(two, /do not take a new snapshot to get rid of it/);
   const three = step(slice, 'Branch, ledger and cost');
-  assert.ok(three.indexOf('Create `.recade/slices/<S-nn>/progress.md`') < three.indexOf("recade guard snapshot --slice '<S-nn>'"), 'the ledger exists before the snapshot is written in it');
+  assert.ok(three.indexOf('Create `<home>/.recade/slices/<S-nn>/progress.md`') >= 0 && three.indexOf('Create `<home>/.recade/slices/<S-nn>/progress.md`') < three.indexOf("recade guard snapshot --slice '<S-nn>'"), 'the ledger exists before the snapshot is written in it');
   assert.match(three, /`Snapshot:`/);
   assert.match(step(slice, 'Gate-1 \\(sensitive lane\\)'), /Run the guard audit \(Step 2\)\. A `BLOCKING:` line stops the slice here, before the owner is asked/);
   const g2 = step(slice, 'Gate-2 or ready to merge');
   assert.match(g2, /Run the guard audit \(Step 2\): a `BLOCKING:` line stops the slice\. Only then run the `ready-to-merge` move/);
 });
 
-test('/slice starts in the first repository of touches, adds the others as directories, and does each step in every worktree', () => {
+test('/slice stays at the root of the workspace and does each step in every worktree of the slice', () => {
   const slice = text('slice');
   const one = step(slice, 'The project, the sheet and the dependencies');
   assert.match(one, /The repositories of the slice are the prefixes of `touches:` in the order they first appear/);
-  assert.match(one, /The first one is the repository of the session/);
-  assert.match(one, /`<home>\/repos\/<repo>\/\.claude\/worktrees\/<S-nn>`, on the branch of the sheet/);
-  assert.match(one, /added to the session as additional directories \(`\/add-dir <worktree>`\)/);
-  assert.match(one, /Claude Code reads the guard and the settings of the folder where it starts/);
+  assert.match(one, /The worktree of a repository is `<home>\/worktrees\/<repo>\/<S-nn>`, on the branch of the sheet/);
+  assert.match(one, /This session stays at the root of the workspace for the whole slice/);
+  assert.match(one, /Claude Code reads the guard, the commands and the agents of the folder where the session starts, and they are in the workspace/);
   const two = step(slice, 'What every dispatch holds');
+  assert.match(two, /its shell starts at the root of the workspace: it reads and writes the code under the worktrees of the slice, runs git as `git -C '<worktree>'`/);
   assert.match(two, /`<home>` \(the full path of the workspace, where the documents named in the agent files are read\)/);
   assert.match(two, /Each repository has its own stamps, and the slice is green when the required gates are green in each of its repositories/);
   assert.match(two, /recade gate run '<name>' --project '<worktree>' -- sh -c '<command>'/);
-  assert.match(two, /An agent cannot run `recade repo sync`, `recade repo add`, `recade harness specialise`, `recade workspace commit`, `recade workspace auto-push` or `recade guard snapshot`, a nested shell \(`sh -c`, `bash -c`, `eval`\), or set `GIT_DIR`, `GIT_WORK_TREE` or `GIT_INDEX_FILE`/);
+  assert.match(two, /An agent cannot run `recade repo sync`, `recade repo add`, `recade harness specialise`, `recade workspace commit`, `recade workspace auto-push`, `recade guard snapshot`, `recade slices merge` or `recade slices open`, a nested shell \(`sh -c`, `bash -c`, `eval`\), or set `GIT_DIR`, `GIT_WORK_TREE` or `GIT_INDEX_FILE`/);
   assert.match(slice, /This command never runs `recade repo sync` or `recade repo add`/);
 });
 
@@ -538,18 +545,19 @@ test('builds go to artifacts/<repo>/<S-nn>/ and drafts to tmp/, in the commands 
   assert.match(protocol, /goes to `<home>\/artifacts\/<repo>\/<S-nn>\/`, and one of a version, made by the main session, to `<home>\/artifacts\/<repo>\/<version>\/`\. A draft goes to `<home>\/tmp\/<S-nn>\/`/);
 });
 
-test('/parallel opens one worktree for each repository a slice touches and starts the session in the first', () => {
+test('/parallel opens the worktrees of several slices with recade slices open, and every session starts at the root of the workspace', () => {
   const src = text('parallel');
-  assert.match(step(src, 'The plan'), /its `worktrees` \(one `\{repo, path, branch\}` for each code repository it touches, the first one being the repository of the first glob of `touches:`, where its session starts\)/);
+  assert.match(step(src, 'The plan'), /its `worktrees` \(one `\{repo, path, branch\}` for each code repository it touches, in the order of `touches:`, the path being `worktrees\/<repo>\/<S-nn>` of the workspace\)/);
   assert.match(step(src, 'The plan'), /recade parallel plan --max <max> --json --project '<home>'/);
   const open = step(src, 'The worktrees');
-  assert.match(open, /in `<home>\/repos\/<repo>\/\.claude\/worktrees\/<S-nn>`, on the branch of the sheet, the same branch in every repository/);
-  assert.match(open, /`git -C '<home>\/repos\/<repo>' branch --show-current` prints its `default_branch`/);
-  assert.match(open, /Never write in `\.git` yourself/);
-  assert.match(open, /A slice with a repository that failed is reported as half opened/);
+  assert.match(open, /`recade slices open` does for one slice what this step does for each pick/);
+  assert.match(open, /`<home>\/worktrees\/<repo>\/<S-nn>`, on the branch of the sheet, the same branch in every repository/);
+  assert.match(open, /`--no-session` opens the worktrees without tying this session to the slice/);
+  assert.match(open, /say which slice is half opened, so the owner does not start it/);
   const how = step(src, 'How to start');
-  assert.match(how, /Open a new Claude Code session in the worktree of the first repository: `<home>\/repos\/<first repo>\/\.claude\/worktrees\/<S-nn>`/);
-  assert.match(how, /add their worktrees to that session as additional directories \(`\/add-dir <home>\/repos\/<repo>\/\.claude\/worktrees\/<S-nn>`/);
+  assert.match(how, /Open a new Claude Code session at the root of the workspace, `<home>`, one session for each slice that runs at the same time/);
+  assert.match(how, /Type `\/slice <S-nn>` in that session/);
+  assert.doesNotMatch(src, /\/add-dir|\.claude\/worktrees/);
 });
 
 test('the dispatching commands collect every report before they end the turn, and never split a task that fits one agent', () => {
@@ -588,7 +596,7 @@ test('/second-opinion reads the sheet from the workspace, never copies it, and k
   assert.match(src, /it is never copied into the pull request, a comment or the code repository/);
   assert.match(src, /cite requirement IDs, DoD row numbers, files and lines, and never quote the sheet/);
   assert.match(src, /Check before you post that the text quotes no line of the sheet/);
-  assert.match(src, /recade harness models --check --dir '\.claude\/agents'`, from the code repository/);
+  assert.match(src, /recade harness models --check --dir '<home>\/\.claude\/agents'`: the agents are installed in the workspace/);
 });
 
 test('/merge-order and /board work across the code repositories of the workspace', () => {
@@ -596,7 +604,7 @@ test('/merge-order and /board work across the code repositories of the workspace
   assert.match(mo, /`recade repo list --json`: each entry has a `name` and a `remote`/);
   assert.match(mo, /`\[\{pr, repo, slice, reason\}\]`, a pull request number being the number in its own repository/);
   assert.match(mo, /gh pr view '<next>' --repo '<remote>' --json number,headRefName,url/);
-  assert.match(mo, /git -C '<home>\/repos\/<repo>' worktree add --detach '<home>\/repos\/<repo>\/\.claude\/worktrees\/merge-<next>'/);
+  assert.match(mo, /git -C '<home>\/repos\/<repo>' worktree add --detach '<home>\/worktrees\/<repo>\/merge-<S-nn>' 'origin\/<branch>'`\. If the folder already exists, say so and stop: the owner removes it by hand\. Call the folder `<folder>`\. Then run `recade slices open '<S-nn>' --tie-only --project '<home>'`/);
   assert.match(mo, /merges its pull requests in the order of its sheet/);
   assert.equal(/Bash\(git (push|merge)/.test(frontmatter(mo)['allowed-tools']), false);
   const board = text('board');
@@ -642,7 +650,8 @@ test('the default branch of each repository is used, never a hard-coded main, fo
   assert.match(text('merge-order'), /rebase the branch on `origin\/<base>` in `<folder>`/);
   const slice = text('slice');
   assert.match(slice, /`<base>` below is the `default_branch` of a repository in `recade repo list --json`/);
-  assert.equal((slice.match(/git rebase '<base>'/g) ?? []).length, 3);
+  assert.equal((slice.match(/git -C '<worktree>' rebase '<base>'/g) ?? []).length, 3);
+  assert.match(text('review'), /run `recade slices open '<S-nn>' --keep-session --project '<home>'`, exactly that way, as its own command/);
   assert.match(text('review'), /`<base>\.\.\.<branch>` in each repository, `<base>` being the `default_branch` of that repository/);
 });
 
@@ -650,10 +659,11 @@ test('/second-opinion takes --repo <name> for the pull request of another reposi
   const src = text('second-opinion');
   assert.match(src, /An optional `--repo <name>` follows, the code repository whose pull request it is/);
   assert.match(src, /Usage: \/second-opinion <PR> \[--repo <name>\]/);
-  assert.match(src, /the entry of that name must exist and have a `remote` that is not `none`/);
-  assert.match(src, /pass `--repo '<remote>'` to every `gh` command of this command and of the agent/);
-  assert.match(src, /gh pr view '<PR>' --json [a-zA-Z,]+` \(with `--repo '<remote>'` when `--repo` was given\)/);
-  assert.match(step(text('slice'), 'Documentation, pull request and second opinion'), /`\/second-opinion <PR> --repo '<repo>'` for the one of each other repository/);
+  assert.match(src, /With `--repo`, the entry of that name must exist\. Without it, the registry must hold one entry/);
+  assert.match(src, /The entry must have a `remote` that is not `none`/);
+  assert.match(src, /pass `--repo '<remote>'` to every `gh` command of this command and of the agent: this session is at the root of the workspace/);
+  assert.match(src, /gh pr view '<PR>' --repo '<remote>' --json [a-zA-Z,]+`/);
+  assert.match(step(text('slice'), 'Documentation, pull request and second opinion'), /`\/second-opinion <PR> --repo '<repo>'` for the pull request of each repository/);
 });
 
 test('a resumed /slice keeps its snapshot and audits against it, and takes a new one only when the owner says so', () => {

@@ -149,6 +149,7 @@ function block(repo, stack, eol, stackFile, { target, name } = {}) {
     lines.push(
       '- The project documents (bible, slice sheets, decisions) are in the workspace of this project: `recade workspace root` prints its folder',
       `- Harness technical sheet of this repository: the table headed \`${name}\` in section 12 of the stack document of the workspace`,
+      '- Slices are delivered from a session started at the root of the workspace, with `/slice <S-nn>`: the agents and the commands are there, and the worktree of a slice is `worktrees/<repo>/<S-nn>` of the workspace',
     );
   } else {
     lines.push(

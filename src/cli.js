@@ -8,11 +8,11 @@ import { scanAttachments, formatFinding } from './style/attachments.js';
 import { checkRoot, renderIndexMd } from './index/check.js';
 import { stringify } from 'yaml';
 import { configPath, loadConfig, saveConfig, setConfigValue } from './config.js';
-import { WRITER_CHOICES, WRITER_MODELS, isWriterChoice } from './models.js';
+import { WRITER_CHOICES, WRITER_MODELS, isSecondOpinionChoice, isWriterChoice } from './models.js';
 import { EXTRAS, isExtra } from './deliverables.js';
 import { firstSliceDue, loadState, noteFirstSliceDone, saveState } from './state.js';
 import {
-  PHASES, GATES, ADOPT_GATES, SETTINGS, decisionsOf, phasesOf, gatesOf, normalizeState, canStart, passGate, resetFrom, nextAction, projectRoot, workspaceOf, currentPhase, setSetting, trackOf, firstSliceLine,
+  PHASES, GATES, ADOPT_GATES, SETTINGS, decisionsOf, phasesOf, gatesOf, normalizeState, canStart, passGate, resetFrom, nextAction, projectRoot, workspaceOf, currentPhase, setSetting, trackOf, forgeOf, firstSliceLine,
   phaseCommand,
 } from './project/state.js';
 import { runChecks, defaultExec } from './doctor.js';
@@ -30,6 +30,7 @@ import { initAdopt, preflight, writeOwnFile, AdoptError } from './project/adopt.
 import { scan as scanInventory, renderInventory, scanWorkspace, renderWorkspaceInventory } from './project/inventory.js';
 import { checkTeam } from './project/doctrine.js';
 import { checkSlices, renderGraph, renderStatus, setStatus, tickDod } from './project/slices.js';
+import { cleanSpikes, recordBefore, spikeEnv, spikeRoom } from './project/spikes.js';
 import { initGithub, adoptBoard } from './project/github.js';
 import { fromCode } from './project/fromcode.js';
 import { impactOf } from './project/amend.js';
@@ -38,9 +39,10 @@ import { openProvisional, closeProvisional, listProvisionals } from './project/p
 import { newDecision, closeDecision, listDecisions, reopenTeamDecision } from './project/decisions.js';
 import { addTeamDecision, challengeTeamDecision, listTeamDecisions } from './project/teamdecisions.js';
 import { DEFAULT_BUDGETS, budgetsOf, checkSizes } from './budgets.js';
-import { estimatePhases, estimateSlice, formatRange, projectFacts, PHASE_IDS, SLICE_LANES } from './estimate.js';
-import { loadModels, modelWarnings, sensitiveLane, syncAgents } from './harness/models.js';
+import { estimatePhases, estimateSlice, formatRange, formatSteps, projectFacts, ESTIMATE_IDS, SLICE_LANES } from './estimate.js';
+import { loadModels, modelWarnings, secondOpinionOf, sensitiveLane, syncAgents, withSecondOpinion } from './harness/models.js';
 import { runGate, checkGate, isGateName, defaultExec as runCommand } from './harness/stamps.js';
+import { formatOpen, openSlice, tieSession } from './workspace/worktrees.js';
 import { handleHook, logGuard } from './harness/guard.js';
 import { refresh as refreshClaudeMd, findStack } from './harness/claudemd.js';
 import { explainParallel, DEFAULT_MAX } from './harness/parallel.js';
@@ -56,6 +58,7 @@ import { TARGET_NAMES, REPO_SETTINGS, readRepoSettings, writeRepoSettings } from
 import { verify, formatVerify } from './harness/verify.js';
 import { loadCaseSets, setPaths, runCases, defaultRun } from './harness/cases.js';
 import { protect } from './harness/protect.js';
+import { planLocalMerge, runLocalMerge } from './harness/localmerge.js';
 
 /** @typedef {{stdout:{write(s:string):void}, stderr:{write(s:string):void}, cwd:string, env:Record<string,string|undefined>, run?: (cmd: string[], opts: {cwd: string}) => {code: number, stdout: string, stderr: string}}} IO `run` is an optional test seam for the board commands. */
 
@@ -116,14 +119,15 @@ function renderHelp() {
   out += `${term('recade cases')}List and replay the agent test cases, the plugin's and the harness's: recade cases [--plugin] [--harness] [--run] [--agent <name>]\n`;
   out += `${term('recade workspace')}Find the project workspace, set its auto-push, commit its leftover documents: recade workspace root | auto-push on|off | commit --paths <path>[,<path>...] -m <message>\n`;
   out += `${term('recade repo')}Register the code repositories of the workspace, check and relink them: recade repo add <name> (--new | --clone <url>) | list | check | sync\n`;
-  out += `${term('recade harness')}Install, verify and test the agent harness: recade harness install | verify | cases [--run] | protect [--apply] | set | specialise <agent|command> <name> --file <path> | models\n`;
+  out += `${term('recade harness')}Install, verify and test the agent harness: recade harness install | verify | cases [--run] | protect [--apply] | set | specialise <agent|command> <name> --file <path> | models | migrate [--dry-run]\n`;
   out += `${term('recade cost')}Record the cost of a slice: recade cost record <S-nn> --minutes <n> --fix-loops <n> [--tokens <n> | --transcript <path|auto> [--since <ms>] [--session-dir <dir>]]. Estimate a phase or a slice before it runs: recade cost estimate [--phase <phase> | --slice standard|sensitive] [--json]\n`;
   out += `${term('recade retro')}Write retros/INC-n.md with DORA metrics and cost per slice: recade retro <INC-n> [--force] [--json]\n`;
   out += `${term('recade intake')}Scan intake/attachments for invisible Unicode and bidi controls before an agent reads them: recade intake scan [--json]\n`;
   out += `${term('recade quarantine')}Keep flaky tests in tests/quarantine.json until they are fixed: recade quarantine add | remove | list | check\n`;
   out += `${term('recade release-notes')}Release notes from conventional commits: recade release-notes <from>..<to> [--version <v>] [--write]\n`;
+  out += `${term('recade spikes')}Before a spike, check that this machine has the free memory and disk it needs, record what it holds and print the environment of the runner: recade spikes check --spike <layer>-<option> [--json]. After the spikes, remove what their manifests list and nothing else: recade spikes clean [--spike <layer>-<option>] [--json]\n`;
   out += `${term('recade docs')}Measure the project documents against their word budgets: recade docs size [D1|D2|D3|PLAN|STACK|BIBLE ...] [--json] | budgets [--json]. The team's own choices: recade decision team add | list | challenge\n`;
-  out += `${term('recade render')}Render Markdown documents to DOCX, PDF and XLSX: recade render <file.md...> [--format docx,pdf,xlsx] [--out <dir>] [--no-check], or the extras you chose (deliverables.extras: stack, decisions, design, reviews): recade render extras --project <dir> [--no-check]\n`;
+  out += `${term('recade render')}Render Markdown documents to DOCX and XLSX and an HTML dossier, named <ID>_<Title> in the document language (PDF too with deliverables.pdf true): recade render <file.md...> [--format docx,xlsx,html,pdf] [--out <dir>] [--no-check], or the extras you chose (deliverables.extras: stack, decisions, design, reviews): recade render extras --project <dir> [--no-check]\n`;
   return out;
 }
 
@@ -270,6 +274,9 @@ export const commands = {
           command_available: entry?.available !== false,
           next_action: nextAction(state),
           track: trackOf(state),
+          forge: forgeOf(state),
+          // The owner chose the forge already (`recade state set forge`): /recade:slices asks only when this is false.
+          forge_asked: state.forge === 'github' || state.forge === 'local',
           first_slice: firstSliceLine(state, localDate((io.now ?? (() => new Date()))())),
         };
         io.stdout.write(`${JSON.stringify(out, null, 2)}\n`);
@@ -662,6 +669,8 @@ export const commands = {
   },
   async slices(args, io) {
     if (args[0] === 'dod') return slicesDod(args.slice(1), io);
+    if (args[0] === 'merge') return slicesMerge(args.slice(1), io);
+    if (args[0] === 'open') return slicesOpen(args.slice(1), io);
     const set = args[0] === 'status' && args[1] === '--set';
     if (!set && (args.length !== 1 || !['check', 'graph', 'status'].includes(args[0]))) {
       io.stderr.write(`${SLICES_USAGE}\n`);
@@ -743,7 +752,7 @@ export const commands = {
       }
       try {
         mkdirSync(join(root, 'slices'), { recursive: true });
-        writeFileSync(join(root, 'slices', file), sub === 'graph' ? renderGraph(fresh.graph) : renderStatus(fresh.status));
+        writeFileSync(join(root, 'slices', file), sub === 'graph' ? renderGraph(fresh.graph) : renderStatus(fresh.status, fresh.backlog));
       } catch (err) {
         return { fail: 2, message: `Cannot write slices/${file}: ${oneLine(err)}` };
       }
@@ -755,6 +764,66 @@ export const commands = {
       return step.value.fail;
     }
     io.stdout.write(`Wrote slices/${file} with ${step.value.count} slice${step.value.count === 1 ? '' : 's'}.\n`);
+    return 0;
+  },
+  async spikes(args, io) {
+    const [sub, ...rest] = args;
+    const parsed = parseOptions(rest, { flags: ['--json'], values: ['--spike'] });
+    if (!['check', 'clean'].includes(sub) || parsed.error || parsed.positional.length > 0) {
+      io.stderr.write(`${SPIKES_USAGE}\n`);
+      return 2;
+    }
+    const root = projectRoot(io.cwd);
+    if (root === null) {
+      io.stderr.write('No Recade project here: recade/state.yaml not found. Run /recade:new first.\n');
+      return 1;
+    }
+    const json = parsed.flags.has('--json');
+    if (sub === 'check') {
+      const room = spikeRoom(root, io.spikeSeams ?? {});
+      const spike = parsed.values['--spike'];
+      let before = null;
+      let env = null;
+      if (room.ok && spike !== undefined) {
+        try {
+          before = recordBefore(root, spike, { exec: io.run ?? runCommand, ...(io.spikeSeams ?? {}) });
+        } catch (err) {
+          io.stderr.write(`Cannot record the machine before the spike: ${oneLine(err)}\n`);
+          return 2;
+        }
+        env = spikeEnv(join(root, 'spikes', spike));
+      }
+      if (json) io.stdout.write(`${JSON.stringify({ ...room, ...(before ? { before: before.record, env } : {}) })}\n`);
+      else {
+        io.stdout.write(`Free memory: ${room.memoryMb} MB (a spike needs ${room.min.memoryMb} MB).\n`);
+        io.stdout.write(room.diskMb === null ? 'Free disk: unknown.\n' : `Free disk: ${room.diskMb} MB (a spike needs ${room.min.diskMb} MB).\n`);
+        for (const p of room.problems) io.stdout.write(`${p}\n`);
+        io.stdout.write(room.ok ? 'Room for a spike: yes.\n' : 'Room for a spike: no. Skip the spike and decide the layer from the research.\n');
+        if (before) {
+          io.stdout.write(`Recorded the machine before the spike in spikes/${spike}.before.json.\n`);
+          io.stdout.write('Environment for the runner (it sets these before any install, so the caches stay in its folder):\n');
+          for (const [k, v] of Object.entries(env)) io.stdout.write(`export ${k}=${shellQuote(v)}\n`);
+        }
+      }
+      return room.ok ? 0 : 1;
+    }
+    let result;
+    try {
+      result = cleanSpikes(root, { exec: io.run ?? runCommand, only: parsed.values['--spike'], ...(io.spikeSeams ?? {}) });
+    } catch (err) {
+      io.stderr.write(`Cannot clean the spikes: ${oneLine(err)}\n`);
+      return 2;
+    }
+    if (json) {
+      io.stdout.write(`${JSON.stringify(result)}\n`);
+    } else {
+      for (const n of result.notes) io.stdout.write(`${n}\n`);
+      for (const r of result.removed) io.stdout.write(`Removed ${r.kind} ${r.what} (spikes/${r.spike}).\n`);
+      for (const r of result.gone) io.stdout.write(`Already gone: ${r.kind} ${r.what} (spikes/${r.spike}).\n`);
+      for (const r of result.kept) io.stdout.write(`Kept ${r.kind} ${r.what} (spikes/${r.spike}): ${r.why}.\n`);
+      const n = result.removed.length;
+      io.stdout.write(`Spikes cleaned: ${n} item${n === 1 ? '' : 's'} removed, ${result.kept.length} kept, from ${result.folders.length} manifest${result.folders.length === 1 ? '' : 's'}.\n`);
+    }
     return 0;
   },
   async amend(args, io) {
@@ -810,6 +879,7 @@ export const commands = {
       return 2;
     };
     if (sub === 'models') return harnessModels(rest, io, usage);
+    if (sub === 'migrate') return harnessMigrate(rest, io, { pluginRoot, usage });
     if (!['install', 'verify', 'cases', 'protect', 'set', 'specialise'].includes(sub)) return usage();
     const parsed = parseOptions(rest, {
       flags: sub === 'install' ? ['--force'] : sub === 'cases' ? ['--run'] : sub === 'protect' ? ['--apply'] : [],
@@ -845,7 +915,7 @@ export const commands = {
     if (sub === 'install') {
       let result;
       try {
-        result = install(root, { pluginRoot, target: place.target, workspace: place.workspace, force: parsed.flags.has('--force'), ref: parsed.values['--ref'], exec: io.run ?? runCommand });
+        result = install(root, { pluginRoot, target: place.target, workspace: place.workspace, force: parsed.flags.has('--force'), ref: parsed.values['--ref'], exec: io.run ?? runCommand, secondOpinion: projectSecondOpinion(join(root, '.claude', 'agents'), io) });
       } catch (err) {
         io.stderr.write(`${oneLine(err)}\n`);
         return err instanceof InstallError ? 1 : 2;
@@ -900,6 +970,11 @@ export const commands = {
       return 0;
     }
     if (sub === 'protect') {
+      const refused = localForgeRefusal(root, '`recade harness protect`');
+      if (refused !== null) {
+        io.stderr.write(`${refused}\n`);
+        return 1;
+      }
       // Run from a code repository, it protects that repository with the strict rules, not the workspace.
       const where = workspaceOf(io.cwd);
       const codeDir = where?.via === 'link' ? mainRepoOf(io.cwd) : null;
@@ -1101,13 +1176,14 @@ export const commands = {
       return 0;
     }
     if (order.length === 0) {
-      io.stdout.write(`No open pull request to order against ${base ?? 'the default branch'}.\n`);
+      io.stdout.write(`No open ${forgeOf(loadState(root)) === 'local' ? 'review request' : 'pull request'} to order against ${base ?? 'the default branch'}.\n`);
       return 0;
     }
     const ready = order.filter((o) => !o.waiting);
     const waiting = order.filter((o) => o.waiting);
     io.stdout.write(`Merge order (${ready.length} open pull request${ready.length === 1 ? '' : 's'}, ${waiting.length} waiting):\n`);
-    const name = (o) => `${o.repo === undefined ? '' : `${o.repo} `}#${o.pr}`;
+    // On the local forge an entry is a slice branch with its review request, not a numbered pull request.
+    const name = (o) => `${o.repo === undefined ? '' : `${o.repo} `}${o.branch === undefined ? `#${o.pr}` : o.branch}`;
     ready.forEach((o, i) => io.stdout.write(`  ${i + 1}. ${name(o)} ${o.reason}\n`));
     if (waiting.length > 0) {
       io.stdout.write('Waiting:\n');
@@ -1508,12 +1584,13 @@ export const commands = {
     let owner = null;
     let autoPush = false;
     const repos = [];
-    let bad = sub !== 'init';
+    const sync = sub === 'sync';
+    let bad = sub !== 'init' && !sync;
     for (let i = 0; i < rest.length && !bad; i++) {
       if (rest[i] === '--dry-run') dryRun = true;
-      else if (rest[i] === '--auto-push') autoPush = true;
-      else if (rest[i] === '--owner' && i + 1 < rest.length) owner = rest[++i];
-      else if (rest[i] === '--repo' && i + 1 < rest.length && !rest[i + 1].startsWith('-')) repos.push(rest[++i]);
+      else if (rest[i] === '--auto-push' && !sync) autoPush = true;
+      else if (rest[i] === '--owner' && i + 1 < rest.length && !sync) owner = rest[++i];
+      else if (rest[i] === '--repo' && i + 1 < rest.length && !rest[i + 1].startsWith('-') && !sync) repos.push(rest[++i]);
       else bad = true;
     }
     if (bad) {
@@ -1524,6 +1601,24 @@ export const commands = {
     if (root === null) {
       io.stderr.write('No Recade project here: recade/state.yaml not found. Run /recade:new first.\n');
       return 1;
+    }
+    if (sync) {
+      // The sync keeps an existing board in line with the documents. A project that does not use GitHub has nothing to sync.
+      const state = loadState(root);
+      if (state?.forge !== undefined && state.forge !== 'github') {
+        io.stdout.write(`This project does not use GitHub (forge: ${state.forge}), so there is nothing to sync.\n`);
+        return 0;
+      }
+      if (typeof state?.github?.owner !== 'string' || !Number.isInteger(state?.github?.project_number)) {
+        io.stderr.write('No board is recorded in recade/state.yaml. Run recade github init first.\n');
+        return 1;
+      }
+    } else {
+      const refused = localForgeRefusal(root, '`recade github init`');
+      if (refused !== null) {
+        io.stderr.write(`${refused}\n`);
+        return 1;
+      }
     }
     if (owner === null) {
       const recordedOwner = loadState(root)?.github?.owner;
@@ -1541,7 +1636,7 @@ export const commands = {
     const exec = io.exec ?? ((cmd, cmdArgs) => defaultExec(cmd, cmdArgs, 120000));
     // gh calls take long: the refusals come first, the work runs outside the lock, then the state it recorded is committed.
     let result;
-    if (dryRun) result = await initGithub(root, { owner, exec, dryRun, repos });
+    if (dryRun || sync) result = await initGithub(root, { owner, exec, dryRun, repos, sync });
     else {
       // The owner's yes to auto-push is recorded with the workspace repository, as `recade workspace auto-push on` does.
       const step = await endStep(io, root, ['recade/state.yaml'], 'chore(recade): GitHub board recorded', async () => {
@@ -1556,16 +1651,17 @@ export const commands = {
       io.stdout.write('Dry run: nothing is written. These calls would run:\n');
       for (const line of result.planned) io.stdout.write(`${line}\n`);
       if (autoPush) io.stdout.write('Then the workspace auto-push would be turned on (recade workspace auto-push on).\n');
-      if (result.planned.length === 0 && result.error === null) io.stdout.write('Nothing to create: the repository, the board and the issues exist.\n');
+      if (result.planned.length === 0 && result.error === null) io.stdout.write(sync ? 'Nothing to change: the board, the epics and the issues follow the documents.\n' : 'Nothing to create: the repository, the board and the issues exist.\n');
     } else {
-      for (const line of result.created) io.stdout.write(`Created: ${line}\n`);
+      for (const line of result.created) io.stdout.write(`${sync ? 'Done' : 'Created'}: ${line}\n`);
     }
     for (const w of result.warnings) io.stderr.write(`Warning: ${w}\n`);
     if (result.error !== null) {
       io.stderr.write(`Stopped: ${result.error}\nRun the command again to continue where it stopped.\n`);
       return 1;
     }
-    if (!dryRun) io.stdout.write(`GitHub board ready: ${result.repo}, project ${result.project}. ${result.created.length} object${result.created.length === 1 ? '' : 's'} created.\n`);
+    if (!dryRun && sync) io.stdout.write(`GitHub board in line with the documents: ${result.repo}, project ${result.project}. ${result.created.length} change${result.created.length === 1 ? '' : 's'}.\n`);
+    else if (!dryRun) io.stdout.write(`GitHub board ready: ${result.repo}, project ${result.project}. ${result.created.length} object${result.created.length === 1 ? '' : 's'} created.\n`);
     return 0;
   },
   async index(args, io) {
@@ -1741,14 +1837,15 @@ export const commands = {
       return 1;
     }
     try {
-      const { outputs, findings } = await pipeline.renderFiles(opts.files, {
-        formats: opts.formats, outDir: opts.out, check: opts.check, env: io.env, cwd: io.cwd,
+      const { outputs, findings, stale } = await pipeline.renderFiles(opts.files, {
+        formats: opts.formats, pdf: opts.formats ? false : pdfWanted(io), outDir: opts.out, check: opts.check, env: io.env, cwd: io.cwd,
         // Test seams, as for doctor.
         chromiumStatus: io.chromiumStatus ? () => io.chromiumStatus(io.env) : undefined,
         withBrowser: io.withBrowser,
       });
       printPlainFindings(findings, io);
       for (const file of outputs) io.stdout.write(`Wrote ${file}\n`);
+      printLeftOver(stale, io);
       return 0;
     } catch (err) {
       printPlainFindings(err.findings ?? [], io);
@@ -1954,12 +2051,37 @@ function harnessPlace(io, { target, repo }) {
   return { target: 'code', root: dir, workspace: found.dir };
 }
 
-const HARNESS_USAGE = 'Usage: recade harness models [--check] [--dir <agents folder>] [--models <models.yaml>]'
+const HARNESS_USAGE = 'Usage: recade harness models [--check] [--dir <agents folder>] [--second-opinion opus|fable] [--models <models.yaml>]'
   + ' | install [--ref <tag or commit>] [--force] [--target workspace|code] [--repo <name>]'
   + ' | verify [--target workspace|code] [--repo <name>] | cases [--run] [--agent <name>] | protect [--apply] [--branch <name>]'
   + ' | set [--required-gates <a,b>] [--threshold-files <a,b>] [--wip-limit <1-9>]'
   + ' | specialise <agent|command> <name> --file <path> [--target workspace|code] [--repo <name>]'
+  + ' | migrate [--dry-run] (from the workspace: the old layout to the one entry point)'
   + ' (add --project <dir> to work on a project from another folder)';
+
+/**
+ * `recade harness migrate [--dry-run]`: move a workspace of the old layout to the one entry point (src/harness/migrate.js).
+ * Run from the workspace. Exit 1 when something was refused or failed, so the owner reads the lines.
+ */
+async function harnessMigrate(rest, io, { pluginRoot, usage }) {
+  const parsed = parseOptions(rest, { flags: ['--dry-run'], values: ['--ref'] });
+  if (parsed.error || parsed.positional.length > 0) return usage();
+  const found = workspaceOf(io.cwd);
+  if (found === null || found.via !== 'self') {
+    io.stderr.write(`recade harness migrate runs from the workspace${found === null ? '' : ` (${found.dir})`}.\n`);
+    return 1;
+  }
+  const { formatMigrate, migrate } = await import('./harness/migrate.js');
+  let result;
+  try {
+    result = migrate(found.dir, { pluginRoot, dryRun: parsed.flags.has('--dry-run'), exec: io.run ?? runCommand, ref: parsed.values['--ref'], secondOpinion: projectSecondOpinion(join(found.dir, '.claude', 'agents'), io) });
+  } catch (err) {
+    io.stderr.write(`${oneLine(err)}\n`);
+    return 2;
+  }
+  io.stdout.write(formatMigrate(result));
+  return result.errors.length > 0 || result.moves.some((m) => m.status === 'refused') ? 1 : 0;
+}
 
 const CASES_USAGE = 'Usage: recade cases [--plugin] [--harness] [--run] [--agent <name>] [--project <dir>]';
 
@@ -2011,18 +2133,39 @@ function casesCommand(parsed, io, { pluginRoot, sets, tagged, command }) {
   return failed > 0 ? 1 : 0;
 }
 
+/** The owner's second-opinion choice of the user config (`models.second_opinion`): `opus` when it is missing or not valid. */
+function secondOpinionChoice(io) {
+  try {
+    const choice = loadConfig(io.env).config.models?.second_opinion;
+    return isSecondOpinionChoice(choice) ? choice : 'opus';
+  } catch {
+    return 'opus';
+  }
+}
+
+/**
+ * The second-opinion choice of a project copy. Once installed, the copy is the source of truth, as `verify` reads it,
+ * so that another machine with another user config agrees. The user config is only the default of a first install.
+ */
+function projectSecondOpinion(agentsDir, io) {
+  return existsSync(join(agentsDir, 'second-opinion.md')) ? secondOpinionOf(agentsDir) : secondOpinionChoice(io);
+}
+
 /** `recade harness models`: write the model and effort of models.yaml into the agent files, or check them. */
 function harnessModels(args, io, usage) {
-  const parsed = parseOptions(args, { flags: ['--check'], values: ['--dir', '--models'] });
+  const parsed = parseOptions(args, { flags: ['--check'], values: ['--dir', '--models', '--second-opinion'] });
   if (parsed.error || parsed.positional.length > 0 || Object.values(parsed.values).some((v) => v.startsWith('--'))) return usage();
   const check = parsed.flags.has('--check');
+  const given = parsed.values['--second-opinion'];
+  if (given !== undefined && (!isSecondOpinionChoice(given) || check || parsed.values['--dir'] === undefined)) return usage();
   const harnessDir = fileURLToPath(new URL('../harness/', import.meta.url));
   const dir = parsed.values['--dir'] === undefined ? join(harnessDir, 'agents') : resolve(io.cwd, expandHome(parsed.values['--dir'], io.env));
   const modelsFile = parsed.values['--models'] === undefined ? join(harnessDir, 'models.yaml') : resolve(io.cwd, expandHome(parsed.values['--models'], io.env));
   let changed;
   let models;
   try {
-    models = loadModels(modelsFile);
+    // A project copy (--dir) keeps its own second-opinion choice, or takes the one given; the plugin's own agents keep the table as it is.
+    models = parsed.values['--dir'] === undefined ? loadModels(modelsFile) : withSecondOpinion(loadModels(modelsFile), given ?? projectSecondOpinion(dir, io));
     ({ changed } = syncAgents(dir, models, { check }));
   } catch (err) {
     io.stderr.write(`${err.message}\n`);
@@ -2036,7 +2179,9 @@ function harnessModels(args, io, usage) {
     return 0;
   }
   if (check) {
-    io.stderr.write(`Agents out of sync with models.yaml: ${changed.join(', ')}. Run: recade harness models\n`);
+    const again = parsed.values['--dir'] === undefined ? 'recade harness models' : `recade harness models --dir ${shellQuote(parsed.values['--dir'])}`;
+    io.stderr.write(`Agents out of sync with models.yaml: ${changed.join(', ')}. Run: ${again}\n`);
+    if (parsed.values['--dir'] !== undefined) io.stderr.write(`It keeps the second-opinion model of this project. To change it for the project, run: ${again} --second-opinion opus (or fable), then commit .claude/agents.\n`);
     return 1;
   }
   io.stdout.write(`Updated: ${changed.join(', ')}\n`);
@@ -2059,8 +2204,8 @@ function parseBoardArgs(sub, rest) {
   return out;
 }
 const COST_USAGE = 'Usage: recade cost record <S-nn> --minutes <n> --fix-loops <n> [--tokens <n> | --transcript <path|auto> [--since <epoch ms>] [--session-dir <dir>]] [--project <dir>]'
-  + ' | recade cost estimate [--phase intake|team|docs|bible|slices|harness | --slice standard|sensitive] [--json] [--project <dir>]';
-const COST_ESTIMATE_USAGE = 'Usage: recade cost estimate [--phase intake|team|docs|bible|slices|harness | --slice standard|sensitive] [--json] [--project <dir>]';
+  + ' | recade cost estimate [--phase intake|team|docs|bible|slices|next|harness | --slice standard|sensitive] [--json] [--project <dir>]';
+const COST_ESTIMATE_USAGE = 'Usage: recade cost estimate [--phase intake|team|docs|bible|slices|next|harness | --slice standard|sensitive] [--json] [--project <dir>]';
 
 /** The plugin's two model tables: the tiers of the framing agents and the harness lanes. */
 const tiersUrl = new URL('../agents/models.json', import.meta.url);
@@ -2080,7 +2225,7 @@ function costEstimate(args, io) {
   const phase = parsed.values['--phase'];
   const lane = parsed.values['--slice'];
   if (phase !== undefined && lane !== undefined) return usage();
-  if (phase !== undefined && !PHASE_IDS.includes(phase)) return usage();
+  if (phase !== undefined && !ESTIMATE_IDS.includes(phase)) return usage();
   if (lane !== undefined && !SLICE_LANES.includes(lane)) return usage();
   const json = parsed.flags.has('--json');
   const loaded = readConfig(io);
@@ -2095,7 +2240,7 @@ function costEstimate(args, io) {
   try {
     const state = root === null ? null : normalizeState(loadState(root));
     if (lane !== undefined) {
-      result = estimateSlice(lane, { harnessModels: loadModels(fileURLToPath(harnessModelsUrl)), secondOpinion: state?.second_opinion });
+      result = estimateSlice(lane, { harnessModels: withSecondOpinion(loadModels(fileURLToPath(harnessModelsUrl)), root === null ? loaded.config.models?.second_opinion : projectSecondOpinion(join(root, '.claude', 'agents'), io)), secondOpinion: state?.second_opinion });
     } else {
       if (root === null) {
         io.stderr.write('No Recade project here: recade/state.yaml not found. Run /recade:new first.\n');
@@ -2125,11 +2270,13 @@ function costEstimate(args, io) {
   }
   if (phase !== undefined) {
     io.stdout.write(`Estimated cost of this phase: ${formatRange(result.phases[0])} (${tail})\n`);
+    // The progress line of each step reads its usual time from this line.
+    if (result.phases[0].steps !== undefined) io.stdout.write(`Usual time of each step: ${formatSteps(result.phases[0].steps)}.\n`);
   } else {
     for (const p of result.phases) io.stdout.write(`${p.name}: ${formatRange(p)}\n`);
     io.stdout.write(`Total: ${formatRange(result.total)} (${tail})\n`);
   }
-  io.stdout.write(`An estimate, not a measure: ${result.prices}, writing model ${writer}.\n`);
+  io.stdout.write(`An estimate, not a measure: ${result.prices}, writing model ${writer}. The durations scale from a measured short-track framing.\n`);
   return 0;
 }
 const RETRO_USAGE = 'Usage: recade retro <INC-n> [--force] [--json] [--base <branch>] [--project <dir>]';
@@ -2314,11 +2461,61 @@ function parseConflictsArgs(rest) {
   return out;
 }
 const CLAUDE_MD_USAGE = 'Usage: recade claude-md refresh [--write] [--target workspace|code] [--repo <name>] [--project <dir>]';
-const GITHUB_USAGE = 'Usage: recade github init [--dry-run] [--owner <name>] [--repo <code repository>]... [--auto-push] [--project <dir>]';
+const GITHUB_USAGE = 'Usage: recade github init [--dry-run] [--owner <name>] [--repo <code repository>]... [--auto-push] [--project <dir>]'
+  + ' | recade github sync [--dry-run] [--project <dir>]';
 const AMEND_USAGE = 'Usage: recade amend impact <ID...> [--project <dir>]';
+/** A value in single quotes for a POSIX shell. */
+const shellQuote = (v) => `'${String(v).replaceAll("'", "'\\''")}'`;
+
+const SPIKES_USAGE = 'Usage: recade spikes check [--spike <layer>-<option>] [--json] | clean [--spike <layer>-<option>] [--json] [--project <dir>]';
+
 const SLICES_USAGE = 'Usage: recade slices check|graph|status [--project <dir>]'
   + ' | recade slices status --set <S-nn> <status> [--note <text>] [--project <dir>]'
-  + ' | recade slices dod <S-nn> --tick <n> [--tick <n> ...] [--project <dir>]';
+  + ' | recade slices dod <S-nn> --tick <n> [--tick <n> ...] [--project <dir>]'
+  + ' | recade slices merge <S-nn> [--dry-run] [--project <dir>] (local forge, the owner\'s merge)'
+  + ' | recade slices open <S-nn> [--json] [--no-session|--keep-session|--tie-only] [--project <dir>] (the worktrees of the slice, under worktrees/<repo>/<S-nn>, and the slice of the session)';
+
+/**
+ * `recade slices open <S-nn>`: open the worktrees of one slice under `worktrees/<repo>/<S-nn>` of the workspace, one for
+ * each repository its `touches:` name. Only the main session runs it (the guard refuses it to an agent), from the
+ * workspace. Exit 1 when a repository could not be opened.
+ */
+async function slicesOpen(rest, io) {
+  // Once every repository is open, the command ties the session that runs it to the slice (the guard reads the record).
+  // `--no-session` ties nothing (/parallel opens several), `--keep-session` adds the slice to the ones the session runs
+  // (/review), and `--tie-only` adds it with no worktree opened (/merge-order, for its rebase worktree).
+  const flags = ['--json', '--no-session', '--keep-session', '--tie-only'];
+  const json = rest.includes('--json');
+  const words = rest.filter((a) => !flags.includes(a));
+  const ties = ['--no-session', '--keep-session', '--tie-only'].filter((f) => rest.includes(f));
+  if (words.length !== 1 || !/^S-\d{2}[a-z]?$/.test(words[0]) || ties.length > 1) {
+    io.stderr.write(`${SLICES_USAGE}\n`);
+    return 2;
+  }
+  const found = workspaceOf(io.cwd);
+  if (found === null || found.via !== 'self') {
+    io.stderr.write(`recade slices open runs from the workspace${found === null ? '' : ` (${found.dir})`}: the worktrees of a slice live under its worktrees/ folder.\n`);
+    return 1;
+  }
+  let result;
+  try {
+    if (rest.includes('--tie-only')) {
+      const row = checkSlices(found.dir).status.find((r) => r.id === words[0]);
+      result = { slice: words[0], lane: row?.lane ?? '', branch: row?.branch ?? null, worktrees: [], errors: row === undefined ? [`There is no sheet for ${words[0]} in slices/. Write it first with /slice-write ${words[0]}.`] : [] };
+    } else result = openSlice(found.dir, words[0], { exec: io.run ?? runCommand });
+  } catch (err) {
+    io.stderr.write(`${oneLine(err)}\n`);
+    return 2;
+  }
+  // Only a slice that opened in full is tied: a failed or half-opened one leaves the session as it was.
+  if (result.errors.length === 0 && !rest.includes('--no-session')) {
+    result.session = tieSession(found.dir, words[0], {
+      sessionId: io.env?.CLAUDE_CODE_SESSION_ID, from: io.invokedFrom ?? io.cwd, keep: rest.includes('--keep-session') || rest.includes('--tie-only'),
+    });
+  }
+  io.stdout.write(json ? `${JSON.stringify(result, null, 2)}\n` : formatOpen(result));
+  return result.errors.length > 0 ? 1 : 0;
+}
 
 /** `<S-nn> --tick <n> [--tick <n> ...]`, or null when the arguments do not have that shape. */
 function parseDodTick(rest) {
@@ -2337,6 +2534,45 @@ function parseDodTick(rest) {
  * commit (`docs(slices): tick DoD row n of S-nn`) run under the commit lock of the workspace, and nothing is pushed: a tick is
  * not an end of phase. The sheet must have no change of its own that the step did not make.
  */
+/**
+ * `recade slices merge <S-nn> [--dry-run]`: the owner's merge of a slice on the local forge. The dry run prints the git
+ * commands, one for each code repository of the slice in its merge order; without it the merges run. Only the main
+ * session runs it, after the owner's yes (the guard refuses it to every agent). Exit 1 on a refusal or a failed merge.
+ */
+async function slicesMerge(rest, io) {
+  const dryRun = rest.includes('--dry-run');
+  const words = rest.filter((a) => a !== '--dry-run');
+  if (words.length !== 1 || !/^S-\d{2}[a-z]?$/.test(words[0])) {
+    io.stderr.write(`${SLICES_USAGE}\n`);
+    return 2;
+  }
+  const root = projectRoot(io.cwd);
+  if (root === null) {
+    io.stderr.write('No Recade project here: recade/state.yaml not found. Run /recade:new first.\n');
+    return 1;
+  }
+  const exec = io.run ?? runCommand;
+  let result;
+  try {
+    result = dryRun ? planLocalMerge(root, words[0], { exec }) : runLocalMerge(root, words[0], { exec });
+  } catch (err) {
+    io.stderr.write(`${oneLine(err)}\n`);
+    return 2;
+  }
+  if (dryRun && result.errors.length === 0) {
+    io.stdout.write(`The owner's merge of ${words[0]} (review request: ${result.review}). Nothing was run. The commands, in order:\n`);
+    for (const step of result.steps) io.stdout.write(step.merged === null ? `${step.command}\n` : `# ${step.repo ?? 'the project'}: already merged (${step.merged.slice(0, 7)})\n`);
+    for (const w of result.waits) io.stdout.write(`Before the merge: ${w}\n`);
+    io.stdout.write(`Then run /board to mark ${words[0]} done.\n`);
+    return 0;
+  }
+  for (const label of result.done ?? []) io.stdout.write(`${label}: merged.\n`);
+  for (const e of result.errors) io.stderr.write(`${e}\n`);
+  if (result.errors.length > 0) return 1;
+  io.stdout.write(`${words[0]} is merged in ${result.steps.length === 1 ? 'its repository' : `its ${result.steps.length} repositories`}. Run /board to mark it done.\n`);
+  return 0;
+}
+
 async function slicesDod(rest, io) {
   const tick = parseDodTick(rest);
   if (tick === null) {
@@ -2467,6 +2703,11 @@ async function adoptPhase(args, io) {
       }
       return r.gaps.length > 0 ? 1 : 0;
     }
+    const refused = localForgeRefusal(root, '`recade adopt board`');
+    if (refused !== null) {
+      io.stderr.write(`${refused}\n`);
+      return 1;
+    }
     // A workspace with no GitHub repository yet is matched before `github init`: the owner comes from the state or the config.
     let owner;
     if (state.kind === 'workspace' && typeof state.github?.owner !== 'string') {
@@ -2548,10 +2789,27 @@ function parseOptions(args, { flags, values }) {
 }
 
 const STATE_USAGE =
-  'Usage: recade state show [--json] | can-start <phase> | pass <gate> | reset-from <gate> | set <key> <value> (keys: slicing, second_opinion, hotspots, lots, docs_step, decisions as ask or trust, track as full or short, budgets as D1=12000,PLAN=8000) [--project <dir>]';
+  'Usage: recade state show [--json] | can-start <phase> | pass <gate> | reset-from <gate> | set <key> <value> (keys: slicing, second_opinion, hotspots, lots, docs_step, decisions as ask or trust, track as full or short, forge as github or local, spikes as run or none, budgets as D1=12000,PLAN=8000) [--project <dir>]';
 
 const localDate = (d) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+/**
+ * The refusal of a command that needs GitHub, on a project whose forge is local, or null. Such a command makes no gh
+ * call at all: the owner moves the project to GitHub first (docs/design.md, section 6.8).
+ * @param {string} root the project folder
+ * @param {string} what the command, as the owner reads it
+ */
+function localForgeRefusal(root, what) {
+  let state;
+  try {
+    state = loadState(root);
+  } catch {
+    return null;
+  }
+  if (forgeOf(state) !== 'local') return null;
+  return `${what} needs GitHub, and this project works on the local forge (forge: local): nothing was called and nothing changed. To move the project to GitHub, run recade state set forge github, then run it again.`;
+}
 
 function renderState(state, root, today) {
   const firstSlice = firstSliceLine(state, today);
@@ -2562,6 +2820,7 @@ function renderState(state, root, today) {
     `Project: ${root}`,
     `Mode: ${state.mode ?? 'unknown'}`,
     `Track: ${trackOf(state)}`,
+    `Forge: ${forgeOf(state)}${forgeOf(state) === 'local' ? ' (git on this machine only, the board is slices/STATUS.md)' : ''}`,
     `Phase: ${phase.id} ${phase.name}`,
     'Gates:',
     ...gatesOf(state).map((g) => `${g.padEnd(Math.max(9, ...gatesOf(state).map((x) => x.length + 1)))} ${state.gates[g] ? `passed ${state.gates[g].passed}` : 'open'}`),
@@ -2572,13 +2831,14 @@ function renderState(state, root, today) {
     `Hotspots: ${state.hotspots.length ? state.hotspots.join(', ') : 'none'}`,
     `Lots: ${state.lots.length ? state.lots.join(', ') : 'none'}`,
     ...(state.docs_step ? [`Docs step: ${state.docs_step}`] : []),
+    ...(state.spikes ? [`Spikes: ${state.spikes}`] : []),
     ...(firstSlice === null ? [] : [`First slice: ${firstSlice}`]),
     `Next action: ${nextAction(state)}`,
   ];
   return `${lines.join('\n')}\n`;
 }
 
-const RENDER_USAGE = 'Usage: recade render <file.md...> [--format docx,pdf,xlsx] [--out <dir>] [--no-check]';
+const RENDER_USAGE = 'Usage: recade render <file.md...> [--format docx,xlsx,html,pdf] [--out <dir>] [--no-check]';
 const EXTRAS_USAGE = 'Usage: recade render extras [--project <dir>] [--no-check]';
 
 /**
@@ -2623,8 +2883,8 @@ async function renderExtrasCommand(args, io) {
   }
   const warn = (warnings) => { for (const w of warnings ?? []) io.stderr.write(`Warning: ${w}\n`); };
   try {
-    const { outputs, findings, warnings } = await engine.renderExtras(root, chosen, {
-      check: !args.includes('--no-check'), env: io.env,
+    const { outputs, findings, warnings, stale } = await engine.renderExtras(root, chosen, {
+      check: !args.includes('--no-check'), pdf: loaded.config.deliverables?.pdf === true, env: io.env,
       // Test seams, as for render.
       chromiumStatus: io.chromiumStatus ? () => io.chromiumStatus(io.env) : undefined,
       withBrowser: io.withBrowser,
@@ -2632,6 +2892,7 @@ async function renderExtrasCommand(args, io) {
     printPlainFindings(findings, io);
     warn(warnings);
     for (const file of outputs) io.stdout.write(`Wrote ${file}\n`);
+    printLeftOver(stale, io);
     return 0;
   } catch (err) {
     printPlainFindings(err.findings ?? [], io);
@@ -2647,6 +2908,22 @@ function findRenderRoot(dir) {
   for (let d = resolve(dir); ; d = dirname(d)) {
     if (existsSync(join(d, 'recade', 'state.yaml'))) return d;
     if (dirname(d) === d) return null;
+  }
+}
+
+/** One line for each file of an older render left as it was. Recade never deletes them: the owner decides. */
+function printLeftOver(files, io) {
+  for (const file of files ?? []) {
+    io.stdout.write(`Left as it was: ${file}. Recade no longer writes this name or this format; delete it when you no longer need it.\n`);
+  }
+}
+
+/** `deliverables.pdf` of the user config: true only when the owner turned the PDF on. An unreadable config is no PDF. */
+function pdfWanted(io) {
+  try {
+    return loadConfig(io.env).config.deliverables?.pdf === true;
+  } catch {
+    return false;
   }
 }
 
@@ -2838,7 +3115,7 @@ function parseIndexArgs(args) {
 }
 
 /** Commands that work on a project folder. They accept `--project <dir>` in place of running from inside it. */
-const PROJECT_SCOPED = ['state', 'provisional', 'decision', 'team', 'slices', 'amend', 'github', 'lint-style', 'intake', 'index', 'render', 'claude-md', 'parallel', 'board', 'merge-order', 'cost', 'retro', 'quarantine', 'release-notes', 'harness', 'cases', 'gate', 'repo', 'workspace', 'docs'];
+const PROJECT_SCOPED = ['state', 'provisional', 'decision', 'team', 'slices', 'spikes', 'amend', 'github', 'lint-style', 'intake', 'index', 'render', 'claude-md', 'parallel', 'board', 'merge-order', 'cost', 'retro', 'quarantine', 'release-notes', 'harness', 'cases', 'gate', 'repo', 'workspace', 'docs'];
 
 /**
  * Run the CLI and return the exit code.

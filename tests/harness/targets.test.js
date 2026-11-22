@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseDocument } from 'yaml';
 import { InstallError, install } from '../../src/harness/install.js';
-import { TARGETS, TARGET_NAMES, readRepoSettings, thresholdCandidates } from '../../src/harness/targets.js';
+import { TARGETS, TARGET_NAMES, readRepoSettings, selectFor, thresholdCandidates } from '../../src/harness/targets.js';
 import { verify } from '../../src/harness/verify.js';
 import { readCreated } from '../../src/project/adopt.js';
 import { loadState, saveState } from '../../src/state.js';
@@ -21,25 +21,30 @@ const installWs = (ws, extra = {}) => install(ws.dir, { pluginRoot: plugin, targ
 const installCode = (ws, name, extra = {}) => install(ws.repo(name), { pluginRoot: plugin, target: 'code', workspace: ws.dir, ref: REF, ...extra });
 const errors = (r, check) => r.findings.filter((f) => f.severity === 'error' && (check === undefined || f.check === check));
 
-test('TARGETS: the workspace and the code repository each get their commands and agents, and nothing is left out', () => {
+test('TARGETS: the workspace gets every command and every agent, a code repository only its pointer', () => {
   assert.deepEqual(TARGET_NAMES, ['workspace', 'code']);
-  assert.deepEqual([...TARGETS.workspace.commands].sort(), ['amend', 'board', 'decision', 'design', 'inventory', 'merge-order', 'parallel', 'retro', 'slice-check', 'slice-write', 'status']);
-  assert.deepEqual([...TARGETS.workspace.agents].sort(), ['board-keeper', 'doc-writer', 'explorer', 'merge-keeper', 'release-manager', 'spec-writer', 'ui-designer', 'ux-designer']);
-  assert.deepEqual([...TARGETS.code.commands].sort(), ['explain', 'review', 'second-opinion', 'slice']);
-  assert.deepEqual([...TARGETS.code.agents].sort(), harnessAgents);
-  // A command or an agent added to the plugin must belong to a target, or it would never be installed.
-  const placed = new Set([...TARGETS.workspace.commands, ...TARGETS.code.commands]);
-  assert.deepEqual(harnessCommands.filter((c) => !placed.has(c)), []);
-  assert.deepEqual([...placed].filter((c) => !harnessCommands.includes(c)), []);
-  assert.deepEqual(TARGETS.workspace.agents.filter((a) => !harnessAgents.includes(a)), []);
+  const ws = selectFor('workspace', { commands: harnessCommands, agents: harnessAgents });
+  // One entry point: every command and every agent of the plugin goes to the workspace, so nothing is left out.
+  assert.deepEqual(ws.commands, harnessCommands);
+  assert.deepEqual(ws.agents, harnessAgents);
+  assert.equal(ws.protocol, true);
+  assert.deepEqual(ws.pointers, []);
+  const code = selectFor('code', { commands: harnessCommands, agents: harnessAgents });
+  assert.deepEqual(code.commands, []);
+  assert.deepEqual(code.agents, []);
+  assert.deepEqual(code.pointers, ['slice']);
+  assert.equal(code.protocol, false);
+  assert.deepEqual([...TARGETS.code.pointers], ['slice']);
+  for (const p of TARGETS.code.pointers) assert.ok(existsSync(join(plugin, 'harness', 'pointer', `${p}.md`)), p);
 });
 
-test('a workspace install writes the project commands, the eight agents, the guard, the hooks and workspace.yml, and no slice command', async () => {
+test('a workspace install writes every command, every agent, the guard, the hooks and workspace.yml, and ignores worktrees/', async () => {
   const ws = await makeWorkspace();
   const r = installWs(ws);
-  assert.deepEqual(names(join(ws.dir, '.claude', 'commands')), TARGETS.workspace.commands.map((c) => `${c}.md`).sort());
-  assert.equal(existsSync(join(ws.dir, '.claude', 'commands', 'slice.md')), false);
-  assert.deepEqual(names(join(ws.dir, '.claude', 'agents')), TARGETS.workspace.agents.map((a) => `${a}.md`).sort());
+  assert.deepEqual(names(join(ws.dir, '.claude', 'commands')), harnessCommands.map((c) => `${c}.md`).sort());
+  assert.ok(existsSync(join(ws.dir, '.claude', 'commands', 'slice.md')), '/slice is typed at the root of the workspace');
+  assert.match(read(ws.dir, '.claude/commands/slice.md'), /sensitive_model/, 'the real command, not the pointer');
+  assert.deepEqual(names(join(ws.dir, '.claude', 'agents')).map((f) => f.replace(/\.md$/, '')).sort(), harnessAgents);
   for (const f of ['.claude/protocol.md', '.claude/settings.json', '.claude/hooks/recade-guard.mjs', '.githooks/pre-commit', '.githooks/commit-msg', '.github/workflows/workspace.yml', '.recade/plugin-root']) {
     assert.ok(existsSync(join(ws.dir, f)), f);
   }
@@ -52,8 +57,11 @@ test('a workspace install writes the project commands, the eight agents, the gua
   assert.equal(git(ws.dir, 'config', '--get', 'core.hooksPath').stdout.trim(), '.githooks');
   assert.equal(r.written.every((w) => w.status === 'created'), true);
   const ignore = read(ws.dir, '.gitignore');
-  for (const line of ['repos/', 'artifacts/', 'tmp/', '.recade/', '.claude/settings.local.json']) assert.ok(ignore.split('\n').includes(line), line);
+  for (const line of ['repos/', 'worktrees/', 'artifacts/', 'tmp/', '.recade/', '.claude/settings.local.json']) assert.ok(ignore.split('\n').includes(line), line);
   assert.equal(installWs(ws).written.every((w) => w.status === 'unchanged'), true, 'a second install changes nothing');
+  // The install record holds the hash of each file it wrote.
+  const record = JSON.parse(read(ws.dir, '.recade/installed.json'));
+  assert.match(record.files['.claude/commands/slice.md'], /^[0-9a-f]{64}$/);
 });
 
 test('workspace.yml runs style, the ID index and the slice check, pinned to the ref, and nothing of the code', async () => {
@@ -71,14 +79,17 @@ test('workspace.yml runs style, the ID index and the slice check, pinned to the 
   assert.match(text, /permissions:\s*\n\s+contents: read/);
 });
 
-test('a code install writes the slice commands, every agent, the guard, the link, the three workflows and the dependabot file', async () => {
+test('a code install writes the pointer, the guard, the link, the three workflows and the dependabot file, and no agent', async () => {
   const ws = await makeWorkspace({ repos: ['api', 'web'] });
   const r = installCode(ws, 'api');
   const api = ws.repo('api');
-  assert.deepEqual(names(join(api, '.claude', 'commands')), TARGETS.code.commands.map((c) => `${c}.md`).sort());
-  assert.ok(existsSync(join(api, '.claude', 'commands', 'slice.md')));
-  assert.deepEqual(names(join(api, '.claude', 'agents')).map((f) => f.replace(/\.md$/, '')).sort(), harnessAgents);
-  for (const f of ['.claude/protocol.md', '.claude/settings.json', '.claude/hooks/recade-guard.mjs', '.githooks/pre-commit', '.githooks/commit-msg', '.github/workflows/ci.yml', '.github/workflows/conflicts.yml', '.github/workflows/second-opinion.yml', '.github/dependabot.yml', '.recade/plugin-root', '.recade/workspace']) {
+  // One pointer command, which sends a session opened here to the workspace. No agent and no protocol: they are in the workspace.
+  assert.deepEqual(names(join(api, '.claude', 'commands')), ['slice.md']);
+  assert.match(read(api, '.claude/commands/slice.md'), /start a new Claude Code session at `<home>`, the root of the workspace/);
+  assert.doesNotMatch(read(api, '.claude/commands/slice.md'), /sensitive_model|Agent/);
+  assert.equal(existsSync(join(api, '.claude', 'agents')), false);
+  assert.equal(existsSync(join(api, '.claude', 'protocol.md')), false);
+  for (const f of ['.claude/settings.json', '.claude/hooks/recade-guard.mjs', '.githooks/pre-commit', '.githooks/commit-msg', '.github/workflows/ci.yml', '.github/workflows/conflicts.yml', '.github/workflows/second-opinion.yml', '.github/dependabot.yml', '.recade/plugin-root', '.recade/workspace']) {
     assert.ok(existsSync(join(api, f)), f);
   }
   assert.equal(existsSync(join(api, '.github', 'workflows', 'workspace.yml')), false);
@@ -216,13 +227,14 @@ test('the CLI: install and verify infer the code target inside a code repository
   assert.equal(existsSync(join(ws.dir, '.claude')), false, 'the workspace was not installed');
   const verified = await cli(ws.repo('api'), ['harness', 'verify']);
   assert.equal(verified.code, 0, verified.stdout + verified.stderr);
-  const wt = join(ws.repo('api'), '.claude', 'worktrees', 'S-01');
+  const wt = join(ws.dir, 'worktrees', 'api', 'S-01');
+  mkdirSync(join(ws.dir, 'worktrees', 'api'), { recursive: true });
   git(ws.repo('api'), 'worktree', 'add', '-q', '-b', 'slice/S-01', wt);
   const fromWorktree = await cli(wt, ['harness', 'verify']);
   assert.equal(fromWorktree.code, 0, fromWorktree.stdout + fromWorktree.stderr);
   const asWs = await cli(ws.dir, ['harness', 'install', '--target', 'workspace', '--ref', REF]);
   assert.equal(asWs.code, 0, asWs.stderr);
-  assert.equal(existsSync(join(ws.dir, '.claude', 'commands', 'slice.md')), false);
+  assert.match(read(ws.dir, '.claude/commands/slice.md'), /sensitive_model/, 'the workspace has the real /slice');
   const byName = await cli(ws.dir, ['harness', 'install', '--target', 'code', '--repo', 'web', '--ref', REF]);
   assert.equal(byName.code, 0, byName.stderr);
   assert.ok(existsSync(join(ws.repo('web'), '.claude', 'commands', 'slice.md')));
@@ -259,8 +271,8 @@ test('with no --target at the root of a workspace, install, verify and claude-md
   assert.equal(first.code, 0, first.stderr);
   assert.ok(existsSync(join(ws.dir, '.github', 'workflows', 'workspace.yml')), 'the workspace workflow is written');
   assert.equal(existsSync(join(ws.dir, '.github', 'workflows', 'ci.yml')), false, 'no CI of a code repository in the workspace');
-  assert.equal(existsSync(join(ws.dir, '.claude', 'commands', 'slice.md')), false, 'no slice command in the workspace');
-  assert.equal(existsSync(join(ws.dir, '.claude', 'agents', 'implementer.md')), false, 'no code agent in the workspace');
+  assert.ok(existsSync(join(ws.dir, '.claude', 'commands', 'slice.md')), '/slice is in the workspace');
+  assert.ok(existsSync(join(ws.dir, '.claude', 'agents', 'implementer.md')), 'every agent is in the workspace');
   assert.ok(existsSync(join(ws.dir, '.claude', 'commands', 'status.md')));
   const verified = await cli(ws.dir, ['harness', 'verify']);
   assert.equal(verified.code, 0, verified.stdout + verified.stderr);
@@ -331,7 +343,8 @@ test('adopt: a code repository installed from an adopted workspace keeps the own
   assert.match(read(api, '.github/workflows/recade.yml'), /name: "Recade: /);
   assert.equal(existsSync(join(api, '.github', 'workflows', 'workspace.yml')), false);
   const created = readCreated(api);
-  for (const f of ['.claude/commands/slice.md', '.claude/agents/reviewer.md', '.claude/hooks/recade-guard.mjs', '.github/workflows/recade.yml', '.githooks/pre-commit']) assert.ok(created.includes(f), f);
+  for (const f of ['.claude/commands/slice.md', '.claude/hooks/recade-guard.mjs', '.github/workflows/recade.yml', '.githooks/pre-commit']) assert.ok(created.includes(f), f);
+  assert.equal(created.includes('.claude/agents/reviewer.md'), false, 'no agent in a code repository');
   assert.equal(created.includes('.github/workflows/ci.yml'), false);
   const settings = JSON.parse(read(api, '.claude/settings.json'));
   assert.deepEqual(settings.permissions.allow, ['Bash(make:*)']);

@@ -70,6 +70,7 @@ function fakeGh({ issues = { [WS]: [], [API]: [API_ISSUE] }, boards = [{ number:
     { id: 'F_prio', name: 'Priority', type: 'ProjectV2SingleSelectField', options: options(['P0', 'P1', 'P2', 'P3']) },
     { id: 'F_due', name: 'Due', type: 'ProjectV2Field' },
     { id: 'F_owner', name: 'Owner', type: 'ProjectV2Field' },
+    { id: 'F_epic', name: 'Epic', type: 'ProjectV2Field' },
   ];
   gh.exec = async (cmd, args) => {
     if (cmd === 'git') {

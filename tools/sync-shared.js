@@ -86,6 +86,7 @@ function defaultsTable(root) {
     '| Setting | Default | Set in |',
     '|---|---|---|',
     `| \`models.writer\`, in the user config | \`${d.writer}\` | \`src/config.js\` |`,
+    `| \`models.second_opinion\`, in the user config | \`${DEFAULT_CONFIG.models.second_opinion}\` (\`fable\` puts the project copy on Fable 5.2) | \`src/config.js\` |`,
     `| \`slicing\`, in \`recade/state.yaml\` | \`${d.slicing}\` | \`src/project/state.js\` |`,
     `| \`second_opinion\`, in \`recade/state.yaml\` | \`${d.secondOpinion}\` | \`src/project/state.js\` |`,
     `| \`budgets\`, in \`recade/state.yaml\`, in words | ${budgetsText(d.budgets)} | \`src/budgets.js\` |`,

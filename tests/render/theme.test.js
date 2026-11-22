@@ -77,11 +77,15 @@ test('fr labels have every en key', () => {
   assert.equal(fr.contents, 'Sommaire');
   assert.equal(fr.revisionHistory, 'Historique des révisions');
   for (const [k, v] of Object.entries({ ...en, ...fr })) {
-    if (k === 'planTerms') continue; // a map of the fixed terms of the PLAN, empty in English
+    if (k === 'planTerms' || k === 'registers' || k === 'dossier') continue; // maps, checked below
     assert.equal(typeof v, 'string', k);
     assert.ok(v.length > 0, k);
   }
+  assert.deepEqual(Object.keys(fr.dossier).sort(), Object.keys(en.dossier).sort());
+  for (const v of [...Object.values(en.dossier), ...Object.values(fr.dossier)]) assert.ok(typeof v === 'string' && v.length > 0);
   assert.deepEqual(en.planTerms, {});
+  assert.deepEqual(Object.keys(fr.registers).sort(), Object.keys(en.registers).sort());
+  assert.equal(fr.registers.decisions, 'registre des décisions');
   assert.equal(fr.planTerms.Milestones, 'Jalons');
 });
 

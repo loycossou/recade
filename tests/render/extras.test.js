@@ -257,15 +257,14 @@ test('with no extra chosen, render extras prints one line, writes nothing and ex
   assert.deepEqual(listDeliverables(root), []);
 });
 
-test('stack: STACK.docx, STACK.pdf and the matrix workbook, one sheet for the weighted matrix', { skip }, async (t) => {
+test('stack: STACK_Stack-Decision.docx and the matrix workbook of the same name, one sheet for the weighted matrix', { skip }, async (t) => {
   const root = project(t);
   const { code, out, err } = await cli(root, ['stack'], {}, t);
   assert.equal(code, 0, err);
-  assert.deepEqual(listDeliverables(root), ['STACK-matrix.xlsx', 'STACK.docx', 'STACK.pdf']);
-  assert.ok(isZip(join(deliverables(root), 'STACK.docx')));
-  assert.ok(isPdf(join(deliverables(root), 'STACK.pdf')));
-  for (const name of ['STACK.docx', 'STACK.pdf', 'STACK-matrix.xlsx']) assert.ok(out.includes(`Wrote ${join(deliverables(root), name)}`), name);
-  const wb = await sheetsOf(join(deliverables(root), 'STACK-matrix.xlsx'));
+  assert.deepEqual(listDeliverables(root), ['STACK_Stack-Decision.docx', 'STACK_Stack-Decision.xlsx']);
+  assert.ok(isZip(join(deliverables(root), 'STACK_Stack-Decision.docx')));
+  for (const name of ['STACK_Stack-Decision.docx', 'STACK_Stack-Decision.xlsx']) assert.ok(out.includes(`Wrote ${join(deliverables(root), name)}`), name);
+  const wb = await sheetsOf(join(deliverables(root), 'STACK_Stack-Decision.xlsx'));
   assert.deepEqual(wb.worksheets.map((w) => w.name), ['Weighted matrix']);
   const ws = wb.worksheets[0];
   assert.deepEqual(ws.getRow(4).values.slice(1), ['Criterion', 'Weight', 'Node built-in', 'Web framework']);
@@ -283,12 +282,12 @@ test('stack: no docs/STACK.md is one warning on stderr, exit 0 and no file', asy
   assert.deepEqual(listDeliverables(root), []);
 });
 
-test('stack: a STACK with no table in section 5 still gives the docx and the pdf, and warns about the matrix', { skip }, async (t) => {
+test('stack: a STACK with no table in section 5 still gives the docx, and warns about the matrix', { skip }, async (t) => {
   const root = project(t, { stack: false });
   writeFileSync(join(root, 'docs', 'STACK.md'), STACK.replace(/## 5\. Weighted matrix[^]*?## 6/, '## 5. Weighted matrix\n\nNot applicable, adopt mode.\n\n## 6'));
   const { code, out, err } = await cli(root, ['stack'], {}, t);
   assert.equal(code, 0, err);
-  assert.deepEqual(listDeliverables(root), ['STACK.docx', 'STACK.pdf']);
+  assert.deepEqual(listDeliverables(root), ['STACK_Stack-Decision.docx']);
   assert.match(out, /stack-matrix/);
 });
 
@@ -301,19 +300,18 @@ test('stack: a failing check stops everything, and --no-check lets it through', 
   assert.deepEqual(listDeliverables(root), []);
   const forced = await cli(root, ['stack'], { args: ['--no-check'] }, t);
   assert.equal(forced.code, 0, forced.err);
-  assert.deepEqual(listDeliverables(root), ['STACK-matrix.xlsx', 'STACK.docx', 'STACK.pdf']);
+  assert.deepEqual(listDeliverables(root), ['STACK_Stack-Decision.docx', 'STACK_Stack-Decision.xlsx']);
 });
 
-test('decisions: DECISIONS.docx, .pdf and .xlsx, one row per DEC, and no register file anywhere in the project', { skip }, async (t) => {
+test('decisions: DECISIONS_Decision-Register.docx and .xlsx, one row per DEC, and no register file anywhere in the project', { skip }, async (t) => {
   const root = project(t);
   const before = new Set(everyFile(root));
   const { code, err } = await cli(root, ['decisions'], {}, t);
   assert.equal(code, 0, err);
-  assert.deepEqual(listDeliverables(root), ['DECISIONS.docx', 'DECISIONS.pdf', 'DECISIONS.xlsx']);
-  assert.ok(isPdf(join(deliverables(root), 'DECISIONS.pdf')));
-  const text = await docxText(join(deliverables(root), 'DECISIONS.docx'));
+  assert.deepEqual(listDeliverables(root), ['DECISIONS_Decision-Register.docx', 'DECISIONS_Decision-Register.xlsx']);
+  const text = await docxText(join(deliverables(root), 'DECISIONS_Decision-Register.docx'));
   for (const part of ['DEC-01', 'Where does the desk store its data?', 'B (SQLite file)', 'DEC-02', 'Which server runs the desk?', 'none yet', 'JSON file', '2026-11-18']) assert.ok(text.includes(part), part);
-  const ws = (await sheetsOf(join(deliverables(root), 'DECISIONS.xlsx'))).worksheets[0];
+  const ws = (await sheetsOf(join(deliverables(root), 'DECISIONS_Decision-Register.xlsx'))).worksheets[0];
   assert.equal(ws.name, 'Decisions');
   const header = ws.getRow(4).values.slice(1);
   assert.deepEqual(header.slice(0, 6), ['ID', 'Question', 'Document', 'Status', 'Options', 'Chosen option']);
@@ -343,9 +341,9 @@ test('design: one PDF for each board, named after it, and nothing for the README
   const root = project(t);
   const { code, out, err } = await cli(root, ['design'], {}, t);
   assert.equal(code, 0, err);
-  assert.deepEqual(listDeliverables(root), ['design-ledger-paper.pdf', 'design-night-shift.pdf']);
+  assert.deepEqual(listDeliverables(root), ['DESIGN_Ledger-Paper.pdf', 'DESIGN_Night-Shift.pdf']);
   for (const f of listDeliverables(root)) assert.ok(isPdf(join(deliverables(root), f)), f);
-  assert.match(out, /design-ledger-paper\.pdf/);
+  assert.match(out, /DESIGN_Ledger-Paper\.pdf/);
 });
 
 const REFERENCES = `---
@@ -369,16 +367,15 @@ Mode: I give my criteria. Platform: web. Product type: finance.
 | mobbin | Ledgerly | Dashboard | Dense table with a quiet header | https://example.com/ledgerly/dashboard |
 `;
 
-test('design: references.md is rendered to design-references.pdf next to the boards, and its absence is not a warning', { skip }, async (t) => {
+test('design: references.md is rendered to DESIGN_Design-References.docx next to the boards, and its absence is not a warning', { skip }, async (t) => {
   const root = project(t);
   mkdirSync(join(root, 'design'), { recursive: true });
   writeFileSync(join(root, 'design', 'references.md'), REFERENCES);
   const { code, out, err } = await cli(root, ['design'], {}, t);
   assert.equal(code, 0, err);
-  assert.deepEqual(listDeliverables(root), ['design-ledger-paper.pdf', 'design-night-shift.pdf', 'design-references.pdf']);
-  assert.ok(isPdf(join(deliverables(root), 'design-references.pdf')));
-  assert.match(out, /design-references\.pdf/);
-  assert.equal(existsSync(join(root, 'docs', 'deliverables', 'design-references.docx')), false);
+  assert.deepEqual(listDeliverables(root), ['DESIGN_Design-References.docx', 'DESIGN_Ledger-Paper.pdf', 'DESIGN_Night-Shift.pdf']);
+  assert.ok(isZip(join(deliverables(root), 'DESIGN_Design-References.docx')));
+  assert.match(out, /DESIGN_Design-References\.docx/);
   const plain = await cli(project(t), ['design'], {}, t);
   assert.equal(plain.code, 0);
   assert.equal(plain.err, '');
@@ -391,7 +388,7 @@ test('design: references.md alone renders, with the missing-boards warning', { s
   const { code, err } = await cli(root, ['design'], {}, t);
   assert.equal(code, 0);
   assert.match(err, /^Warning: no design\/directions\/\*\.html, nothing to render for design\.\n$/);
-  assert.deepEqual(listDeliverables(root), ['design-references.pdf']);
+  assert.deepEqual(listDeliverables(root), ['DESIGN_Design-References.docx']);
 });
 
 test('design: a references.md that breaks the style rules is refused like any source, and nothing is written', async (t) => {
@@ -415,13 +412,12 @@ test('design: no board is one warning, exit 0 and no file; a linked board outsid
   assert.deepEqual(listDeliverables(root), []);
 });
 
-test('reviews: REVIEWS.docx and REVIEWS.pdf hold every note, one section each', { skip }, async (t) => {
+test('reviews: REVIEWS_Review-Notes.docx holds every note, one section each', { skip }, async (t) => {
   const root = project(t);
   const { code, err } = await cli(root, ['reviews'], {}, t);
   assert.equal(code, 0, err);
-  assert.deepEqual(listDeliverables(root), ['REVIEWS.docx', 'REVIEWS.pdf']);
-  assert.ok(isPdf(join(deliverables(root), 'REVIEWS.pdf')));
-  const text = await docxText(join(deliverables(root), 'REVIEWS.docx'));
+  assert.deepEqual(listDeliverables(root), ['REVIEWS_Review-Notes.docx']);
+  const text = await docxText(join(deliverables(root), 'REVIEWS_Review-Notes.docx'));
   for (const part of ['Review of D1 by the architect', 'Review of D1 by the security lead', 'Keep NFR-01 provisional.', 'No blocker.']) assert.ok(text.includes(part), part);
   assert.equal(existsSync(join(root, 'docs', 'reviews', 'REVIEWS.md')), false);
 });
@@ -441,11 +437,11 @@ test('every extra together, D1 and the other defaults left alone', { skip }, asy
   const { code, out, err } = await cli(root, ['reviews', 'design', 'decisions', 'stack'], {}, t);
   assert.equal(code, 0, err);
   assert.deepEqual(listDeliverables(root), [
-    'D1.docx', 'DECISIONS.docx', 'DECISIONS.pdf', 'DECISIONS.xlsx', 'REVIEWS.docx', 'REVIEWS.pdf', 'STACK-matrix.xlsx', 'STACK.docx', 'STACK.pdf',
-    'design-ledger-paper.pdf', 'design-night-shift.pdf',
+    'D1.docx', 'DECISIONS_Decision-Register.docx', 'DECISIONS_Decision-Register.xlsx', 'REVIEWS_Review-Notes.docx',
+    'STACK_Stack-Decision.docx', 'STACK_Stack-Decision.xlsx', 'DESIGN_Ledger-Paper.pdf', 'DESIGN_Night-Shift.pdf',
   ].sort());
   assert.equal(readFileSync(join(deliverables(root), 'D1.docx'), 'utf8'), 'old D1');
-  assert.equal(out.split('\n').filter((l) => l.startsWith('Wrote ')).length, 10);
+  assert.equal(out.split('\n').filter((l) => l.startsWith('Wrote ')).length, 7);
   assert.equal(err, '');
 });
 
@@ -454,7 +450,7 @@ test('a missing source of one extra does not stop the others', { skip }, async (
   const { code, err } = await cli(root, ['decisions', 'reviews'], {}, t);
   assert.equal(code, 0);
   assert.match(err, /Warning: no decisions\/DEC-\*\.md/);
-  assert.deepEqual(listDeliverables(root), ['REVIEWS.docx', 'REVIEWS.pdf']);
+  assert.deepEqual(listDeliverables(root), ['REVIEWS_Review-Notes.docx']);
 });
 
 test('Chromium missing: exit 1, the same message as render, /recade:setup named, nothing written', async (t) => {
@@ -517,6 +513,37 @@ test('render extras refuses stray arguments, and a folder that is not a Recade p
   assert.match(none.err, /is not a Recade project/);
 });
 
+test('the registers take their title in the deliverable language: a French project gets French names', async (t) => {
+  const root = project(t, { stack: false, boards: false });
+  const state = join(root, 'recade', 'state.yaml');
+  writeFileSync(state, readFileSync(state, 'utf8').replace('deliverables: [en]', 'deliverables: [fr]'));
+  const { code, err } = await cli(root, ['decisions', 'reviews'], {}, t);
+  assert.equal(code, 0, err);
+  assert.deepEqual(listDeliverables(root), ['DECISIONS_Registre-Des-Decisions.docx', 'DECISIONS_Registre-Des-Decisions.xlsx', 'REVIEWS_Notes-De-Revue.docx']);
+});
+
+test('extras: the old names are left as they were and named once; deliverables.pdf adds the PDF', { skip }, async (t) => {
+  const root = project(t, { stack: false, decisions: false, boards: false });
+  mkdirSync(deliverables(root), { recursive: true });
+  for (const name of ['REVIEWS.docx', 'REVIEWS.pdf', 'STACK-matrix.xlsx']) writeFileSync(join(deliverables(root), name), 'old');
+  const first = await cli(root, ['reviews'], {}, t);
+  assert.equal(first.code, 0, first.err);
+  for (const name of ['REVIEWS.docx', 'REVIEWS.pdf']) {
+    assert.ok(first.out.includes(`Left as it was: ${join(deliverables(root), name)}.`), name);
+    assert.equal(readFileSync(join(deliverables(root), name), 'utf8'), 'old');
+  }
+  assert.equal(first.out.includes('STACK-matrix'), false, 'an extra not chosen is not looked at');
+  const cfg = configDir(t);
+  writeFileSync(join(cfg, 'config.yaml'), 'deliverables:\n  extras: [reviews]\n  pdf: true\n');
+  const out = [];
+  const code = await run(['render', 'extras', '--project', root], {
+    stdout: { write: (s) => out.push(s) }, stderr: { write() {} }, cwd: tmpdir(), env: { ...process.env, RECADE_CONFIG_DIR: cfg },
+  });
+  assert.equal(code, 0);
+  assert.ok(isPdf(join(deliverables(root), 'REVIEWS_Review-Notes.pdf')));
+  assert.match(out.join(''), /Wrote .*REVIEWS_Review-Notes\.pdf/);
+});
+
 test('recade help lists render extras', async () => {
   const out = [];
   const code = await run(['help'], { stdout: { write: (s) => out.push(s) }, stderr: { write() {} }, cwd: tmpdir(), env: process.env });
@@ -530,5 +557,5 @@ test('design: an app name that looks like an ID in references.md does not block 
   writeFileSync(join(root, 'design', 'references.md'), REFERENCES.replace('Ledgerly', 'M1 Finance').replace('Dense table', 'Like Q-12, a dense table'));
   const { code, err } = await cli(root, ['design'], {}, t);
   assert.equal(code, 0, err);
-  assert.ok(listDeliverables(root).includes('design-references.pdf'));
+  assert.ok(listDeliverables(root).includes('DESIGN_Design-References.docx'));
 });

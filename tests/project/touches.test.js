@@ -164,14 +164,14 @@ test('planParallel: a slice that touches api and web gets two worktrees on the s
   } });
   const [pick] = planParallel(root, {});
   assert.deepEqual(pick.worktrees, [
-    { repo: 'web', path: 'repos/web/.claude/worktrees/S-03', branch: 'slice/s-03-both' },
-    { repo: 'api', path: 'repos/api/.claude/worktrees/S-03', branch: 'slice/s-03-both' },
+    { repo: 'web', path: 'worktrees/web/S-03', branch: 'slice/s-03-both' },
+    { repo: 'api', path: 'worktrees/api/S-03', branch: 'slice/s-03-both' },
   ]);
 });
 
 test('planParallel: with one repository an unprefixed slice gets one worktree in it; without a registry none', () => {
   const one = project({ repos: ['api'], slices: { 'S-01-a.md': { touches: ['src/a/**'] } } });
-  assert.deepEqual(planParallel(one, {})[0].worktrees.map((w) => w.path), ['repos/api/.claude/worktrees/S-01']);
+  assert.deepEqual(planParallel(one, {})[0].worktrees.map((w) => w.path), ['worktrees/api/S-01']);
   const none = project({ repos: [], slices: { 'S-01-a.md': { touches: ['src/a/**'] } } });
   assert.deepEqual(planParallel(none, {})[0].worktrees, []);
 });

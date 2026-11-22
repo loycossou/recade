@@ -53,6 +53,8 @@ export function createFakeGh({ base, existing = null, remotes = {} }) {
     fields: [...(existing?.fields ?? [])],
     issues: (existing?.issues ?? []).map((i) => ({ repo: existing.repo, state: 'OPEN', ...i })),
     items: [],
+    /** The labels: `{repo, name}`. */
+    labels: [],
     /** The pull requests: `{repo (folder name), full, number, branch, base, state, sha}`. */
     prs: [],
     nextId: 100,
@@ -114,17 +116,51 @@ export function createFakeGh({ base, existing = null, remotes = {} }) {
     if (a === 'issue' && b === 'create') {
       const repo = flag(args, '--repo');
       const number = gh.issues.filter((i) => i.repo === repo).reduce((m, i) => Math.max(m, i.number), 0) + 1;
-      const issue = { repo, number, title: flag(args, '--title'), url: `https://github.com/${repo}/issues/${number}`, labels: [], state: 'OPEN' };
+      const labels = args.includes('--label') ? [{ name: flag(args, '--label') }] : [];
+      const issue = { repo, number, title: flag(args, '--title'), body: flag(args, '--body') ?? '', url: `https://github.com/${repo}/issues/${number}`, labels, state: 'OPEN' };
       gh.issues.push(issue);
       return ok(`${issue.url}\n`);
     }
-    if (a === 'issue' && ['view', 'close', 'comment'].includes(b)) {
+    if (a === 'issue' && ['view', 'close', 'comment', 'edit', 'reopen'].includes(b)) {
       const target = args[2];
       const repo = args.includes('--repo') ? flag(args, '--repo') : null;
       const issue = gh.issues.find((i) => (/^\d+$/.test(target) ? i.repo === repo && String(i.number) === target : i.url === target));
       if (issue === undefined) return fail(`could not resolve to an issue: ${target}`);
       if (b === 'close') issue.state = 'CLOSED';
+      if (b === 'reopen') issue.state = 'OPEN';
+      if (b === 'comment') (issue.comments ??= []).push(flag(args, '--body'));
+      if (b === 'edit') {
+        if (args.includes('--title')) issue.title = flag(args, '--title');
+        if (args.includes('--body')) issue.body = flag(args, '--body');
+      }
       return ok(b === 'view' ? { number: issue.number, state: issue.state } : '');
+    }
+    if (a === 'label' && b === 'list') {
+      const repo = flag(args, '--repo');
+      return ok(gh.labels.filter((l) => l.repo === repo).map((l) => ({ name: l.name })));
+    }
+    if (a === 'label' && b === 'create') {
+      gh.labels.push({ repo: flag(args, '--repo'), name: args[2] });
+      return ok('');
+    }
+    if (a === 'api' && b !== 'graphql') {
+      // The REST calls of the epics: the numeric id of an issue (`--jq .id`), the sub-issues of an issue, and a new sub-issue.
+      // GitHub keeps one parent for each issue, and moves it only with `replace_parent`.
+      const method = args.includes('--method') ? flag(args, '--method') : 'GET';
+      const path = args.find((x) => x.startsWith('repos/')) ?? '';
+      const m = /^repos\/([^/]+\/[^/]+)\/issues\/(\d+)(\/sub_issues)?(?:\?.*)?$/.exec(path);
+      if (m === null) return fail(`unexpected gh api call: ${args.join(' ')}`);
+      const issue = gh.issues.find((i) => i.repo === m[1] && String(i.number) === m[2]);
+      if (issue === undefined) return fail('gh: Not Found (HTTP 404)');
+      issue.id ??= gh.nextId++;
+      if (m[3] === undefined) return ok(`${issue.id}\n`);
+      if (method === 'GET') return ok(gh.issues.filter((i) => i.parent === issue.url).map((i) => ({ id: i.id, number: i.number, html_url: i.url, title: i.title })));
+      const id = Number(args.find((x) => x.startsWith('sub_issue_id=')).split('=')[1]);
+      const sub = gh.issues.find((i) => i.id === id);
+      if (sub === undefined) return fail('gh: Not Found (HTTP 404)');
+      if (sub.parent !== undefined && !args.includes('replace_parent=true')) return fail('gh: Validation Failed (HTTP 422)');
+      sub.parent = issue.url;
+      return ok({ id: issue.id, number: issue.number });
     }
     if (a === 'project' && b === 'item-list') return ok({ items: gh.items, totalCount: gh.items.length });
     if (a === 'project' && b === 'item-add') {
@@ -243,11 +279,14 @@ export function createFakeGh({ base, existing = null, remotes = {} }) {
   };
 
   /** The calls that change GitHub: repository, board, field, issue, item, pull request and GraphQL writes. */
-  gh.writes = () => gh.calls.filter(([a, b]) => (
-    (a === 'repo' && b === 'create')
-    || (a === 'project' && ['create', 'field-create', 'item-add', 'item-edit'].includes(b))
-    || (a === 'issue' && ['create', 'edit', 'comment', 'close'].includes(b))
-    || (a === 'pr' && b === 'create')
-    || a === 'api'));
+  gh.writes = () => gh.calls.filter((args) => {
+    const [a, b] = args;
+    return (a === 'repo' && b === 'create')
+      || (a === 'project' && ['create', 'field-create', 'item-add', 'item-edit'].includes(b))
+      || (a === 'issue' && ['create', 'edit', 'comment', 'close', 'reopen'].includes(b))
+      || (a === 'label' && b === 'create')
+      || (a === 'pr' && b === 'create')
+      || (a === 'api' && (b === 'graphql' || args.includes('--method')));
+  });
   return gh;
 }

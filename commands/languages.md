@@ -7,6 +7,8 @@ allowed-tools: Bash(node:*), Bash(npm ci:*), AskUserQuestion
 
 Write short, plain sentences. No exclamation marks, no emoji. Answer the user in English until Step 0 is done.
 
+<!-- shared:owner-choice -->**How to ask.** Ask the owner every question as a closed choice with `AskUserQuestion`: 2 to 4 options, the recommended one first, with its reason in its description (the tool adds `Other` by itself). When `AskUserQuestion` is not available, write the question in the chat with lettered options (A, B, C; for a DEC, the letters of its file), the recommended one first with its reason, and wait for the answer. Ask an open question only for an answer that is free text by nature: a name, a path, a date, or the owner's own words after they picked an option that asks for them.<!-- /shared:owner-choice -->
+
 Keywords stay in English whatever the choice: commands, agents, statuses, identifiers, file names, YAML keys, branches.
 
 ## Step 0. Dependencies

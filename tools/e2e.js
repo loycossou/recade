@@ -12,6 +12,8 @@ import { checkSlices, sliceRepoOrder } from '../src/project/slices.js';
 import { registryNames } from '../src/project/touches.js';
 import { createFakeGh } from './fake-gh.js';
 import { buildAdoptRepo } from '../example/adopt/build.js';
+import { splitFrontMatter } from '../src/render/frontmatter.js';
+import { sourceDeliverableName } from '../src/render/names.js';
 
 /**
  * The end-to-end driver (plan 5, task 6). It plays the CLI path of every phase of a Recade project, with the agent
@@ -60,11 +62,16 @@ export function phaseSources(text, { mode, full = false }) {
   if (mode === 'adopt') return (full ? rows.get('mode `adopt` with `full` true') : undefined) ?? rows.get('mode `adopt`') ?? null;
   return rows.get('any other mode') ?? null;
 }
-export const MODES = ['scratch', 'from', 'adopt'];
+/**
+ * `local` is the scratch project on the local forge (docs/design.md, section 6.8): the owner answers `Local only` at
+ * the slices, no GitHub repository, board or pull request is made, and the slice ends with a local review request that
+ * the owner merges with `recade slices merge`. The fake `gh` must never be called in that mode.
+ */
+export const MODES = ['scratch', 'from', 'adopt', 'local'];
 
 /** Every date of a run is this day, so generated files compare byte for byte. */
 const NOW = new Date(2026, 10, 18, 12, 0, 0);
-const PROJECT = { scratch: 'Fernhill Lending', from: 'Fernhill Lending', adopt: 'fernhill-desk' };
+const PROJECT = { scratch: 'Fernhill Lending', from: 'Fernhill Lending', adopt: 'fernhill-desk', local: 'Fernhill Lending' };
 const OWNER = 'fernhill';
 /** The parent folder of the workspace, and of the original of the adopt mode: a space and an accent in each (Review Focus 3). */
 export const PARENT_FOLDER = 'Projets Clients \u00c9t\u00e9';
@@ -76,6 +83,7 @@ const PHASES = {
   scratch: ['intake', 'team', 'docs', 'bible', 'slices', 'harness', 'delivery'],
   from: ['intake', 'team', 'docs', 'bible', 'slices', 'harness', 'delivery'],
   adopt: ['inventory', 'team', 'docs', 'bible', 'slices', 'harness', 'delivery'],
+  local: ['intake', 'team', 'docs', 'bible', 'slices', 'harness', 'delivery'],
 };
 
 /** What each phase must have received from the recorded agents. A missing file fails the run, named. */
@@ -100,6 +108,7 @@ const REQUIRED = {
   },
 };
 REQUIRED.from = REQUIRED.scratch;
+REQUIRED.local = REQUIRED.scratch;
 REQUIRED.adopt.team = REQUIRED.scratch.team;
 
 /** The files Recade generates in each phase, compared with `example/expected/`. */
@@ -197,6 +206,7 @@ export async function runE2E({ mode, tmp, exec = defaultExec, example = EXAMPLE,
   if (typeof tmp !== 'string' || tmp === '') throw new Error('runE2E needs a temp folder (tmp).');
   const started = Date.now();
   const adopt = mode === 'adopt';
+  const local = mode === 'local';
   const answers = parse(readFileSync(join(example, adopt ? 'adopt' : 'scratch', 'answers.yaml'), 'utf8'));
   const config = join(tmp, 'config');
   const projects = join(tmp, PARENT_FOLDER);
@@ -334,12 +344,25 @@ export async function runE2E({ mode, tmp, exec = defaultExec, example = EXAMPLE,
   const render = async (...files) => {
     await cli(['render', ...files]);
     for (const f of files) {
-      const base = f.replace(/^docs\//, '').replace(/\.md$/, '');
-      for (const ext of base.startsWith('PLAN') ? ['docx', 'pdf', 'xlsx'] : ['docx', 'pdf']) {
+      // Each source gives <ID>_<Title> in its own language, Word, and Excel for the PLAN. No PDF by default.
+      const base = sourceDeliverableName(join(dir, f), splitFrontMatter(readFileSync(join(dir, f), 'utf8'), f).meta);
+      for (const ext of base.startsWith('PLAN') ? ['docx', 'xlsx', 'html'] : ['docx', 'html']) {
         const out = `docs/deliverables/${base}.${ext}`;
         if (!existsSync(join(dir, out))) throw new E2EError(phase, f, null, `The render wrote no ${out}.`);
         touched.add(out);
       }
+      const pdf = join(dir, 'docs', 'deliverables', `${base}.pdf`);
+      if (existsSync(pdf)) throw new E2EError(phase, f, null, `The render wrote ${norm(relative(dir, pdf))}, but the PDF is off by default.`);
+      // A document with a companion gets its recap in the dossier, and the index links the dossier.
+      const html = readFileSync(join(dir, `docs/deliverables/${base}.html`), 'utf8');
+      if (existsSync(join(dir, f.replace(/\.md$/, '.story.yaml'))) && !html.includes('class="recap"')) {
+        throw new E2EError(phase, f.replace(/\.md$/, '.story.yaml'), null, `The dossier docs/deliverables/${base}.html has no recap, though the companion exists.`);
+      }
+      const index = 'docs/deliverables/INDEX_The-Project-Documents.html';
+      if (!existsSync(join(dir, index)) || !readFileSync(join(dir, index), 'utf8').includes(`href="${encodeURI(`${base}.html`)}"`)) {
+        throw new E2EError(phase, f, null, `The render wrote no ${index} that links ${base}.html.`);
+      }
+      touched.add(index);
     }
   };
 
@@ -480,6 +503,11 @@ export async function runE2E({ mode, tmp, exec = defaultExec, example = EXAMPLE,
       await cli(['index', 'build']);
       await cli(['index', 'check']);
       await render('docs/PLAN.md');
+      // The BIBLE gets its dossier only, beside the others.
+      await cli(['render', 'BIBLE.md', '--format', 'html']);
+      const bible = `docs/deliverables/${sourceDeliverableName(join(dir, 'BIBLE.md'), splitFrontMatter(readFileSync(join(dir, 'BIBLE.md'), 'utf8'), 'BIBLE.md').meta)}.html`;
+      if (!existsSync(join(dir, bible))) throw new E2EError(phase, 'BIBLE.md', null, `The render wrote no ${bible}.`);
+      touched.add(bible);
       const gates = [await gate('G3')];
       compare();
       await commit('docs(bible): rules and delivery plan approved at G3', 'BIBLE.md', 'INDEX.md', 'docs', 'recade');
@@ -494,6 +522,18 @@ export async function runE2E({ mode, tmp, exec = defaultExec, example = EXAMPLE,
       await cli(['index', 'check']);
       await cli(['slices', 'graph']);
       await cli(['slices', 'status']);
+      if (local) {
+        // The owner answers `Local only` to "Where should the code live?": the sheets are committed, G4 is asked, and
+        // nothing is called on GitHub. `github init` refuses on the local forge.
+        await cli(['state', 'set', 'forge', 'local']);
+        const shown = JSON.parse((await cli(['state', 'show', '--json'])).stdout);
+        if (shown.forge !== 'local' || shown.forge_asked !== true) throw new E2EError(phase, 'recade/state.yaml', null, 'The state does not hold the local forge.');
+        await commit('docs(slices): slice sheets', 'slices', 'recade');
+        await cli(['github', 'init', '--dry-run'], { expect: 1 });
+        const gates = [await gate('G4')];
+        compare();
+        return gates;
+      }
       await commit('docs(slices): slice sheets', 'slices', 'recade');
       if (adopt) await board();
       const writesBefore = gh.writes().length;
@@ -510,7 +550,7 @@ export async function runE2E({ mode, tmp, exec = defaultExec, example = EXAMPLE,
     },
     async harness() {
       await cli(['state', 'can-start', '5']);
-      // Two targets: the project commands in the workspace, then the slice commands, the guard and the gates in each code repository.
+      // Two targets: every command and agent in the workspace, the one entry point, then the guard, the hooks and the CI in each code repository.
       const missing = [];
       const first = await cli(['harness', 'install', '--target', 'workspace']);
       for (const r of repoNames) missing.push((await cli(['harness', 'install', '--target', 'code', '--repo', r])).stdout);
@@ -521,7 +561,8 @@ export async function runE2E({ mode, tmp, exec = defaultExec, example = EXAMPLE,
       touched.add('.claude/protocol.md');
       await lint('.claude/protocol.md');
       await cli(['harness', 'models', '--check', '--dir', join(dir, '.claude', 'agents')]);
-      await cli(['harness', 'models', '--check', '--dir', join(repoDir(repoNames[0]), '.claude', 'agents')]);
+      // A code repository holds no agent: only the pointer that sends a session opened there to the workspace.
+      for (const r of repoNames) if (existsSync(join(repoDir(r), '.claude', 'agents'))) throw new E2EError(phase, `repos/${r}/.claude/agents`, null, 'A code repository got agents: they belong to the workspace.');
       await cli(['harness', 'set', '--wip-limit', '3']);
       await cli(['claude-md', 'refresh', '--write', '--target', 'workspace']);
       for (const r of repoNames) await cli(['claude-md', 'refresh', '--write', '--target', 'code', '--repo', r]);
@@ -551,15 +592,17 @@ export async function runE2E({ mode, tmp, exec = defaultExec, example = EXAMPLE,
     },
     /** A slice across the repositories, from todo to done: a worktree and a branch in each, a pull request in each, merged in order. */
     async delivery() {
+      if (local) return play.deliveryLocal();
       const row = checkSlices(dir).status.find((s) => s.id === DELIVERED);
       const names = sliceRepoOrder(row, registryNames(loadState(dir)));
       if (row.status !== 'todo' || names.length === 0) throw new E2EError(phase, `slices/${row.file}`, null, `${DELIVERED} should be todo and touch a code repository, and is ${row.status} with ${names.length} repositories.`);
       const issue = gh.issues.find((i) => i.title.startsWith(`[${DELIVERED}]`) || Object.values(loadState(dir).github?.links ?? {}).includes(i.url));
+      // /slice opens the worktrees from touches:, under worktrees/<repo>/<S-nn> of the workspace.
+      await openWorktrees(row, names);
       for (const name of names) {
         const where = repoDir(name);
         const base = loadState(dir).repos.find((e) => e.name === name).default_branch;
-        const tree = join(where, '.claude', 'worktrees', DELIVERED);
-        await gitIn(where, 'worktree', 'add', '-q', join('.claude', 'worktrees', DELIVERED), '-b', row.branch, base);
+        const tree = join(dir, 'worktrees', name, DELIVERED);
         mkdirSync(join(tree, 'src'), { recursive: true });
         writeFileSync(join(tree, 'src', `${DELIVERED.toLowerCase()}.js`), `export const slice = '${DELIVERED}';\n`);
         await commitIn(tree, `feat(${name}): ${DELIVERED} ${row.title}`);
@@ -594,6 +637,73 @@ export async function runE2E({ mode, tmp, exec = defaultExec, example = EXAMPLE,
       return { gates: [], cleanup: cleanup.stdout };
     },
   };
+
+  /**
+   * The local forge: a worktree and a branch in each repository, one local review request in the workspace, the owner's
+   * merge with `recade slices merge` after its dry run, then `/board` reads the merges from git and marks the slice done.
+   */
+  play.deliveryLocal = async () => {
+    const row = checkSlices(dir).status.find((s) => s.id === DELIVERED);
+    const names = sliceRepoOrder(row, registryNames(loadState(dir)));
+    if (row.status !== 'todo' || names.length === 0) throw new E2EError(phase, `slices/${row.file}`, null, `${DELIVERED} should be todo and touch a code repository, and is ${row.status} with ${names.length} repositories.`);
+    const sections = [];
+    await openWorktrees(row, names);
+    for (const name of names) {
+      if (loadState(dir).repos.find((e) => e.name === name).remote !== 'none') throw new E2EError(phase, `repos/${name}`, null, `${name} has a remote on the local forge.`);
+      const tree = join(dir, 'worktrees', name, DELIVERED);
+      mkdirSync(join(tree, 'src'), { recursive: true });
+      writeFileSync(join(tree, 'src', `${DELIVERED.toLowerCase()}.js`), `export const slice = '${DELIVERED}';\n`);
+      await commitIn(tree, `feat(${name}): ${DELIVERED} ${row.title}`);
+      sections.push(`## ${name}\n\nThe ${name} side of ${DELIVERED}: one new module. Slice issue: local, see slices/STATUS.md\n`);
+    }
+    // The release manager writes the body it would have put in a pull request, and the main session commits it.
+    mkdirSync(join(dir, 'slices', 'reviews'), { recursive: true });
+    writeFileSync(join(dir, 'slices', 'reviews', `${DELIVERED}.md`), `# Review request: ${DELIVERED}\n\n${sections.join('\n')}`);
+    touched.add(`slices/reviews/${DELIVERED}.md`);
+    await cli(['workspace', 'commit', '--paths', `slices/reviews/${DELIVERED}.md`, '-m', `docs(${DELIVERED}): review request`]);
+    for (const status of ['spec', 'tests', 'implementation', 'audit', 'ready-to-merge']) await cli(['slices', 'status', '--set', DELIVERED, status]);
+    const dod = (readFileSync(join(dir, 'slices', row.file.split('/').pop()), 'utf8').match(/^\| \d+ \|.*\[ \] \|$/gm) ?? []).length;
+    if (dod === 0) throw new E2EError(phase, `slices/${row.file.split('/').pop()}`, null, 'The sheet has no open row in its Definition of Done.');
+    await cli(['slices', 'dod', DELIVERED, ...Array.from({ length: dod }, (_, i) => ['--tick', String(i + 1)]).flat()]);
+    const before = await cli(['board', 'reconcile', '--apply']);
+    if (!/review requested/.test(before.stdout) || /S-01\s+done/.test(before.stdout)) throw new E2EError(phase, 'recade board reconcile', null, `Before the merge the slice should wait on its review request: ${before.stdout.split('\n').slice(0, 4).join(' | ')}`);
+    // The owner sees the exact commands first, then says yes.
+    const dry = await cli(['slices', 'merge', DELIVERED, '--dry-run']);
+    for (const name of names) {
+      const line = `git -C '${repoDir(name)}' merge --no-ff ${row.branch}`;
+      if (!dry.stdout.includes(line)) throw new E2EError(phase, 'recade slices merge', null, `The dry run does not show: ${line}`);
+    }
+    if (/Before the merge/.test(dry.stdout)) throw new E2EError(phase, 'recade slices merge', null, `The dry run still waits: ${dry.stdout}`);
+    await cli(['slices', 'merge', DELIVERED]);
+    const done = await cli(['board', 'reconcile', '--apply']);
+    if (!/done/.test(done.stdout)) throw new E2EError(phase, 'recade board reconcile', null, `${DELIVERED} did not move to done: ${done.stdout.split('\n').slice(0, 4).join(' | ')}`);
+    const cleanup = await cli(['board', 'cleanup', '--apply']);
+    for (const name of names) {
+      if (existsSync(join(dir, 'worktrees', name, DELIVERED))) throw new E2EError(phase, 'recade board cleanup', null, `The worktree of ${DELIVERED} in ${name} is still there: ${cleanup.stdout}`);
+    }
+    if (gh.calls.length > 0) throw new E2EError(phase, 'gh', null, `The local forge called gh: ${gh.calls.map((c) => c.join(' ')).join('; ')}`);
+    touched.add('slices/STATUS.md');
+    compare();
+    return { gates: [], cleanup: cleanup.stdout };
+  };
+
+  /**
+   * What `/slice` does first: `recade slices open` reads touches: and opens one worktree for each repository, on the branch
+   * of the sheet, under worktrees/<repo>/<S-nn> of the workspace, which its .gitignore keeps out of git.
+   */
+  async function openWorktrees(row, names) {
+    const opened = JSON.parse((await cli(['slices', 'open', DELIVERED, '--json'])).stdout);
+    const got = opened.worktrees.map((w) => w.repo);
+    if ([...got].sort().join(',') !== [...names].sort().join(',')) {
+      throw new E2EError(phase, 'recade slices open', null, `The worktrees opened are ${got.join(', ') || 'none'}, not ${names.join(', ')}.`);
+    }
+    for (const name of names) {
+      const tree = join(dir, 'worktrees', name, DELIVERED);
+      const branch = (await gitIn(tree, 'branch', '--show-current')).trim();
+      if (branch !== row.branch) throw new E2EError(phase, `worktrees/${name}/${DELIVERED}`, null, `The worktree is on ${branch}, not on ${row.branch}.`);
+    }
+    if ((await gitIn(dir, 'status', '--porcelain', '--', 'worktrees')).trim() !== '') throw new E2EError(phase, '.gitignore', null, 'The workspace sees the slice worktrees: worktrees/ is not ignored.');
+  }
 
   /**
    * The install lists the rows of the harness technical sheet that have no value. The owner answers each one (a command or

@@ -25,9 +25,13 @@ const exampleCopy = (tmp) => {
 
 const GATES = { scratch: ['G0', 'G1', 'G2-stack', 'G2', 'G3', 'G4', 'G5'], adopt: ['G0-inventory', 'G1', 'G2-stack', 'G2', 'G3', 'G4', 'G5'] };
 GATES.from = GATES.scratch;
+GATES.local = GATES.scratch;
 const PHASES = { scratch: ['intake', 'team', 'docs', 'bible', 'slices', 'harness', 'delivery'], adopt: ['inventory', 'team', 'docs', 'bible', 'slices', 'harness', 'delivery'] };
 PHASES.from = PHASES.scratch;
-const WORKSPACE = { scratch: 'fernhill-lending-workspace', from: 'fernhill-lending-workspace', adopt: 'fernhill-desk-workspace' };
+PHASES.local = PHASES.scratch;
+const WORKSPACE = { scratch: 'fernhill-lending-workspace', from: 'fernhill-lending-workspace', adopt: 'fernhill-desk-workspace', local: 'fernhill-lending-workspace' };
+/** The mode the state records: the local run is a scratch project on the local forge. */
+const STATE_MODE = { scratch: 'scratch', from: 'from-docs', adopt: 'adopt', local: 'scratch' };
 
 const stateOf = (dir) => parse(readFileSync(join(dir, 'recade', 'state.yaml'), 'utf8'));
 const read = (dir, rel) => readFileSync(join(dir, rel), 'utf8');
@@ -48,18 +52,25 @@ for (const mode of MODES) {
 
     const state = stateOf(r.dir);
     assert.ok(GATES[mode].every((g) => typeof state.gates[g].passed === 'string'), 'the project state holds every gate as passed');
-    assert.equal(state.mode, mode === 'from' ? 'from-docs' : mode);
+    assert.equal(state.mode, STATE_MODE[mode]);
+    assert.equal(state.forge, mode === 'local' ? 'local' : undefined, 'only the local run records a forge');
     assert.equal(state.kind, 'workspace');
     assert.deepEqual(state.repos.map((e) => e.name), r.repos, 'the registry holds the code repositories');
-    // The harness is installed at two targets and verified at each: the project commands in the workspace, the slice commands,
-    // the guard and the gates in each code repository.
+    // The harness is installed at two targets and verified at each: every command and every agent in the workspace, the one
+    // entry point, and the guard, the git hooks, the CI and a pointer in each code repository.
     assert.ok(existsSync(join(r.dir, '.claude', 'commands', 'status.md')) && existsSync(join(r.dir, '.github', 'workflows', 'workspace.yml')));
-    assert.equal(existsSync(join(r.dir, '.claude', 'commands', 'slice.md')), false, 'no slice command in the workspace');
+    assert.ok(existsSync(join(r.dir, '.claude', 'commands', 'slice.md')) && existsSync(join(r.dir, '.claude', 'agents', 'reviewer.md')), '/slice and every agent are in the workspace');
     assert.equal(existsSync(join(r.dir, '.github', 'workflows', 'ci.yml')), false, 'no CI of a code repository in the workspace');
     for (const name of r.repos) {
       const repo = join(r.dir, 'repos', name);
-      assert.ok(existsSync(join(repo, '.claude', 'agents', 'reviewer.md')) && existsSync(join(repo, '.claude', 'commands', 'slice.md')), `${name} has the slice harness`);
+      assert.ok(existsSync(join(repo, '.claude', 'hooks', 'recade-guard.mjs')) && existsSync(join(repo, '.githooks', 'pre-commit')), `${name} has the guard and the git hooks`);
+      assert.match(read(repo, '.claude/commands/slice.md'), /recade-pointer/, `${name} has the pointer to the workspace, not a second /slice`);
+      assert.equal(existsSync(join(repo, '.claude', 'agents')), false, `${name} has no agent`);
       assert.ok(existsSync(join(repo, '.github', 'workflows', mode === 'adopt' ? 'recade.yml' : 'ci.yml')), `${name} has its CI`);
+      // The GitHub-only files are left out on the local forge.
+      for (const f of ['workflows/conflicts.yml', 'workflows/second-opinion.yml', 'dependabot.yml']) {
+        if (mode !== 'adopt') assert.equal(existsSync(join(repo, '.github', f)), mode !== 'local', `${name}: ${f} ${mode === 'local' ? 'is not' : 'is'} installed`);
+      }
       assert.ok(existsSync(join(repo, '.recade', 'workspace')), `${name} is linked to its workspace`);
       // A new repository has no document at all; an adopted one keeps the documents its owner wrote, and none of Recade's.
       assert.equal(existsSync(join(repo, 'docs')), mode === 'adopt', `no document of Recade is copied into ${name}`);
@@ -69,11 +80,22 @@ for (const mode of MODES) {
     assert.equal(r.steps.find((s) => s.phase === 'harness').verify.match(/Harness verified/g).length, 1 + r.repos.length, 'verify passes on each target');
     // The documents are rendered where the commands say.
     const out = join(r.dir, 'docs', 'deliverables');
-    assert.ok(existsSync(join(out, 'PLAN.xlsx')) && existsSync(join(out, 'PLAN.docx')) && existsSync(join(out, 'PLAN.pdf')));
-    if (mode !== 'adopt') for (const d of ['D1', 'D2', 'D3']) assert.ok(existsSync(join(out, `${d}.docx`)) && existsSync(join(out, `${d}.pdf`)), `${d} is rendered`);
+    // Named <ID>_<Title> in the language of the document, Word and Excel only.
+    assert.ok(existsSync(join(out, 'PLAN_Delivery-Plan.xlsx')) && existsSync(join(out, 'PLAN_Delivery-Plan.docx')));
+    const named = mode === 'adopt' ? [] : ['D1_Functional-Specifications', 'D2_Technical-Architecture', 'D3_Security-Requirements'];
+    for (const d of named) assert.ok(existsSync(join(out, `${d}.docx`)), `${d} is rendered`);
+    assert.deepEqual(readdirSync(out).filter((f) => f.endsWith('.pdf')), [], 'no PDF by default');
     // Slices exist, with the generated STATUS and graph.
     assert.ok(readdirSync(join(r.dir, 'slices')).filter((f) => /^S-\d\d/.test(f)).length >= 3);
     assert.ok(existsSync(join(r.dir, 'slices', 'STATUS.md')) && existsSync(join(r.dir, 'slices', 'graph.md')));
+    if (mode === 'local') {
+      // The local forge: the fake gh was never called, nothing was pushed, and every code repository has no remote.
+      assert.deepEqual(r.gh.calls, [], 'the local forge never calls gh');
+      assert.deepEqual(r.gh.network, [], 'nothing reaches a remote');
+      assert.deepEqual(state.repos.map((e) => e.remote), ['none', 'none']);
+      assert.equal(state.github, undefined);
+      return;
+    }
     // The board work went to the fake gh: it was asked, it wrote, and nothing left the machine.
     assert.ok(r.gh.calls.length > 0 && r.gh.writes.length > 0);
     const created = r.gh.writes.filter(([a, b]) => a === 'repo' && b === 'create').map((args) => args[2]);
@@ -93,7 +115,7 @@ test('every mode ends with a clean workspace of exactly the planned tree, and it
     assert.deepEqual(top.filter((x) => !TRACKED.includes(x)), [], `${mode}: only the planned folders and files are tracked`);
     for (const x of ['recade', 'slices', 'docs', '.claude', '.githooks', 'BIBLE.md', 'CLAUDE.md']) assert.ok(top.includes(x), `${mode}: ${x} is tracked`);
     const lines = read(r.dir, '.gitignore').split('\n').map((l) => l.trim());
-    for (const ignored of ['repos/', 'artifacts/', 'tmp/', '.recade/']) assert.ok(lines.includes(ignored), `${mode}: .gitignore holds ${ignored}`);
+    for (const ignored of ['repos/', 'worktrees/', 'artifacts/', 'tmp/', '.recade/']) assert.ok(lines.includes(ignored), `${mode}: .gitignore holds ${ignored}`);
     for (const name of r.repos) {
       assert.ok(existsSync(join(r.dir, 'repos', name, '.git')), `${mode}: ${name} is a repository of its own`);
       assert.equal(spawnSync('git', ['-C', r.dir, 'check-ignore', '-q', `repos/${name}/package.json`]).status, 0, `${mode}: repos/${name} is ignored by the workspace`);
@@ -123,6 +145,30 @@ test('nothing is written outside <parent>/<slug>-workspace: the parent holds tha
   }
 });
 
+test('the board holds one epic for each lot, with its stories and slices as sub-issues, and /board closes the epics whose slices are done', (t) => {
+  const r = results.scratch;
+  if (r === undefined) { t.skip('scratch did not run'); return; }
+  const epics = r.gh.issues.filter((i) => (i.labels ?? []).some((l) => l.name === 'epic'));
+  assert.deepEqual(epics.map((i) => i.title), ['[CAT] Catalogue', '[MEM] Members', '[LOAN] Loans', '[REP] Reports']);
+  const epic = (code) => epics.find((i) => i.title.startsWith(`[${code}]`));
+  assert.match(epic('LOAN').body, /Goal: A volunteer lends a tool and takes it back/);
+  const parent = (id) => r.gh.issues.find((i) => i.url === r.gh.issues.find((x) => x.title.startsWith(`[${id}] `)).parent);
+  assert.equal(parent('S-01'), epic('CAT'), 'S-01 serves CAT and MEM, and sits under the lot of its first story');
+  assert.equal(parent('MEM-01'), epic('MEM'));
+  assert.equal(parent('LOAN-03'), epic('LOAN'));
+  const story = r.gh.issues.find((i) => i.title.startsWith('[LOAN-01] ')).body;
+  assert.match(story, /A volunteer registers a loan at the desk/);
+  assert.match(story, /Acceptance criteria:\n- The loan names the member/);
+  assert.match(story, /- Increment: INC-1/);
+  assert.deepEqual(epics.map((i) => [i.title.slice(1, i.title.indexOf(']')), i.state]), [['CAT', 'CLOSED'], ['MEM', 'CLOSED'], ['LOAN', 'OPEN'], ['REP', 'OPEN']], 'S-01 is done, so the two lots it serves are done');
+  const adopt = results.adopt;
+  if (adopt !== undefined) {
+    const linked = adopt.gh.issues.find((i) => i.url === 'https://github.com/fernhill/fernhill-desk/issues/11');
+    assert.match(adopt.gh.issues.find((i) => i.url === linked.parent).body, /<!-- recade:epic FEE -->/, 'the linked issue of the adopted repository is put under its epic');
+    assert.equal(linked.title.startsWith('[FEE'), false, 'and is not renamed');
+  }
+});
+
 test('a slice that touches api and web goes from todo to done with one fake pull request in each repository, and the issue of the workspace closes once', (t) => {
   for (const mode of ['scratch', 'from']) {
     const r = results[mode];
@@ -144,11 +190,14 @@ test('a slice that touches api and web goes from todo to done with one fake pull
     const issues = r.gh.issues.filter((i) => i.title.startsWith('[S-01]'));
     assert.deepEqual(issues.map((i) => [i.repo, i.state]), [['fernhill/fernhill-lending-workspace', 'CLOSED']]);
     assert.equal(r.gh.issues.some((i) => i.repo !== 'fernhill/fernhill-lending-workspace'), false, 'no issue is created in a code repository');
-    assert.equal(r.gh.writes.filter(([a, b]) => a === 'issue' && b === 'close').length, 1, 'the issue closes once, when the last pull request is merged');
+    const closes = r.gh.writes.filter(([a, b]) => a === 'issue' && b === 'close');
+    const epicNumbers = new Set(r.gh.issues.filter((i) => (i.labels ?? []).some((l) => l.name === 'epic')).map((i) => String(i.number)));
+    assert.equal(closes.filter((c) => !epicNumbers.has(c[2])).length, 1, 'the issue closes once, when the last pull request is merged');
     const subjects = gitOut(r.dir, 'log', '--format=%s').split('\n');
     assert.ok(subjects.includes('chore(slices): S-01 ready-to-merge') && subjects.some((l) => /^docs\(slices\): tick DoD rows? /.test(l)) && subjects[0] === 'chore(board): reconcile slices');
     for (const name of r.repos) {
-      assert.equal(existsSync(join(r.dir, 'repos', name, '.claude', 'worktrees', 'S-01')), false, `${name}: the merged worktree was cleaned up`);
+      assert.equal(existsSync(join(r.dir, 'worktrees', name, 'S-01')), false, `${name}: the merged worktree was cleaned up`);
+      assert.equal(existsSync(join(r.dir, 'repos', name, '.claude', 'agents')), false, `${name}: no agent in a code repository, they are in the workspace`);
       assert.equal(gitOut(join(r.dir, 'repos', name), 'branch', '--list', 'slice/*').trim(), '', `${name}: and so was its branch`);
     }
   }
@@ -159,8 +208,29 @@ test('a slice that touches api and web goes from todo to done with one fake pull
   }
 });
 
+test('on the local forge a slice ends with a review request, the owner merges it with --no-ff, and /board marks it done without gh', (t) => {
+  const r = results.local;
+  if (r === undefined) { t.skip('local did not run'); return; }
+  assert.match(read(r.dir, 'slices/STATUS.md'), /\| S-01 \|[^\n]*\| done \|/);
+  const review = read(r.dir, 'slices/reviews/S-01.md');
+  assert.match(review, /^## api$/m);
+  assert.match(review, /^## web$/m);
+  assert.equal(gitOut(r.dir, 'ls-files', 'slices/reviews/S-01.md').trim(), 'slices/reviews/S-01.md', 'the review request is committed in the workspace');
+  const sheet = sheetOf(r.dir, 'S-01');
+  for (const name of r.repos) {
+    const repo = join(r.dir, 'repos', name);
+    const head = gitOut(repo, 'rev-parse', 'main').trim();
+    assert.equal(gitOut(repo, 'rev-list', '--parents', '-n', '1', 'main').trim().split(' ').length, 3, `${name}: main ends with a merge commit`);
+    assert.match(gitOut(repo, 'log', '-1', '--format=%s', 'main'), /^Merge branch 'slice\/s-01/, `${name}: git's own merge subject`);
+    assert.match(sheet, new RegExp(`\\n  ${name}: ${head}\\n`), `merged: records the merge commit of ${name}`);
+    assert.equal(existsSync(join(r.dir, 'worktrees', name, 'S-01')), false, `${name}: the worktree was cleaned up`);
+    assert.equal(gitOut(repo, 'branch', '--list', 'slice/*').trim(), '', `${name}: and so was its branch`);
+    assert.equal(gitOut(repo, 'remote').trim(), '', `${name}: no remote`);
+  }
+});
+
 test('auto-push calls only the workspace repository: no code repository is pushed by Recade, and every push is on the default branch', (t) => {
-  for (const mode of MODES) {
+  for (const mode of MODES.filter((m) => m !== 'local')) {
     const r = results[mode];
     if (r === undefined) { t.skip(`${mode} did not run`); continue; }
     assert.equal(stateOf(r.dir).workspace?.auto_push, true, `${mode}: the owner said yes, and it is recorded`);

@@ -25,6 +25,7 @@ export const MECHANICAL_STAGES = Object.freeze([
   Object.freeze({ stage: 'translate', agents: Object.freeze(['project-lead', 'architect', 'security-lead', 'bible-writer']), why: 'translation of an approved document' }),
   Object.freeze({ stage: 'glossary', agents: Object.freeze(['project-lead']), why: 'terms the contributors reported, added to Annex A of D1' }),
   Object.freeze({ stage: 'apply-decisions', agents: Object.freeze(['project-lead', 'architect', 'security-lead', 'bible-writer']), why: "the owner's choices carried into the text" }),
+  Object.freeze({ stage: 'story', agents: Object.freeze(['project-lead', 'architect', 'security-lead', 'bible-writer']), why: 'the companion of a written document, a summary that adds no fact' }),
   Object.freeze({ stage: 'fix', agents: Object.freeze(['project-lead', 'architect', 'security-lead', 'bible-writer']), why: 'a style, index or render finding fixed in place' }),
 ]);
 
@@ -38,3 +39,19 @@ export const MECHANICAL_STAGES = Object.freeze([
 export function stageTier(agent, stage) {
   return MECHANICAL_STAGES.some((m) => m.stage === stage && m.agents.includes(agent)) ? 'mechanical' : 'writer';
 }
+
+/**
+ * The models the owner chooses from for the second opinion of the harness (`models.second_opinion`). `opus` keeps
+ * the table of `harness/models.yaml` (Opus 5.5, the reviewer's family, allowed by `second_opinion.same_family: warn`).
+ * `fable` puts the agent on Fable 5.2, another family than the reviewer: a more independent view, at about twice the
+ * price of Opus (`src/pricing.js`).
+ */
+export const SECOND_OPINION_MODELS = Object.freeze({
+  opus: 'claude-opus-5-5',
+  fable: 'claude-fable-5-2',
+});
+
+export const SECOND_OPINION_CHOICES = Object.freeze(Object.keys(SECOND_OPINION_MODELS));
+
+/** True when `value` is one of the second-opinion choices. */
+export const isSecondOpinionChoice = (value) => typeof value === 'string' && Object.hasOwn(SECOND_OPINION_MODELS, value);

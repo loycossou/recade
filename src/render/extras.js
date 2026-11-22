@@ -12,8 +12,10 @@ import { parseDocument } from './parse.js';
 import { loadTheme, loadLabels } from './theme.js';
 import { allowRequest, insideProject } from './figures.js';
 import { renderTablesWorkbook, stackMatrixSheets } from './xlsx.js';
+import { deliverableName, slugTitle } from './names.js';
 import {
-  CACHE_DIR, RenderError, buildOutputs, checkJobs, ignoreCache, lazyBrowser, lotsOf, oneLine, posix, writeAll,
+  CACHE_DIR, RenderError, buildOutputs, checkJobs, ignoreCache, lazyBrowser, leftOver, lotsOf, oneLine, posix,
+  staleCandidates, writeAll,
 } from './pipeline.js';
 
 /** @typedef {import('./pipeline.js').Finding} Finding */
@@ -164,8 +166,10 @@ export function readDecisions(root) {
 
 const frontMatter = (meta) => `---\n${stringify(meta, { lineWidth: 0 }).trimEnd()}\n---\n`;
 
-const registerMeta = (docId, title, { project, date, language }) => ({
-  doc_id: docId, title: `${project}, ${title}`, project, version: '1.0', date, status: 'Register', language,
+/** The front matter of a register. Its title is the one of `registers` in the labels of the deliverable language. */
+const registerMeta = (docId, key, { project, date, language }) => ({
+  doc_id: docId, title: `${project}, ${loadLabels(language).registers?.[key] ?? key}`, project, version: '1.0', date,
+  status: 'Register', language,
 });
 
 /**
@@ -175,7 +179,7 @@ const registerMeta = (docId, title, { project, date, language }) => ({
  * @param {{project:string, date:string, language:string}} meta
  */
 export function decisionRegisterMarkdown(entries, meta) {
-  const out = [frontMatter(registerMeta('DECISIONS', 'decision register', meta)), '## Summary', ''];
+  const out = [frontMatter(registerMeta('DECISIONS', 'decisions', meta)), '## Summary', ''];
   out.push('| ID | Question | Document | Status | Chosen option | Date |', '|---|---|---|---|---|---|');
   for (const e of entries) out.push(`| ${[e.id, e.question, e.document, e.status, e.chosen, e.date].map(cell).join(' | ')} |`);
   for (const e of entries) {
@@ -257,7 +261,7 @@ function demote(body) {
  * @param {{project:string, date:string, language:string}} meta
  */
 export function reviewRegisterMarkdown(notes, meta) {
-  const out = [frontMatter(registerMeta('REVIEWS', 'review notes', meta))];
+  const out = [frontMatter(registerMeta('REVIEWS', 'reviews', meta))];
   for (const n of notes) out.push(`## ${n.title.replace(/\s+/g, ' ')}`, '', demote(n.body), '');
   return `${out.join('\n').trimEnd()}\n`;
 }
@@ -288,17 +292,20 @@ export async function printBoard(browser, file, root) {
 /**
  * Render the extra deliverables the owner chose, into `docs/deliverables`. Every source is read, checked and built
  * in memory first, and nothing is written unless every output succeeded. A missing source is a warning, not a
- * failure. One browser serves the figures and every PDF, started only when something needs it.
- * - `stack`: STACK.docx, STACK.pdf and STACK-matrix.xlsx (one sheet for each table of section 5).
- * - `decisions`: DECISIONS.docx, DECISIONS.pdf and DECISIONS.xlsx, from a register built in memory.
- * - `design`: one `design-<board>.pdf` for each HTML board of `design/directions/`, and `design-references.pdf` from
+ * failure. One browser serves the figures and every PDF, started only when something needs it. Each file is named
+ * `<ID>_<Title>` as the documents are (`STACK_Stack-Decision.docx`); `pdf` adds a PDF next to each `docx`.
+ * - `stack`: STACK_<Title>.docx, and STACK_<Title>.xlsx (one sheet for each table of section 5).
+ * - `decisions`: DECISIONS_<Title>.docx and .xlsx, from a register built in memory.
+ * - `design`: one `DESIGN_<Board>.pdf` for each HTML board of `design/directions/`, and `DESIGN_<Title>.docx` from
  *   `design/references.md` when it exists.
- * - `reviews`: REVIEWS.docx and REVIEWS.pdf, from the notes of `docs/reviews/`, built in memory.
+ * - `reviews`: REVIEWS_<Title>.docx, from the notes of `docs/reviews/`, built in memory.
+ * `stale` lists the files of an older render left as they were (the old names, a PDF no longer asked for).
  * @param {string} root project folder
  * @param {string[]} extras names among `stack`, `decisions`, `design`, `reviews`
- * @param {{check?:boolean, date?:string, env?:Record<string,string|undefined>, chromiumStatus?:typeof defaultChromiumStatus,
- *   withBrowser?:typeof defaultWithBrowser, rename?:(from:string, to:string)=>void}} [options]
- * @returns {Promise<{outputs:string[], findings:Finding[], warnings:string[]}>}
+ * @param {{check?:boolean, pdf?:boolean, date?:string, env?:Record<string,string|undefined>,
+ *   chromiumStatus?:typeof defaultChromiumStatus, withBrowser?:typeof defaultWithBrowser,
+ *   rename?:(from:string, to:string)=>void}} [options]
+ * @returns {Promise<{outputs:string[], findings:Finding[], warnings:string[], stale:string[]}>}
  * @throws {RenderError} with `warnings`
  */
 export async function renderExtras(root, extras, options = {}) {
@@ -322,7 +329,9 @@ export async function renderExtras(root, extras, options = {}) {
   /** @type {{file:string, root:string, rel:string, doc:any, wanted:string[], base:string, text:string, docDir?:string}[]} */
   const real = [];
   const generated = [];
-  const extraFiles = []; // built after the browser exists: {file, build(browser)} or {file, bytes}
+  const extraFiles = []; // built after the browser exists: {file, build()} or {file, print}, with the `old` name
+  const wanted = ['docx', ...(options.pdf ? ['pdf'] : [])];
+  const old = (...names) => names.map((n) => join(outDir, n));
   let cached = null;
   const meta = () => {
     cached ??= { project: projectTitle(root), date: options.date ?? localToday(), language: deliverableLanguage(root) };
@@ -337,7 +346,8 @@ export async function renderExtras(root, extras, options = {}) {
     } catch (err) {
       throw fail(new RenderError(`${name}: ${oneLine(err)}`));
     }
-    const job = { file, root, rel, doc, wanted: ['docx', 'pdf'], base: join(outDir, name), text, docDir };
+    const base = join(outDir, deliverableName(name, doc.meta));
+    const job = { file, root, rel, doc, wanted, base, text, docDir, oldNames: [`${name}.docx`, `${name}.pdf`] };
     generated.push(job);
     return job;
   };
@@ -356,11 +366,12 @@ export async function renderExtras(root, extras, options = {}) {
         } catch (err) {
           throw fail(new RenderError(oneLine(err)));
         }
-        real.push({ file, root, rel: 'docs/STACK.md', doc, wanted: ['docx', 'pdf'], base: join(outDir, 'STACK'), text });
+        const base = join(outDir, deliverableName('STACK', doc.meta));
+        real.push({ file, root, rel: 'docs/STACK.md', doc, wanted, base, text, oldNames: ['STACK.docx', 'STACK.pdf'] });
         const matrix = stackMatrixSheets(doc);
         findings.push(...matrix.warnings);
         if (matrix.sheets.length > 0) {
-          extraFiles.push({ file: join(outDir, 'STACK-matrix.xlsx'), build: async () => {
+          extraFiles.push({ file: `${base}.xlsx`, old: old('STACK-matrix.xlsx'), build: async () => {
             theme ??= loadTheme(root);
             return renderTablesWorkbook({ meta: doc.meta, source: 'STACK.md', sheets: matrix.sheets }, { theme, labels: loadLabels(doc.meta.language) });
           } });
@@ -370,7 +381,7 @@ export async function renderExtras(root, extras, options = {}) {
         warnings.push(...skipped);
         if (entries.length === 0) { if (skipped.length === 0) missing('decisions/DEC-*.md', name); continue; }
         const job = generatedJob('DECISIONS', decisionRegisterMarkdown(entries, meta()), join(root, 'decisions'));
-        extraFiles.push({ file: join(outDir, 'DECISIONS.xlsx'), build: async () => {
+        extraFiles.push({ file: `${job.base}.xlsx`, old: old('DECISIONS.xlsx'), build: async () => {
           theme ??= loadTheme(root);
           return renderTablesWorkbook({ meta: job.doc.meta, source: 'decisions', sheets: [decisionSheet(entries)] }, { theme, labels: loadLabels(job.doc.meta.language) });
         } });
@@ -390,20 +401,22 @@ export async function renderExtras(root, extras, options = {}) {
           } catch (err) {
             throw fail(new RenderError(oneLine(err)));
           }
-          real.push({ file: references, root, rel: 'design/references.md', doc, wanted: ['pdf'], base: join(outDir, 'design-references'), text });
+          const base = join(outDir, deliverableName('DESIGN', doc.meta));
+          real.push({ file: references, root, rel: 'design/references.md', doc, wanted, base, text, oldNames: ['design-references.pdf'] });
         }
         const dir = join(root, 'design', 'directions');
         const boards = filesOf(dir, /\.html$/i, root);
         if (boards.length === 0) { missing('design/directions/*.html', name); continue; }
         const seen = new Map();
         for (const board of boards) {
-          const key = basename(board).replace(/\.html$/i, '').toLowerCase();
+          const stem = basename(board).replace(/\.html$/i, '');
+          const name = `DESIGN_${slugTitle(stem) || stem}.pdf`;
+          const key = name.toLowerCase();
           if (seen.has(key)) {
-            throw new RenderError(`design/directions holds ${seen.get(key)} and ${board}, which would both write design-${key}.pdf. Rename one.`);
+            throw new RenderError(`design/directions holds ${seen.get(key)} and ${board}, which would both write ${name}. Rename one.`);
           }
           seen.set(key, board);
-          const file = join(dir, board);
-          extraFiles.push({ file: join(outDir, `design-${basename(board).replace(/\.html$/i, '')}.pdf`), print: file });
+          extraFiles.push({ file: join(outDir, name), old: old(`design-${stem}.pdf`), print: join(dir, board) });
         }
       }
     }
@@ -439,12 +452,20 @@ export async function renderExtras(root, extras, options = {}) {
     await browser.close();
   }
 
-  // 4. Write, all or nothing.
+  // 4. Write, all or nothing, once each name.
+  const names = new Map();
+  for (const { file } of files) {
+    const key = file.toLowerCase();
+    if (names.has(key)) throw fail(new RenderError(`Two extra deliverables would both write ${basename(file)}. Rename one of their sources.`));
+    names.set(key, file);
+  }
   try {
     writeAll(files, options.rename);
   } catch (err) {
     throw fail(err);
   }
   if (files.length > 0) ignoreCache(root);
-  return { outputs: files.map((f) => f.file), findings, warnings };
+  const outputs = files.map((f) => f.file);
+  const candidates = [...[...real, ...generated].flatMap((j) => staleCandidates(j, true)), ...extraFiles.flatMap((i) => i.old ?? [])];
+  return { outputs, findings, warnings, stale: leftOver(candidates, outputs) };
 }

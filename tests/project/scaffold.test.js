@@ -73,10 +73,10 @@ test('createProject writes a normalised state: phase 0, every gate null', async 
   assert.equal(state.kind, 'workspace');
 });
 
-test('createProject returns the workspace: the four ignored entries come first, the tree has docs/source', async () => {
+test('createProject returns the workspace: the five ignored entries come first, the tree has docs/source', async () => {
   const r = await make('Fernhill Lending');
   const ignore = readFileSync(join(r.dir, '.gitignore'), 'utf8').split('\n');
-  assert.deepEqual(ignore.slice(0, 4), ['repos/', 'artifacts/', 'tmp/', '.recade/']);
+  assert.deepEqual(ignore.slice(0, 5), ['repos/', 'worktrees/', 'artifacts/', 'tmp/', '.recade/']);
   assert.ok(statSync(join(r.dir, 'docs', 'source')).isDirectory());
   assert.ok(!existsSync(join(r.dir, 'repos')));
 });

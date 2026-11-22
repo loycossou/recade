@@ -9,9 +9,10 @@ import { loadState } from '../state.js';
 import { findStack, techSheet } from './claudemd.js';
 import { handleHook, parseWrites } from './guard.js';
 import { SYNC_ADVICE, checkLink, findWorkspace } from '../workspace/layout.js';
-import { LAUNCHER, SPEC_LINE, isAdopt, workflowFiles } from './install.js';
-import { loadModels, modelWarnings, sensitiveLane, syncAgents } from './models.js';
-import { checkGate, fingerprint, runGate } from './stamps.js';
+import { LAUNCHER, SPEC_LINE, isAdopt, isLocalForge, legacyCopies, workflowFiles } from './install.js';
+import { loadModels, modelWarnings, secondOpinionOf, sensitiveLane, syncAgents, withSecondOpinion } from './models.js';
+import { checkGate, defaultExec, fingerprint, runGate } from './stamps.js';
+import { WORKTREES_IGNORE, ignoresWorktrees, legacyWorktrees } from '../workspace/worktrees.js';
 import { WORKSPACE_WORKFLOW, preCommitTemplate, selectFor } from './targets.js';
 
 /**
@@ -101,6 +102,7 @@ export async function verify(root, { pluginRoot, target, runHook, only } = {}) {
   const workspaceDir = target === 'code' ? findWorkspace(root)?.dir ?? null : null;
   const adopt = target === 'workspace' ? false : isAdopt(workspaceDir ?? root);
   const wf = workflowFiles(adopt);
+  const local = isLocalForge(workspaceDir ?? root);
   const forWorkspace = target === 'workspace';
   const stem = (f) => f.replace(/\.md$/, '');
 
@@ -111,7 +113,9 @@ export async function verify(root, { pluginRoot, target, runHook, only } = {}) {
   } catch (err) {
     settingsError = `.claude/settings.json does not parse: ${err.message}`;
   }
-  const agentWrites = new Map(mdFiles(agentsDir).map((f) => [f.replace(/\.md$/, ''), parseWrites(read(join(agentsDir, f)))]).filter(([, w]) => w !== null));
+  // A code repository holds no agent: the guard reads the agents of the plugin there.
+  const writesDir = target === 'code' ? join(harness, 'agents') : agentsDir;
+  const agentWrites = new Map(mdFiles(writesDir).map((f) => [f.replace(/\.md$/, ''), parseWrites(read(join(writesDir, f)))]).filter(([, w]) => w !== null));
 
   /* layout */
   if (want('layout')) {
@@ -119,15 +123,24 @@ export async function verify(root, { pluginRoot, target, runHook, only } = {}) {
     const chosen = selectFor(target, { agents: mdFiles(join(harness, 'agents')).map(stem), commands: mdFiles(join(harness, 'commands')).map(stem) });
     const wantAgents = chosen.agents.map((a) => `${a}.md`);
     const wantCommands = chosen.commands.map((c) => `${c}.md`);
+    const wantPointers = chosen.pointers.map((c) => `${c}.md`);
     for (const f of wantAgents) if (!existsSync(join(agentsDir, f))) add('error', 'layout', `.claude/agents/${f} is missing. Run: recade harness install`);
-    for (const f of wantCommands) if (!existsSync(join(commandsDir, f))) add('error', 'layout', `.claude/commands/${f} is missing. Run: recade harness install`);
-    const ci = forWorkspace ? [WORKSPACE_WORKFLOW] : [wf.ci, wf.conflicts, ...(adopt ? [] : ['.github/dependabot.yml'])];
-    for (const f of ['.claude/protocol.md', '.claude/settings.json', LAUNCHER, '.githooks/pre-commit', '.githooks/commit-msg', '.recade/plugin-root', ...ci]) {
+    for (const f of [...wantCommands, ...wantPointers]) if (!existsSync(join(commandsDir, f))) add('error', 'layout', `.claude/commands/${f} is missing. Run: recade harness install`);
+    // On the local forge the GitHub-only workflows and dependabot.yml are not installed (install.js, GITHUB_ONLY).
+    const ci = forWorkspace ? [WORKSPACE_WORKFLOW] : (local ? [wf.ci] : [wf.ci, wf.conflicts, ...(adopt ? [] : ['.github/dependabot.yml'])]);
+    for (const f of [...(chosen.protocol ? ['.claude/protocol.md'] : []), '.claude/settings.json', LAUNCHER, '.githooks/pre-commit', '.githooks/commit-msg', '.recade/plugin-root', ...ci]) {
       if (!existsSync(join(root, f))) add('error', 'layout', `${f} is missing. Run: recade harness install`);
     }
     if (target === 'code') {
       const link = checkLink(root);
       if (!link.ok) add('error', 'layout', `The link of this repository to its workspace is not good: ${link.reason}. Run: ${SYNC_ADVICE}`);
+      const old = legacyCopies(root);
+      if (old.length > 0) add('warn', 'layout', `The harness of the old layout is still here (${old.length} file${old.length === 1 ? '' : 's'}, such as ${old[0]}): every command and agent now lives in the workspace. Run: recade harness migrate --dry-run, from the workspace.`);
+    }
+    if (forWorkspace) {
+      const ignore = existsSync(join(root, '.gitignore')) ? read(join(root, '.gitignore')) : '';
+      if (!ignoresWorktrees(ignore)) add('error', 'layout', `.gitignore does not hold ${WORKTREES_IGNORE}, so the slice worktrees would be committed. Run: recade harness install`);
+      if (legacyWorktrees(root, { exec: defaultExec }).length > 0) add('warn', 'layout', 'Slice worktrees of the old layout are still under repos/<repo>/.claude/worktrees/. Run: recade harness migrate --dry-run');
     }
     const scan = (dir) => (existsSync(dir) ? readdirSync(dir, { recursive: true, withFileTypes: true }).filter((e) => e.isFile()).map((e) => join(e.parentPath ?? e.path, e.name)) : []);
     for (const file of [...scan(claude), ...scan(join(root, '.githooks')), ...(adopt ? [wf.ci, wf.conflicts, wf.secondOpinion].map((f) => join(root, f)).filter((f) => existsSync(f)) : scan(join(root, '.github')))]) {
@@ -177,12 +190,13 @@ export async function verify(root, { pluginRoot, target, runHook, only } = {}) {
     checks.push('models');
     if (existsSync(agentsDir)) {
       try {
-        const models = loadModels(join(harness, 'models.yaml'));
+        // The second-opinion choice is read from the copy (CI has no user config): opus, or fable, another family.
+        const models = withSecondOpinion(loadModels(join(harness, 'models.yaml')), secondOpinionOf(agentsDir));
         for (const w of modelWarnings(models)) add('warn', 'models', `${w}.`);
         const { changed } = syncAgents(agentsDir, models, { check: true });
         if (changed.length > 0) add('error', 'models', `Agents out of sync with models.yaml: ${changed.join(', ')}. Run: recade harness models --dir .claude/agents`);
         const slice = join(commandsDir, 'slice.md');
-        if (sensitiveLane(models).length > 0 && existsSync(slice) && !read(slice).includes('sensitive_model')) {
+        if (target !== 'code' && sensitiveLane(models).length > 0 && existsSync(slice) && !read(slice).includes('sensitive_model')) {
           add('error', 'models', '.claude/commands/slice.md does not dispatch with sensitive_model and sensitive_effort in the sensitive lane. Run: recade harness install');
         }
       } catch (err) {

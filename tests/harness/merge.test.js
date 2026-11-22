@@ -321,11 +321,11 @@ test('/second-opinion stops when the rule is off, checks the PR, and posts the v
   assert.match(project, /`off`[\s\S]*stop/);
   const pull = step(SECOND, 'The pull request');
   assert.match(pull, /\^\[0-9\]\{1,6\}\$/);
-  assert.match(pull, /gh pr view '<PR>' --json/);
+  assert.match(pull, /gh pr view '<PR>' --repo '<remote>' --json/);
   assert.match(pull, /OPEN/);
   assert.match(pull, /\^slice\//);
   const post = step(SECOND, 'The verdict');
-  assert.match(post, /gh pr comment '<PR>' --body-file '/);
+  assert.match(post, /gh pr comment '<PR>' --repo '<remote>' --body-file '/);
   assert.match(post, /CONCURS \| CONCERNS \| BLOCKING/);
   assert.match(post, /Do not invent a verdict/);
 });

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { appendFileSync, chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { frontMatterLength } from '../frontmatter-lines.js';
@@ -8,7 +9,10 @@ import { checkLink, findWorkspace, linkRepo } from '../workspace/layout.js';
 import { findStack } from './claudemd.js';
 import { fillCi, fillDependabot } from './ci.js';
 import { defaultExec } from './stamps.js';
-import { TARGET_NAMES, WORKSPACE_WORKFLOW, preCommitTemplate, selectFor, thresholdCandidates } from './targets.js';
+import { withModelLine } from './models.js';
+import { SECOND_OPINION_MODELS } from '../models.js';
+import { POINTER_COMMANDS, POINTER_MARK, TARGET_NAMES, WORKSPACE_WORKFLOW, preCommitTemplate, selectFor, thresholdCandidates } from './targets.js';
+import { WORKTREES_IGNORE } from '../workspace/worktrees.js';
 
 /**
  * Install the harness template of the plugin (`harness/`) into a project, and install it again later.
@@ -21,7 +25,8 @@ import { TARGET_NAMES, WORKSPACE_WORKFLOW, preCommitTemplate, selectFor, thresho
  *   no path of the machine: its hook runs the launcher `.claude/hooks/recade-guard.mjs`, written whole, which reads the
  *   plugin folder from `.recade/plugin-root` (one per machine, ignored by git).
  *
- * Two targets, `workspace` (the home of the project) and `code` (one code repository of the workspace), take the files of
+ * Two targets, `workspace` (the home of the project, which gets every command and every agent) and `code` (one code
+ * repository of the workspace, which keeps its git hooks, its CI, the guard and one pointer command), take the files of
  * `src/harness/targets.js`. With no target the whole harness goes to one folder, as before the workspace existed.
  *
  * Nothing is written before every file has been computed and checked, so a refusal leaves the project untouched.
@@ -50,6 +55,21 @@ export function isAdopt(root) {
     return false;
   }
 }
+
+/**
+ * True when the project works on the local forge (`forge: local` in recade/state.yaml): no GitHub, so the workflows that
+ * only GitHub runs on a pull request (the conflicts check, the second opinion) and `dependabot.yml` are not installed.
+ */
+export function isLocalForge(root) {
+  try {
+    return loadState(root)?.forge === 'local';
+  } catch {
+    return false;
+  }
+}
+
+/** The files of a code install that only GitHub uses, left out on the local forge. */
+export const GITHUB_ONLY = (wf) => [wf.conflicts, wf.secondOpinion, '.github/dependabot.yml'];
 
 /**
  * The text of a workflow with its name and the name of each of its jobs prefixed with `Recade: `, so the checks of the
@@ -87,7 +107,7 @@ export class InstallError extends Error {}
 
 /**
  * @typedef {{file: string, status: 'created'|'updated'|'unchanged'|'kept'}} Written
- * @typedef {{written: Written[], diffs: {file: string, diff: string}[], warnings: string[], missing: string[], ref: string, version: string, hooksPath: boolean, target?: string, thresholdCandidates: string[]}} InstallResult
+ * @typedef {{written: Written[], diffs: {file: string, diff: string}[], warnings: string[], missing: string[], ref: string, version: string, hooksPath: boolean, target?: string, thresholdCandidates: string[], notes: string[]}} InstallResult
  */
 
 /* ---------- small helpers ---------- */
@@ -324,7 +344,7 @@ function placeOf(root, target, workspace) {
 
 /**
  * @param {string} root the folder to install in (a git repository): the project, the workspace or one code repository
- * @param {{pluginRoot: string, target?: 'workspace'|'code', workspace?: string, team?: string, stack?: string|null, ref?: string, force?: boolean, exec?: (cmd: string[], opts: {cwd: string}) => {code: number, stdout: string, stderr: string}}} options
+ * @param {{pluginRoot: string, target?: 'workspace'|'code', workspace?: string, team?: string, stack?: string|null, ref?: string, force?: boolean, secondOpinion?: string, exec?: (cmd: string[], opts: {cwd: string}) => {code: number, stdout: string, stderr: string}}} options
  *   `target` picks the files (see targets.js; none means the whole harness in `root`). A code install needs `workspace`,
  *   the folder of the workspace that holds `root` in `repos/<name>`: it reads the stack, the doctrines and the adopt mode
  *   there, and it writes the link of the repository. `team` is the folder of the doctrines (default `team`), `stack` the
@@ -334,7 +354,7 @@ function placeOf(root, target, workspace) {
  * @returns {InstallResult}
  * @throws {InstallError}
  */
-export function install(root, { pluginRoot: given, target, workspace, team = 'team', stack, ref, force = false, exec = defaultExec } = {}) {
+export function install(root, { pluginRoot: given, target, workspace, team = 'team', stack, ref, force = false, exec = defaultExec, secondOpinion } = {}) {
   if (target !== undefined && !TARGET_NAMES.includes(target)) throw new InstallError(`Unknown target ${JSON.stringify(target)}. Use ${TARGET_NAMES.join(' or ')}.`);
   const place = placeOf(root, target, workspace);
   const home = place.workspace ?? root;
@@ -347,6 +367,8 @@ export function install(root, { pluginRoot: given, target, workspace, team = 'te
   }
   const version = pluginVersion(pluginRoot);
   const warnings = [];
+  /** What the install left out on purpose, one line each (the GitHub-only files on the local forge). */
+  const notes = [];
   const resolved = ref === undefined ? resolveRef(pluginRoot, version, exec) : { ref, assumed: false };
   if (!REF_OK.test(resolved.ref)) throw new InstallError(`The tools ref must be a tag such as v1.2.3 or a full commit SHA, not ${JSON.stringify(resolved.ref)}.`);
   if (resolved.assumed) warnings.push(`No tag or commit found for the plugin folder: the CI will fetch the tag ${resolved.ref}. Publish that tag, or install again with --ref <tag or commit>.`);
@@ -403,9 +425,13 @@ export function install(root, { pluginRoot: given, target, workspace, team = 'te
     agents: list(join(harness, 'agents'), '.md').map(stem),
     commands: list(join(harness, 'commands'), '.md').map(stem),
   });
-  for (const a of chosen.agents) md(`.claude/agents/${a}.md`, read(join(harness, 'agents', `${a}.md`)));
+  // The owner's second-opinion choice (`models.second_opinion`): `fable` puts the copy on Fable 5.2, another family than the reviewer.
+  const agentText = (a) => (a === 'second-opinion' && secondOpinion === 'fable' ? withModelLine(read(join(harness, 'agents', `${a}.md`)), SECOND_OPINION_MODELS.fable) : read(join(harness, 'agents', `${a}.md`)));
+  for (const a of chosen.agents) md(`.claude/agents/${a}.md`, agentText(a));
   for (const c of chosen.commands) md(`.claude/commands/${c}.md`, read(join(harness, 'commands', `${c}.md`)));
-  md('.claude/protocol.md', read(join(harness, 'protocol.md')));
+  // A code repository gets no agent and no copy of a command: one pointer tells a session opened there to work from the workspace.
+  for (const c of chosen.pointers) md(`.claude/commands/${c}.md`, read(join(harness, 'pointer', `${c}.md`)));
+  if (chosen.protocol) md('.claude/protocol.md', read(join(harness, 'protocol.md')));
 
   const settingsPath = join(root, '.claude', 'settings.json');
   const settings = mergeSettings(existsSync(settingsPath) ? read(settingsPath) : null, JSON.parse(read(join(harness, 'settings.json'))));
@@ -431,6 +457,11 @@ export function install(root, { pluginRoot: given, target, workspace, team = 'te
   } else {
     ci = fillCi(read(join(harness, 'ci', 'ci.yml')), sheet, stackName, place.repo ?? undefined);
     whole(wf.ci, generated(pinRef(named(ci.text, 'Recade CI'), resolved.ref, 'ci.yml')), { foreign: ours });
+    if (isLocalForge(home)) {
+      // No pull request on the local forge: the conflicts check and the second opinion run from /merge-order and
+      // /second-opinion on this machine, and dependency updates need GitHub.
+      notes.push(`Local forge: ${GITHUB_ONLY(wf).map((f) => f.split('/').pop()).join(', ')} not written (GitHub only).`);
+    } else {
     whole(wf.conflicts, generated(pinRef(named(read(join(harness, 'ci', 'conflicts.yml')), 'Recade slice conflicts'), resolved.ref, 'conflicts.yml')), { foreign: ours });
     whole(wf.secondOpinion, generated(named(read(join(harness, 'ci', 'second-opinion.yml')), 'Recade second opinion')), { foreign: ours });
     try {
@@ -440,6 +471,7 @@ export function install(root, { pluginRoot: given, target, workspace, team = 'te
       else whole(dependabot, generated(fillDependabot(read(join(harness, 'dependabot.yml')), sheet, stackName, place.repo ?? undefined).text), { foreign: ours });
     } catch (err) {
       warnings.push(`.github/dependabot.yml was not written: ${err.message}`);
+    }
     }
   }
   if (ci.missing.length > 0) {
@@ -479,15 +511,21 @@ export function install(root, { pluginRoot: given, target, workspace, team = 'te
   // Per machine and kept out of git (`.recade/` is ignored): never recorded in created.json, adopted or not.
   mkdirSync(join(root, '.recade'), { recursive: true });
   writeFileSync(join(root, '.recade', 'plugin-root'), `${pluginRoot}\n`);
+  // The install record: the hash of each harness file as this install left it. `recade harness migrate` removes an old
+  // copy only when it is still exactly what Recade wrote.
+  recordInstall(root, version, plan.filter((p) => p.status !== 'kept').map((p) => p.file));
   // Kept out of git: the stamps and the plugin folder of this machine, the worktrees of the slices, the local settings.
   // Only lines are added: the .gitignore of the project is never rewritten.
   const ignorePath = join(root, '.gitignore');
   const before = existsSync(ignorePath) ? read(ignorePath) : '';
   let ignore = before;
   const lines = ignore.split(/\r?\n/).map((l) => l.trim());
-  // The workspace opens no worktree: its slice worktrees are in the code repositories.
-  const ignored = [['.recade/', '.recade'], ['.claude/worktrees/', '.claude/worktrees', '.claude/', '.claude'], ['.claude/settings.local.json', '.claude/', '.claude']];
-  for (const [line, ...same] of target === 'workspace' ? ignored.filter(([l]) => l !== '.claude/worktrees/') : ignored) {
+  // The slice worktrees live under worktrees/ of the workspace. A code repository keeps .claude/worktrees/ ignored: Claude
+  // Code makes its own worktrees there.
+  const ignored = target === 'workspace'
+    ? [['.recade/', '.recade'], [WORKTREES_IGNORE, '/worktrees/', 'worktrees', '/worktrees'], ['.claude/settings.local.json', '.claude/', '.claude']]
+    : [['.recade/', '.recade'], ['.claude/worktrees/', '.claude/worktrees', '.claude/', '.claude'], ['.claude/settings.local.json', '.claude/', '.claude']];
+  for (const [line, ...same] of ignored) {
     if ([line, ...same].some((l) => lines.includes(l))) continue;
     ignore = `${ignore}${ignore === '' || ignore.endsWith('\n') ? '' : '\n'}${line}\n`;
     lines.push(line);
@@ -529,6 +567,8 @@ export function install(root, { pluginRoot: given, target, workspace, team = 'te
 
   // A code repository learns where its workspace is. The file is per machine and git never sees it.
   if (target === 'code') {
+    const old = legacyCopies(root);
+    if (old.length > 0) warnings.push(`This repository still holds the harness of the old layout (${old.slice(0, 3).join(', ')}${old.length > 3 ? ` and ${old.length - 3} more` : ''}). Every command and agent now lives in the workspace. Run: recade harness migrate --dry-run, from the workspace.`);
     try {
       linkRepo(place.workspace, root);
     } catch (err) {
@@ -538,7 +578,60 @@ export function install(root, { pluginRoot: given, target, workspace, team = 'te
     if (!link.ok) warnings.push(`The link to the workspace is not good (${link.reason}). Run: recade repo sync`);
   }
 
-  return { written, diffs, warnings, missing: ci.missing, ref: resolved.ref, version, hooksPath: hooks.code === 0, target, thresholdCandidates: target === 'code' ? thresholdCandidates(root) : [] };
+  return { written, diffs, warnings, notes, missing: ci.missing, ref: resolved.ref, version, hooksPath: hooks.code === 0, target, thresholdCandidates: target === 'code' ? thresholdCandidates(root) : [] };
+}
+
+/** The install record of a folder: per machine, in `.recade/` (ignored by git). */
+export const INSTALL_RECORD = '.recade/installed.json';
+const sha256 = (text) => createHash('sha256').update(text).digest('hex');
+
+/** Record the hash of each file an install left, keeping the records of the files it did not touch. */
+function recordInstall(root, version, files) {
+  const record = readInstallRecord(root);
+  for (const f of files) {
+    try {
+      record[f] = sha256(readFileSync(join(root, f)));
+    } catch { /* not written */ }
+  }
+  writeFileSync(join(root, INSTALL_RECORD), `${JSON.stringify({ version, files: record }, null, 2)}\n`);
+}
+
+/** The hashes of the install record of `root`, by path. An empty object when there is none or it does not parse. */
+export function readInstallRecord(root) {
+  try {
+    const data = JSON.parse(read(join(root, INSTALL_RECORD)));
+    const files = data?.files;
+    if (files === null || typeof files !== 'object' || Array.isArray(files)) return {};
+    return Object.fromEntries(Object.entries(files).filter(([k, v]) => typeof k === 'string' && typeof v === 'string' && /^[0-9a-f]{64}$/.test(v)));
+  } catch {
+    return {};
+  }
+}
+
+/** Does this file hold exactly what the record of the last install says Recade wrote? */
+export function matchesInstallRecord(root, file) {
+  const hash = readInstallRecord(root)[file];
+  if (hash === undefined) return false;
+  try {
+    return sha256(readFileSync(join(root, file))) === hash;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The harness files of the old layout in a code repository: its agents, its commands other than the pointers, and its
+ * protocol. A code repository now gets none of them: they live in the workspace.
+ */
+export function legacyCopies(root) {
+  const out = [];
+  for (const f of list(join(root, '.claude', 'agents'), '.md')) out.push(`.claude/agents/${f}`);
+  for (const f of list(join(root, '.claude', 'commands'), '.md')) {
+    const pointer = POINTER_COMMANDS.includes(f.replace(/\.md$/, '')) && read(join(root, '.claude', 'commands', f)).includes(POINTER_MARK);
+    if (!pointer) out.push(`.claude/commands/${f}`);
+  }
+  if (existsSync(join(root, '.claude', 'protocol.md'))) out.push('.claude/protocol.md');
+  return out;
 }
 
 /** The text the CLI prints for an install result. */
@@ -548,6 +641,7 @@ export function formatInstall(result) {
   lines.push(`${count('created')} created, ${count('updated')} updated, ${count('unchanged')} unchanged, ${count('kept')} kept.`);
   for (const w of result.written.filter((x) => x.status === 'created' || x.status === 'updated' || x.status === 'kept')) lines.push(`${w.status.padEnd(8)} ${w.file}`);
   for (const d of result.diffs) lines.push('', `Generic part changed in ${d.file} (your text below the line is kept):`, d.diff.trimEnd());
+  for (const n of result.notes ?? []) lines.push(n);
   for (const w of result.warnings) lines.push('', `Warning: ${w}`);
   if (result.thresholdCandidates?.length > 0) {
     lines.push('', `Threshold file candidates: ${result.thresholdCandidates.join(', ')}. Nothing was added: a threshold file is protected from the agents only when the owner lists it (recade harness set --threshold-files <a,b>).`);

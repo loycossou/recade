@@ -6,6 +6,7 @@ import { frontMatterLength } from '../frontmatter-lines.js';
 import { checkSlices } from '../project/slices.js';
 import { LAUNCHER } from '../harness/install.js';
 import { checkLink, linkRepo } from './layout.js';
+import { LEGACY_DIR, WORKTREES_DIR } from './worktrees.js';
 
 /** A repository name: lowercase words joined by single hyphens. It is also the folder name under `repos/`. */
 export const REPO_NAME = /^[a-z0-9]+(-[a-z0-9]+)*$/;
@@ -197,7 +198,8 @@ const hooksOff = (dir) => recadeHooks(dir) && hooksPathOf(dir) === '';
  * workspace that was moved or is another one, or one that does not hold this repository), `no harness` (no guard
  * launcher in the repository), `invalid entry` (the name is not a repository name, so it is not looked at),
  * `git hooks off` (the Recade git hooks are installed and `core.hooksPath` is not set, as on a fresh clone; reported
- * for the workspace too, under the name `workspace`).
+ * for the workspace too, under the name `workspace`), `old layout` (slice worktrees under `.claude/worktrees/` of the
+ * repository, or agents in `.claude/agents/`: `recade harness migrate` moves them to the workspace).
  * @param {string} ws
  * @returns {{findings: {repo: string, problem: string}[]}}
  */
@@ -223,6 +225,7 @@ export function checkRepos(ws) {
     if (!link.ok) findings.push({ repo, problem: link.reason === 'link missing' ? 'link missing' : 'link points elsewhere' });
     if (!existsSync(join(dir, LAUNCHER))) findings.push({ repo, problem: 'no harness' });
     if (hooksOff(dir)) findings.push({ repo, problem: 'git hooks off' });
+    if (oldLayout(dir)) findings.push({ repo, problem: 'old layout' });
   }
   return { findings };
 }
@@ -288,17 +291,9 @@ export async function syncRepos(ws, { exec, pluginRoot }) {
     if (typeof pluginRoot === 'string' && isAbsolute(pluginRoot)) writeFileSync(join(dir, '.recade', 'plugin-root'), `${pluginRoot}\n`);
     linked.push(repo);
     await hooksOn(dir, repo);
-    // A moved workspace leaves the slice worktrees pointing at the old path: git records absolute paths.
-    const trees = join(dir, '.claude', 'worktrees');
-    // Only folders that hold a `.git` file are worktrees: a stray folder or file would make the repair fail for good.
-    const isTree = (p) => {
-      try {
-        return statSync(p).isDirectory() && statSync(join(p, '.git')).isFile();
-      } catch {
-        return false;
-      }
-    };
-    const paths = existsSync(trees) ? readdirSync(trees).sort().map((n) => join(trees, n)).filter(isTree) : [];
+    // A moved workspace leaves the slice worktrees pointing at the old path: git records absolute paths. The worktrees
+    // are under worktrees/<repo>/ of the workspace, or, in a project not migrated yet, under .claude/worktrees/ of the repository.
+    const paths = sliceTreeFolders(ws, repo);
     if (paths.length > 0) {
       const r = await run(exec, 'git', ['-C', dir, 'worktree', 'repair', ...paths]);
       if (r.code === 0) repaired.push(repo);
@@ -306,6 +301,32 @@ export async function syncRepos(ws, { exec, pluginRoot }) {
     }
   }
   return { cloned, linked, repaired, hooked, skipped };
+}
+
+/** Only folders that hold a `.git` file are worktrees: a stray folder or file would make a repair fail for good. */
+function isTree(p) {
+  try {
+    return statSync(p).isDirectory() && statSync(join(p, '.git')).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/** The worktree folders of the slices of `repo`: under `worktrees/<repo>/` of the workspace, then the old `.claude/worktrees/`. */
+function sliceTreeFolders(ws, repo) {
+  const out = [];
+  for (const trees of [join(ws, WORKTREES_DIR, repo), join(repoDir(ws, repo), ...LEGACY_DIR.split('/'))]) {
+    if (existsSync(trees)) out.push(...readdirSync(trees).sort().map((n) => join(trees, n)).filter(isTree));
+  }
+  return out;
+}
+
+/** Does this code repository still use the old layout: slice worktrees in `.claude/worktrees/`, or agents in `.claude/agents/`? */
+function oldLayout(dir) {
+  const trees = join(dir, ...LEGACY_DIR.split('/'));
+  const slices = existsSync(trees) && readdirSync(trees).some((n) => /^S-\d{2}[a-z]?$/.test(n) && isTree(join(trees, n)));
+  const agents = join(dir, '.claude', 'agents');
+  return slices || (existsSync(agents) && readdirSync(agents).some((f) => f.endsWith('.md')));
 }
 
 /** Split the inside of an inline list on the commas that are not inside braces. */

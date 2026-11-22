@@ -39,8 +39,9 @@ test('DEFAULT_CONFIG has the documented values', () => {
     github_owner: null,
     projects_root: '~/projects',
     voice: 'randall-munroe',
-    models: { writer: 'opus' },
-    deliverables: { extras: [] },
+    models: { writer: 'opus', second_opinion: 'opus' },
+    deliverables: { extras: [], pdf: false },
+    stack: { prefer: { php: 'symfony' } },
   });
 });
 
@@ -334,7 +335,15 @@ test('models.writer is fable or opus, and anything else is refused in one line',
   for (const bad of ['sonnet', 'claude-opus-5-5', 'Opus', '']) {
     assert.throws(() => setConfigValue(DEFAULT_CONFIG, 'models.writer', bad), { message: 'models.writer must be fable or opus.' }, bad);
   }
-  assert.throws(() => setConfigValue(DEFAULT_CONFIG, 'models.second_opinion', 'opus'), /Unknown key/);
+});
+
+test('models.second_opinion is opus or fable, opus by default, and anything else is refused in one line', () => {
+  assert.equal(DEFAULT_CONFIG.models.second_opinion, 'opus');
+  assert.equal(setConfigValue(DEFAULT_CONFIG, 'models.second_opinion', ' fable ').models.second_opinion, 'fable');
+  assert.equal(setConfigValue(DEFAULT_CONFIG, 'models.second_opinion', 'opus').models.second_opinion, 'opus');
+  for (const bad of ['sonnet', 'claude-fable-5-2', 'Fable', '']) {
+    assert.throws(() => setConfigValue(DEFAULT_CONFIG, 'models.second_opinion', bad), { message: 'models.second_opinion must be opus or fable.' }, bad);
+  }
 });
 
 test('recade config set models.writer fable is read back by config get and by recade models writer', async () => {
@@ -397,6 +406,23 @@ test('deliverables.extras refuses an unknown name, none beside a name, and a bar
   assert.throws(() => setConfigValue(DEFAULT_CONFIG, 'deliverables.other', 'x'), /Unknown key/);
 });
 
+test('deliverables.pdf is off by default, and config set turns it on and off', async () => {
+  const dir = tmp();
+  const env = { RECADE_CONFIG_DIR: dir };
+  const go = async (args) => {
+    const t = makeIO(dir, env);
+    const code = await run(args, t.io);
+    return { code, out: t.stdout(), err: t.stderr() };
+  };
+  assert.deepEqual(await go(['config', 'get', 'deliverables.pdf']), { code: 0, out: 'false\n', err: '' });
+  assert.equal((await go(['config', 'set', 'deliverables.pdf', 'true'])).code, 0);
+  assert.equal((await go(['config', 'get', 'deliverables.pdf'])).out, 'true\n');
+  assert.equal((await go(['config', 'set', 'deliverables.pdf', 'yes'])).err, 'deliverables.pdf must be true or false.\n');
+  assert.equal((await go(['config', 'set', 'deliverables.pdf', 'false'])).code, 0);
+  assert.equal(parse(readFileSync(join(dir, 'config.yaml'), 'utf8')).deliverables.pdf, false);
+  rmSync(dir, { recursive: true });
+});
+
 test('recade config set and get round-trip deliverables.extras, and the file keeps a plain list', async () => {
   const dir = tmp();
   const env = { RECADE_CONFIG_DIR: dir };
@@ -408,7 +434,7 @@ test('recade config set and get round-trip deliverables.extras, and the file kee
   assert.deepEqual(await go(['config', 'get', 'deliverables.extras']), { code: 0, out: '[]\n', err: '' });
   assert.equal((await go(['config', 'set', 'deliverables.extras', 'design,stack'])).code, 0);
   assert.equal((await go(['config', 'get', 'deliverables.extras'])).out, '- stack\n- design\n');
-  assert.deepEqual(parse(readFileSync(join(dir, 'config.yaml'), 'utf8')).deliverables, { extras: ['stack', 'design'] });
+  assert.deepEqual(parse(readFileSync(join(dir, 'config.yaml'), 'utf8')).deliverables, { extras: ['stack', 'design'], pdf: false });
   const bad = await go(['config', 'set', 'deliverables.extras', 'pdf']);
   assert.equal(bad.code, 2);
   assert.equal(bad.err, 'Unknown extra deliverable: pdf. Use stack, decisions, design, reviews, or none.\n');

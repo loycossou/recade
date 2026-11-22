@@ -10,6 +10,7 @@ import { FONT_DIR, normalizeLanguage, themeStyle } from './theme.js';
 import { collectFigures } from './figures.js';
 import { bookmarkName, isSafeLink } from './bookmarks.js';
 import { captionSeparator, defaultWidths, isIdHeader, keyColumn, planTerm, provisionalText, splitIds } from './look.js';
+import { matchSections } from './story.js';
 
 export { bookmarkName };
 
@@ -30,7 +31,7 @@ const clean = (text) => String(text ?? '').replace(/[\u0000-\u0008\u000B\u000C\u
 const plain = (runs) => (runs ?? []).map((r) => r.text).join('');
 const asRuns = (text) => [{ text: clean(text) }];
 
-function buildContext(doc, { theme, labels, figures, lots }) {
+function buildContext(doc, { theme, labels, figures, lots, story }) {
   const [width, height] = PAGES[theme.page?.size] ?? PAGES.A4;
   const margin = twips(theme.page?.marginCm ?? 2);
   return {
@@ -50,6 +51,8 @@ function buildContext(doc, { theme, labels, figures, lots }) {
     textHeight: height - 2 * margin,
     bookmarks: new Set(),
     listInstances: 0,
+    story: story ?? null,
+    images: imagesByAnchor(doc, story),
   };
 }
 
@@ -241,10 +244,12 @@ function codeBlock(ctx, b) {
 
 function headingBlock(ctx, b) {
   const level = Math.min(Math.max(b.level, 1), 4);
-  return [new Paragraph({
+  const out = [new Paragraph({
     heading: `Heading${level}`,
     children: bookmarked(ctx, b.anchor, inline(level === 2 ? planRuns(ctx, b.runs) : b.runs, ctx)),
   })];
+  const image = ctx.images.get(b.anchor);
+  return image ? [...out, ...imageChildren(ctx, image)] : out;
 }
 
 const BODY_SPACING = { before: 0, after: 120, line: 276 };
@@ -355,13 +360,23 @@ function coverChildren(ctx) {
   ];
   const out = [];
   if (meta.org) {
-    out.push(text(ctx, meta.org, { paragraph: { spacing: { before: 2400, after: 120 } }, run: { smallCaps: true, characterSpacing: 40, color: color.muted, size: halfPoints(size.body) } }));
+    out.push(text(ctx, meta.org, { paragraph: { spacing: { before: 2000, after: 120 } }, run: { smallCaps: true, characterSpacing: 40, color: color.muted, size: halfPoints(size.body) } }));
   }
+  // The cover reads like the start of the dossier: the kicker, the title, the lede and the facts, then the metadata.
+  const story = ctx.story;
+  const kicker = story?.kicker ?? asRuns(`${meta.doc_id}${ctx.style.headerSeparator}${meta.project}`);
   out.push(
-    text(ctx, meta.project, { paragraph: { spacing: { before: meta.org ? 0 : 2400, after: 60 } }, run: { size: halfPoints(size.h2), color: color.ink } }),
-    text(ctx, meta.title, { paragraph: { spacing: { before: 0, after: 480 } }, run: { bold: true, size: halfPoints(size.h1 * 1.6), color: color.heading } }),
-    dataTable(ctx, { rows: metaRows, widths: [30, 70], firstColumnFill: true }),
+    new Paragraph({
+      spacing: { before: meta.org ? 0 : 2000, after: 160 },
+      children: inline(kicker, ctx, { bold: true, allCaps: true, characterSpacing: 30, size: halfPoints(size.caption), color: color.accent }),
+    }),
+    text(ctx, meta.title, { paragraph: { spacing: { before: 0, after: story?.lede ? 240 : 480 } }, run: { bold: true, size: halfPoints(size.h1 * 1.6), color: color.heading } }),
   );
+  if (story?.lede) {
+    out.push(new Paragraph({ spacing: { before: 0, after: 360, line: 300 }, children: inline(story.lede, ctx, { size: halfPoints(size.h3 + 1), color: color.muted }) }));
+  }
+  if (story?.facts?.length) out.push(factTiles(ctx, story.facts), spacer());
+  out.push(dataTable(ctx, { rows: metaRows, widths: [30, 70], firstColumnFill: true }));
   if (meta.revisions?.length) {
     out.push(
       heading(labels.revisionHistory),
@@ -387,6 +402,118 @@ function coverChildren(ctx) {
     run: { italics: true, color: color.muted, size: halfPoints(size.caption) },
   }));
   return out;
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// The companion: fact tiles on the cover, the recap grid before the contents, the image of a section
+
+/** The image of each main heading that the companion gives one, by heading anchor. */
+function imagesByAnchor(doc, story) {
+  const map = new Map();
+  if (!story?.sections?.length) return map;
+  const headings = doc.blocks.filter((b) => b.type === 'heading');
+  if (headings.length === 0) return map;
+  const main = Math.min(...headings.map((h) => h.level));
+  const mains = headings.filter((h) => h.level === main);
+  const { bySection } = matchSections(story, mains.map((h) => ({ text: plain(h.runs) })), doc.file);
+  mains.forEach((h, i) => { if (bySection[i]?.image) map.set(h.anchor, bySection[i].image); });
+  return map;
+}
+
+const dossierLabel = (ctx, key) => ctx.labels.dossier?.[key] ?? key;
+
+/** A small label in capitals, in the accent colour: "THE IMAGE", "THE REAL THING". */
+const tagRun = (ctx, value) => new TextRun({ text: clean(value), bold: true, allCaps: true, characterSpacing: 30, size: halfPoints(ctx.size.caption - 0.5), color: ctx.color.accent });
+
+/** A row of tiles: the value big, its label small under it. */
+function factTiles(ctx, facts) {
+  const cols = columnWidths(facts.length, null, ctx.textWidth);
+  const line = border(ctx.color.rule);
+  return new Table({
+    width: { size: ctx.textWidth, type: WidthType.DXA },
+    columnWidths: cols,
+    layout: TableLayoutType.FIXED,
+    borders: { top: line, bottom: line, left: line, right: line, insideHorizontal: line, insideVertical: line },
+    rows: [new TableRow({
+      cantSplit: true,
+      children: facts.map((f, i) => new TableCell({
+        width: { size: cols[i], type: WidthType.DXA },
+        margins: { top: 100, bottom: 100, left: 140, right: 120 },
+        children: [
+          new Paragraph({ spacing: { before: 0, after: 40 }, children: inline(f.value, ctx, { bold: true, size: halfPoints(ctx.size.h2), color: ctx.color.ink }) }),
+          new Paragraph({ spacing: { before: 0, after: 0 }, children: inline(f.label, ctx, { size: halfPoints(ctx.size.caption), color: ctx.color.muted }) }),
+        ],
+      })),
+    })],
+  });
+}
+
+/** The recap in N sentences, as a grid of two columns, and the decisions that matter. Nothing without a companion. */
+function recapChildren(ctx) {
+  const recap = ctx.story?.recap ?? [];
+  const decisions = ctx.story?.decisions ?? [];
+  if (recap.length === 0 && decisions.length === 0) return [];
+  const out = [];
+  if (recap.length) {
+    out.push(
+      text(ctx, dossierLabel(ctx, 'recap').replace('{n}', String(recap.length)), {
+        paragraph: { spacing: { before: 0, after: 60 }, keepNext: true },
+        run: { bold: true, size: halfPoints(ctx.size.h2), color: ctx.color.heading },
+      }),
+      text(ctx, dossierLabel(ctx, 'recapSub'), { paragraph: { spacing: { before: 0, after: 200 }, keepNext: true }, run: { italics: true, color: ctx.color.muted } }),
+    );
+    const cols = columnWidths(2, null, ctx.textWidth);
+    const cellOf = (runs, n, width) => new TableCell({
+      width: { size: width, type: WidthType.DXA },
+      margins: { top: 120, bottom: 120, left: 160, right: 140 },
+      children: [new Paragraph({
+        spacing: { before: 0, after: 0, line: 264 },
+        children: runs ? [
+          new TextRun({ text: `${String(n).padStart(2, '0')}  `, bold: true, size: halfPoints(ctx.size.caption), color: ctx.color.accent }),
+          ...inline(runs, ctx, { size: halfPoints(ctx.size.body) }),
+        ] : [],
+      })],
+    });
+    const rows = [];
+    for (let i = 0; i < recap.length; i += 2) {
+      rows.push(new TableRow({ cantSplit: true, children: [cellOf(recap[i], i + 1, cols[0]), cellOf(recap[i + 1], i + 2, cols[1])] }));
+    }
+    const line = border(ctx.color.rule);
+    out.push(new Table({
+      width: { size: ctx.textWidth, type: WidthType.DXA },
+      columnWidths: cols,
+      layout: TableLayoutType.FIXED,
+      borders: { top: line, bottom: line, left: line, right: line, insideHorizontal: line, insideVertical: line },
+      rows,
+    }), spacer());
+  }
+  if (decisions.length) {
+    out.push(
+      text(ctx, dossierLabel(ctx, 'decisions'), {
+        paragraph: { spacing: { before: 240, after: 120 }, keepNext: true },
+        run: { bold: true, size: halfPoints(ctx.size.h3), color: ctx.color.heading },
+      }),
+      dataTable(ctx, { header: [asRuns(dossierLabel(ctx, 'decision')), asRuns(dossierLabel(ctx, 'why'))], rows: decisions.map((d) => [d.decision, d.why]), widths: [42, 58] }),
+      spacer(),
+    );
+  }
+  out.push(new Paragraph({ children: [new PageBreak()] }));
+  return out;
+}
+
+/** The image of a section: a tinted box with its label, then the label of the real thing. */
+function imageChildren(ctx, runs) {
+  const bar = eighths(ctx.style.calloutBar);
+  const box = boxTable(ctx, {
+    fill: ctx.color.calloutNote,
+    left: bar > 0 ? border(ctx.color.accent, bar) : undefined,
+    cantSplit: true,
+    children: [
+      new Paragraph({ spacing: { before: 0, after: 60 }, children: [tagRun(ctx, dossierLabel(ctx, 'image'))] }),
+      new Paragraph({ spacing: { before: 0, after: 0, line: 288 }, children: inline(runs, ctx, { size: halfPoints(ctx.size.body + 1) }) }),
+    ],
+  });
+  return [box, new Paragraph({ spacing: { before: 120, after: 80 }, keepNext: true, children: [tagRun(ctx, dossierLabel(ctx, 'real'))] })];
 }
 
 function contentsChildren(ctx, hasFigures) {
@@ -542,7 +669,7 @@ export async function renderDocx(doc, options) {
       {
         properties: { ...properties, type: SectionType.NEXT_PAGE },
         ...pageChrome(ctx),
-        children: [...contentsChildren(ctx, collectFigures(doc.blocks).length > 0), ...body],
+        children: [...recapChildren(ctx), ...contentsChildren(ctx, collectFigures(doc.blocks).length > 0), ...body],
       },
     ],
   });

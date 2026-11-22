@@ -1,5 +1,5 @@
 import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
-import { isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { parse } from 'yaml';
 import { frontMatterLength } from '../frontmatter-lines.js';
 import { loadState, noteFirstSliceDone } from '../state.js';
@@ -10,6 +10,10 @@ import { REPO_NAME, registryNames } from '../project/touches.js';
 import { readStack, techSheet } from './claudemd.js';
 import { defaultExec } from './stamps.js';
 import { listSliceBranches } from './conflicts.js';
+import { epicCode, epicPlan } from '../project/github.js';
+import { forgeOf, projectRoot } from '../project/state.js';
+import { WORKTREES_DIR } from '../workspace/worktrees.js';
+import { findMerge, localMerges, reviewPath, revParse as localRev } from './localforge.js';
 
 /**
  * @typedef {(cmd: string[], opts: {cwd: string}) => {code: number, stdout: string, stderr: string}} Exec
@@ -158,18 +162,46 @@ function pullRequest(exec, root, branch, base) {
   };
 }
 
-const prLabel = (pr) => (pr.kind === 'none' ? 'none' : `${pr.kind === 'other' ? 'merged elsewhere' : pr.kind} #${pr.number}`);
+/**
+ * The pull request of a slice branch on the local forge, read from git: `merged` when a merge commit of `base` has the tip
+ * of the branch as a parent (or, once the branch is gone, when `recorded`, the commit of the `merged:` record, is such a
+ * merge), `open` when the branch is there with its local review request, else `none`. Same shape as `pullRequest`,
+ * with `local: true` and no number. Throws BoardError when git cannot read `base`.
+ */
+function localPullRequest(exec, dir, branch, base, { review, recorded = null }) {
+  const into = base ?? 'main';
+  const tip = localRev(exec, dir, `refs/heads/${branch}`);
+  let merges;
+  try {
+    merges = localMerges(exec, dir, into);
+  } catch (err) {
+    throw new BoardError(firstLine(err.message));
+  }
+  const merge = findMerge(merges, { tip, recorded });
+  const kind = merge !== null ? 'merged' : (tip !== null && review ? 'open' : 'none');
+  return {
+    kind, local: true, number: undefined, url: undefined, sha: merge?.oid ?? tip ?? '', checks: 'none',
+    approved: false, draft: false, base: into, expected: into,
+  };
+}
+
+const LOCAL_LABEL = { merged: 'merged locally', open: 'review requested', none: 'no review request', closed: 'closed' };
+const prLabel = (pr) => {
+  if (pr.local) return LOCAL_LABEL[pr.kind] ?? pr.kind;
+  return pr.kind === 'none' ? 'none' : `${pr.kind === 'other' ? 'merged elsewhere' : pr.kind} #${pr.number}`;
+};
 
 const tag = (p) => (p.number === undefined ? p.repo : `${p.repo} #${p.number}`);
 
 /** One pull request, or the pull requests of a slice across its repositories, as one value for the rules of `reconcile`. */
 function together(pulls) {
-  if (pulls.length === 1 && pulls[0].repo === undefined) return { ...pulls[0], text: `PR #${pulls[0].number}`, is: 'is', label: prLabel(pulls[0]) };
+  if (pulls.length === 1 && pulls[0].repo === undefined) return { ...pulls[0], text: pulls[0].local ? 'the slice branch' : `PR #${pulls[0].number}`, is: 'is', label: prLabel(pulls[0]) };
   const all = pulls.every((p) => p.kind === 'merged');
   const some = pulls.some((p) => p.kind === 'merged' || p.kind === 'open');
   const kind = all ? 'merged' : (some ? 'open' : (pulls.some((p) => p.kind === 'closed' || p.kind === 'other') ? 'closed' : 'none'));
+  const local = pulls.some((p) => p.local);
   return {
-    kind, number: undefined, text: `PRs ${pulls.map(tag).join(', ')}`, is: 'are',
+    kind, local, number: undefined, text: local ? `the branches in ${pulls.map(tag).join(', ')}` : `PRs ${pulls.map(tag).join(', ')}`, is: 'are',
     label: pulls.map((p) => `${p.repo} ${prLabel(p)}`).join('; '),
   };
 }
@@ -179,11 +211,15 @@ function together(pulls) {
  * of its repository. A folder that exists but is not a git repository of its own is refused: gh would read the
  * workspace repository there. Throws BoardError on a gh failure.
  */
-function pullsOf(exec, root, branch, names, defaults = new Map()) {
+function pullsOf(exec, root, branch, names, defaults = new Map(), local = null) {
   return names.map((repo) => {
     const dir = join(root, 'repos', repo);
     if (existsSync(dir) && !existsSync(join(dir, '.git'))) throw new BoardError(`${repo}: repos/${repo} is not a git repository. Run: recade repo sync`);
     const base = typeof defaults.get(repo) === 'string' ? defaults.get(repo) : undefined;
+    if (local !== null) {
+      if (!existsSync(join(dir, '.git'))) throw new BoardError(`${repo}: repos/${repo} is missing. Run: recade repo sync`);
+      return { repo, ...localPullRequest(exec, dir, branch, base, { review: local.review, recorded: local.merged?.[repo] ?? null }) };
+    }
     return { repo, ...pullRequest(exec, dir, branch, base) };
   });
 }
@@ -208,14 +244,17 @@ function pullsOf(exec, root, branch, names, defaults = new Map()) {
  * @returns {{rows: ReconcileRow[], applied: string[], errors: string[], apply: boolean, writes: string[], deferred?: {id: string, to: string, sheet: {file: string, record: Record<string, string>}|null}[]}}
  */
 export function reconcile(root, { exec = defaultExec, apply = false, deferStatus = false, today } = {}) {
-  const result = { rows: [], applied: [], errors: [], apply, writes: [] };
+  const result = { rows: [], epics: [], applied: [], errors: [], apply, writes: [] };
   if (deferStatus) result.deferred = [];
   const state = loadState(root) ?? {};
+  // The local forge has no board and no pull request: the facts come from git and the review requests, and no gh call is made.
+  const local = forgeOf(state) === 'local';
+  result.local = local;
   const registry = registryNames(state);
   const defaults = new Map((Array.isArray(state.repos) ? state.repos : []).filter((e) => e !== null && typeof e === 'object').map((e) => [e.name, e.default_branch]));
   const github = state.github ?? {};
   const { owner, repo, project_number: number } = github;
-  if (typeof owner !== 'string' || typeof repo !== 'string' || !Number.isInteger(number)) {
+  if (!local && (typeof owner !== 'string' || typeof repo !== 'string' || !Number.isInteger(number))) {
     result.errors.push('No board is recorded in recade/state.yaml. Run: recade github init');
     return result;
   }
@@ -235,15 +274,15 @@ export function reconcile(root, { exec = defaultExec, apply = false, deferStatus
 
   let project;
   let status;
-  let items;
-  let issues;
-  try {
+  let items = [];
+  let issues = [];
+  if (!local) try {
     project = ghJson(['project', 'view', String(number), '--owner', owner, '--format', 'json']);
     const fields = asArray(ghJson(['project', 'field-list', String(number), '--owner', owner, '--format', 'json', '--limit', '100']), 'fields');
     status = fields.find((f) => String(f.name).toLowerCase() === 'status');
     if (status === undefined || !Array.isArray(status.options)) throw new BoardError('The board has no Status field with options. Run: recade github init');
     items = asArray(ghJson(['project', 'item-list', String(number), '--owner', owner, '--format', 'json', '--limit', '1000']), 'items');
-    issues = asArray(ghJson(['issue', 'list', '--repo', `${owner}/${repo}`, '--state', 'all', '--limit', '1000', '--json', 'number,title,url,state']));
+    issues = asArray(ghJson(['issue', 'list', '--repo', `${owner}/${repo}`, '--state', 'all', '--limit', '1000', '--json', 'number,title,url,state,body']));
   } catch (err) {
     result.errors.push(firstLine(err.message));
     return result;
@@ -309,10 +348,12 @@ export function reconcile(root, { exec = defaultExec, apply = false, deferStatus
     if (!BRANCH.test(sheet.branch)) row.reason = 'its sheet names no usable branch, so there is no pull request to look at';
     else {
       try {
+        const there = local ? { review: existsSync(join(root, reviewPath(s.id))), merged: sheet.merged } : null;
         if (names.length > 0) {
-          pulls = pullsOf(exec, root, sheet.branch, names, defaults);
+          pulls = pullsOf(exec, root, sheet.branch, names, defaults, there);
           pr = together(pulls);
-        } else pr = together([pullRequest(exec, root, sheet.branch)]);
+        } else if (local) pr = together([localPullRequest(exec, root, sheet.branch, 'main', { review: there.review, recorded: Object.values(sheet.merged)[0] ?? null })]);
+        else pr = together([pullRequest(exec, root, sheet.branch)]);
       } catch (err) {
         result.errors.push(firstLine(err.message));
         row.pr = 'unknown';
@@ -343,7 +384,8 @@ export function reconcile(root, { exec = defaultExec, apply = false, deferStatus
       else if (pr.kind === 'open') reasons.push(`${pr.text} ${pr.is} not merged yet`);
     }
     if (pulls !== null) {
-      const verdict = statusFromPulls(pulls);
+      // On the local forge there is no check and no approval to read: /slice moves the slice to ready-to-merge itself.
+      const verdict = local ? { status: null, failing: [] } : statusFromPulls(pulls);
       // Every pull request open, green and approved (or one already merged) makes the slice ready to merge.
       if (!doneProved && verdict.status === 'ready-to-merge' && !['ready-to-merge', 'done'].includes(current)) {
         const move = setStatus(root, s.id, 'ready-to-merge');
@@ -397,6 +439,11 @@ export function reconcile(root, { exec = defaultExec, apply = false, deferStatus
   // The board side of each row.
   const ids = new Map();
   for (const row of rows) {
+    if (local) {
+      // No board: STATUS.md and the sheets are the board.
+      row.board = row.target === '' ? '' : 'local';
+      continue;
+    }
     if (row.action === 'skip' || row.target === '') continue;
     const { issue, item } = itemOf(row.id);
     ids.set(row.id, { issue, item });
@@ -418,7 +465,7 @@ export function reconcile(root, { exec = defaultExec, apply = false, deferStatus
   // The issue of a done slice is closed once: only when the workspace repository still shows it open.
   const closing = new Set();
   for (const row of rows) {
-    if (!closes.has(row.id) || row.action === 'skip') continue;
+    if (local || !closes.has(row.id) || row.action === 'skip') continue;
     const issue = ids.get(row.id)?.issue;
     if (issue !== null && issue !== undefined && String(issue.state ?? '').toUpperCase() !== 'CLOSED') closing.add(row.id);
   }
@@ -426,6 +473,30 @@ export function reconcile(root, { exec = defaultExec, apply = false, deferStatus
     if (row.action === 'keep' && (statusMoves.has(row.id) || mergedWrites.has(row.id) || closing.has(row.id))) row.action = 'move';
   }
   result.rows = rows;
+
+  // The epic of a lot (the issue with the Recade marker) closes when every story of the lot is cited by a slice and every slice
+  // that serves the lot is done, and reopens when a slice that serves it is not done any more, or a new one is added.
+  // A lot that left the PLAN is not looked at here: `recade github sync` closed its epic.
+  let lotPlan = { lots: [], sliceLots: new Map() };
+  try {
+    lotPlan = epicPlan(root);
+  } catch (err) {
+    result.errors.push(`epics: ${firstLine(err.message)}`);
+  }
+  for (const lot of lotPlan.lots) {
+    const epic = issues.find((i) => epicCode(i.body) === lot.code);
+    if (epic === undefined) continue;
+    const serving = slices.filter((s) => (lotPlan.sliceLots.get(s.id) ?? []).includes(lot.code)).map((s) => s.id);
+    if (serving.length === 0 || serving.some((id) => !effective.has(id))) continue;
+    const uncovered = lot.stories.filter((st) => (coveredBy.get(st.id) ?? []).length === 0).map((st) => st.id);
+    const open = serving.filter((id) => !effective.get(id).done);
+    const closed = String(epic.state ?? '').toUpperCase() === 'CLOSED';
+    if (!closed && open.length === 0 && uncovered.length === 0) {
+      result.epics.push({ code: lot.code, number: epic.number, action: 'close', reason: `every slice of the lot is done (${serving.join(', ')})` });
+    } else if (closed && open.length > 0) {
+      result.epics.push({ code: lot.code, number: epic.number, action: 'reopen', reason: `${open.join(', ')} ${open.length === 1 ? 'is' : 'are'} not done` });
+    }
+  }
   if (!apply) return result;
 
   for (const row of rows.filter((r) => r.action === 'move')) {
@@ -454,6 +525,10 @@ export function reconcile(root, { exec = defaultExec, apply = false, deferStatus
         }
       }
       if (closing.has(row.id)) note.push('issue closed');
+      if (local) {
+        result.applied.push(`${row.id}: ${note.join('; ')}`);
+        continue;
+      }
       if (found.item !== null && !SAME_PLACE[row.target].includes(row.board.toLowerCase())) {
         gh(['project', 'item-edit', '--id', found.item.id, '--project-id', project.id, '--field-id', status.id,
           '--single-select-option-id', optionFor(status.options, row.target).id]);
@@ -467,6 +542,17 @@ export function reconcile(root, { exec = defaultExec, apply = false, deferStatus
       result.applied.push(`${row.id}: ${note.join('; ')}`);
     } catch (err) {
       result.errors.push(`${row.id}: ${firstLine(err.message)}`);
+    }
+  }
+  for (const e of result.epics) {
+    try {
+      gh(['issue', 'comment', String(e.number), '--repo', `${owner}/${repo}`, '--body', `Board reconcile: the epic ${e.code} is ${e.action === 'close' ? 'closed' : 'reopened'}: ${e.reason}.`]);
+      gh(e.action === 'close'
+        ? ['issue', 'close', String(e.number), '--repo', `${owner}/${repo}`, '--reason', 'completed']
+        : ['issue', 'reopen', String(e.number), '--repo', `${owner}/${repo}`]);
+      result.applied.push(`epic ${e.code}: ${e.action === 'close' ? 'closed' : 'reopened'}`);
+    } catch (err) {
+      result.errors.push(`epic ${e.code}: ${firstLine(err.message)}`);
     }
   }
   return result;
@@ -518,8 +604,9 @@ const pad = (rows, i) => Math.max(...rows.map((r) => String(r[i]).length));
 export function formatReconcile(result) {
   const out = [];
   if (result.rows.length > 0) {
-    const head = ['Item', 'STATUS.md', 'PR', 'Board now', 'Board target', 'Action'];
-    const body = result.rows.map((r) => [r.id, r.status || '-', r.pr || '-', r.board || '-', r.target || '-', r.action]);
+    // The local forge has no board: STATUS.md is the board, and the review request stands for the pull request.
+    const head = result.local ? ['Item', 'STATUS.md', 'Review', 'Action'] : ['Item', 'STATUS.md', 'PR', 'Board now', 'Board target', 'Action'];
+    const body = result.rows.map((r) => (result.local ? [r.id, r.status || '-', r.pr || '-', r.action] : [r.id, r.status || '-', r.pr || '-', r.board || '-', r.target || '-', r.action]));
     const all = [head, ...body];
     const w = head.map((_, i) => pad(all, i));
     const fmt = (r) => r.map((c, i) => String(c).padEnd(w[i])).join('  ').trimEnd();
@@ -527,9 +614,10 @@ export function formatReconcile(result) {
     const why = result.rows.filter((r) => r.reason !== '' && (r.action !== 'keep' || /not|never/.test(r.reason)));
     if (why.length > 0) out.push('', ...why.map((r) => `${r.id}: ${r.reason}`));
   } else if (result.errors.length === 0) out.push('No slice and no story to reconcile.');
-  const moves = result.rows.filter((r) => r.action === 'move').length;
+  if ((result.epics ?? []).length > 0) out.push('', ...result.epics.map((e) => `Epic ${e.code}: ${e.action}, ${e.reason}`));
+  const moves = result.rows.filter((r) => r.action === 'move').length + (result.epics ?? []).length;
   if (result.apply) {
-    out.push('', `Applied ${result.applied.length} of ${moves} move${moves === 1 ? '' : 's'}.`);
+    out.push('', `Applied ${result.applied.length} of ${moves} move${moves === 1 ? '' : 's'}${result.local ? ' (local forge: no gh call)' : ''}.`);
     for (const a of result.applied) out.push(`  ${a}`);
   } else if (result.errors.length === 0) {
     out.push('', `Dry run: ${moves} move${moves === 1 ? '' : 's'} planned, nothing changed. Run again with --apply once the owner agrees.`);
@@ -615,7 +703,7 @@ function insideRepo(main, path) {
  * @param {string} repo the main folder of the repository, or one of its worktrees
  * @param {{exec?: Exec, apply?: boolean, gcThresholdKiB?: number}} [options]
  */
-function cleanupRepo(repo, { exec = defaultExec, apply = false, gcThresholdKiB = GC_THRESHOLD_KIB, allowIgnored = [], stack, name } = {}) {
+function cleanupRepo(repo, { exec = defaultExec, apply = false, gcThresholdKiB = GC_THRESHOLD_KIB, allowIgnored = [], stack, name, ws = null, local: localForge = false, base: localBase = 'main' } = {}) {
   const result = { candidates: [], kept: [], removed: [], bytesEstimate: 0, bytesFreed: 0, gc: false, errors: [], warnings: [], apply };
   const git = (cwd, ...args) => call(exec, ['git', ...args], cwd);
   const fail = (message) => {
@@ -630,7 +718,16 @@ function cleanupRepo(repo, { exec = defaultExec, apply = false, gcThresholdKiB =
   if (listing.code !== 0) return fail(`git worktree list failed: ${firstLine(listing.stderr) || `exit ${listing.code}`}`);
   const trees = worktrees(listing.stdout);
   const main = resolve(trees[0]?.path ?? here);
-  const hasOrigin = git(main, 'remote', 'get-url', 'origin').code === 0;
+  // The local forge never reaches a remote: no remote branch is read or deleted.
+  const hasOrigin = !localForge && git(main, 'remote', 'get-url', 'origin').code === 0;
+  let merges = null;
+  if (localForge) {
+    try {
+      merges = localMerges(exec, main, localBase);
+    } catch (err) {
+      return fail(firstLine(err.message));
+    }
+  }
 
   // The stop command, from the harness technical sheet. Read from the main folder.
   let stop = null;
@@ -667,7 +764,16 @@ function cleanupRepo(repo, { exec = defaultExec, apply = false, gcThresholdKiB =
       const slice = sliceId(branch);
       const keep = (...reasons) => kept.push({ slice, branch, worktree: tree?.path ?? null, reasons });
       const tree = trees.find((t) => t.branch === `refs/heads/${branch}`);
-      const r = call(exec, ['gh', 'pr', 'view', branch, '--json', 'number,state,mergedAt,headRefOid,baseRefName'], main);
+      // On the local forge the merge is read from git: a merge commit of the base branch whose parent is the branch tip.
+      const localTip = localForge ? revParse(main, `refs/heads/${branch}`) : null;
+      const localMerge = localForge ? findMerge(merges, { tip: localTip }) : null;
+      if (localForge && localMerge === null) {
+        keep(localTip === null ? 'the branch is gone, so its merge cannot be proved' : `the branch is not merged into ${localBase} with a merge commit (git merge --no-ff)`);
+        continue;
+      }
+      const r = localForge
+        ? { code: 0, stdout: JSON.stringify({ number: null, state: 'MERGED', mergedAt: 'local', headRefOid: localTip, baseRefName: localBase }), stderr: '' }
+        : call(exec, ['gh', 'pr', 'view', branch, '--json', 'number,state,mergedAt,headRefOid,baseRefName'], main);
       if (r.code !== 0) {
         if (/no pull requests? found/i.test(r.stderr)) keep('no pull request found for the branch');
         else keep(`the pull request could not be read: ${firstLine(r.stderr) || `exit ${r.code}`}`);
@@ -715,7 +821,8 @@ function cleanupRepo(repo, { exec = defaultExec, apply = false, gcThresholdKiB =
       let bytes = 0;
       let caches = 0;
       if (tree !== undefined) {
-        if (!insideRepo(main, tree.path)) reasons.push('the worktree is outside the repository folder, or is reached through a link: it was not touched');
+        // A slice worktree lives under worktrees/<repo>/ of the workspace, or, before the migration, inside the repository.
+        if (!insideRepo(main, tree.path) && !(ws !== null && name !== undefined && insideRepo(join(ws, WORKTREES_DIR, name), tree.path))) reasons.push('the worktree is outside the repository folder and the worktrees/ folder of the workspace, or is reached through a link: it was not touched');
         else if (resolve(tree.path) === main) reasons.push('it is checked out in the main folder');
         else if (resolve(tree.path) === here) reasons.push('it is the current folder: run the cleanup from the main folder');
         else if (tree.locked) reasons.push('the worktree is locked');
@@ -886,18 +993,32 @@ export function cleanup(repo, options = {}) {
   const { exec = defaultExec, apply = false } = options;
   const top = call(exec, ['git', 'rev-parse', '--show-toplevel'], repo);
   const ws = top.code === 0 ? workspaceTop(resolve(top.stdout.trim())) : null;
-  if (ws === null) return cleanupRepo(repo, options);
+  if (ws === null) {
+    // A code repository of a workspace, or a legacy project: its forge is read from the project it belongs to.
+    let state = null;
+    try {
+      const home = projectRoot(repo);
+      state = home === null ? null : loadState(home);
+    } catch { /* no readable project: the GitHub forge, as before */ }
+    const name = top.code === 0 ? basename(resolve(top.stdout.trim())) : '';
+    const entry = (Array.isArray(state?.repos) ? state.repos : []).find((e) => e?.name === name);
+    const base = typeof entry?.default_branch === 'string' && BRANCH.test(entry.default_branch) ? entry.default_branch : 'main';
+    return cleanupRepo(repo, { ...options, local: forgeOf(state) === 'local', base });
+  }
 
   const result = { candidates: [], kept: [], removed: [], bytesEstimate: 0, bytesFreed: 0, gc: false, errors: [], warnings: [], apply, tmp: { path: 'tmp', planned: false, removed: false, bytes: 0 } };
   const stack = readStack(ws);
-  const names = registryNames(loadState(ws) ?? {}).filter((n) => REPO_NAME.test(n) && n !== 'workspace');
+  const state = loadState(ws) ?? {};
+  const names = registryNames(state).filter((n) => REPO_NAME.test(n) && n !== 'workspace');
   for (const name of names) {
     // A folder with no .git of its own would be read as the workspace repository: refuse it.
     if (!existsSync(join(ws, 'repos', name, '.git'))) {
       result.errors.push(`${name}: repos/${name} is not a git repository. Run: recade repo sync`);
       continue;
     }
-    const sub = cleanupRepo(join(ws, 'repos', name), { ...options, stack: stack ?? '', name });
+    const entry = (Array.isArray(state.repos) ? state.repos : []).find((e) => e?.name === name);
+    const base = typeof entry?.default_branch === 'string' && BRANCH.test(entry.default_branch) ? entry.default_branch : 'main';
+    const sub = cleanupRepo(join(ws, 'repos', name), { ...options, stack: stack ?? '', name, ws, local: forgeOf(state) === 'local', base });
     const label = (item) => ({ repo: name, ...item });
     result.kept.push(...sub.kept.map(label));
     result.errors.push(...sub.errors.map((e) => `${name}: ${e}`));

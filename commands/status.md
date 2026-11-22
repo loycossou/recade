@@ -25,7 +25,7 @@ This command only reads. It never changes the state and never passes a gate.
 
 Show, in this order:
 
-1. The phase: its number and name (`phase`, `phase_name`), the track (`track`: `full` or `short`), and the decisions mode (`decisions`): `ask`, every open decision comes to the owner, or `trust`, the team decides what is reversible and costs nothing.
+1. The phase: its number and name (`phase`, `phase_name`), the track (`track`: `full` or `short`), and the decisions mode (`decisions`): `ask`, every open decision comes to the owner, or `trust`, the team decides what is reversible and costs nothing. Then the forge (`forge`): `local`, git on this machine only and `slices/STATUS.md` as the board, or `github`, private repositories, a board and pull requests.
 2. The gates, as a table: gate, state (`passed` or `open`), date. Take them from `gates`. Gates run in the order `G0`, `G1`, `G2-stack`, `G2`, `G3`, `G4`, `G5`. In mode `adopt` the first gate is `G0-inventory` instead of `G0`.
 3. The open provisionals: read `intake/provisionals.md` with Read if the file exists. List each PRV record that is not closed, one line each: id and title. If the file does not exist or nothing is open, write "No open provisional".
 4. The open blockers: read `BLOCKERS.md` at the project root with Read if the file exists. List each blocker that is not closed, one line each. If the file does not exist or nothing is open, write "No open blocker".

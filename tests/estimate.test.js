@@ -7,7 +7,10 @@ import { fileURLToPath } from 'node:url';
 import { MODEL_ALIASES, PRICES, PRICES_DATE, PRICES_SOURCE, dollarsOf, modelId, priceOf } from '../src/pricing.js';
 import {
   DEFAULT_ROLES, PHASE_IDS, SHORT_ROLES, TOKENS_PER_WORD, estimatePhases, estimateSlice, formatRange, projectFacts, rosterRoles, roundDollars, runTokens,
+  TRIAL_MINUTES, PHASE_STEPS, formatDuration, formatSteps, roundMinutes, SHORT_SPIKES_RUN, SPIKE_MINUTES, SPIKE_SETUP_MINUTES, STACK_RESEARCH_MINUTES,
 } from '../src/estimate.js';
+import { setSetting } from '../src/project/state.js';
+import { withSecondOpinion } from '../src/harness/models.js';
 import { MECHANICAL_STAGES, stageTier } from '../src/models.js';
 import { loadModels } from '../src/harness/models.js';
 import { run } from '../src/cli.js';
@@ -166,7 +169,7 @@ test('the docs phase counts the runs the command dispatches: one review per docu
   assert.equal(team.items.find((i) => i.agent === 'doctrine-writer').runs.low, 9);
 });
 
-test('the short track: spikes from none to the full number, one stack opinion, a revise only for a blocker, two boards', () => {
+test('the short track: no spike by default, one stack opinion, a revise only for a blocker, two boards', () => {
   const root = fixture();
   const full = { languages: { deliverables: ['en'] } };
   const short = { ...full, track: 'short' };
@@ -176,9 +179,9 @@ test('the short track: spikes from none to the full number, one stack opinion, a
   const [fd, sd] = [phase(full, 'docs'), phase(short, 'docs')];
   assert.equal(projectFacts(root, full).track, 'full');
   assert.equal(projectFacts(root, short).track, 'short');
-  // Spikes: 6 to 15 in the full track; in the short track the leader gap is unknown before the research.
+  // Spikes: 6 to 15 in the full track; the short track decides from the research unless the owner asks for spikes.
   assert.deepEqual(runs(fd, 'spike-runner', 'spike'), { low: 6, high: 15 });
-  assert.deepEqual(runs(sd, 'spike-runner', 'spike'), { low: 0, high: 15 });
+  assert.deepEqual(runs(sd, 'spike-runner', 'spike'), { low: 0, high: 0 });
   // One opinion on the stack, the architect's: three architect reviews (STACK, D3, PLAN) on both tracks, no devops one.
   assert.deepEqual(runs(fd, 'devops-lead', 'review'), { low: 1, high: 1 });
   assert.deepEqual(runs(sd, 'devops-lead', 'review'), { low: 0, high: 0 });
@@ -248,8 +251,8 @@ test('the estimate of one slice follows the chain of the lane and the models of 
 // Figures of the constants of src/estimate.js: when a constant is tuned, these change on purpose.
 const EXPECTED_FIXTURE = {
   team: [11, 13, 17, 60],
-  docs: [54, 90, 25, 105],
-  bible: [6, 10, 3, 9],
+  docs: [58, 94, 25, 110],
+  bible: [7, 11, 3, 10],
   slices: [1, 3, 1.3, 6],
   harness: [5, 7, 2, 7],
 };
@@ -265,17 +268,20 @@ test('recade cost estimate prints each phase not passed, the total, and says it 
   assert.equal(await run(['cost', 'estimate', '--project', root], t.io), 0, t.stderr());
   const lines = t.stdout().trim().split('\n');
   assert.deepEqual(lines.map((l) => l.split(':')[0]), ['Team', 'Documents', 'Bible', 'Slices', 'Harness', 'Total', 'An estimate, not a measure']);
-  assert.match(lines[0], /^Team: about \$\d+ to \$\d+, \d+ to \d+ agent runs$/);
+  assert.match(lines[0], /^Team: about \$\d+ to \$\d+ and \d+ to \d+ minutes, \d+ to \d+ agent runs$/);
   assert.match(lines[5], /\(API prices; on a Claude subscription it counts against your usage limits instead\.\)$/);
-  assert.equal(lines[6], 'An estimate, not a measure: prices of 2026-11-03, Anthropic API, per million tokens, writing model opus.');
+  assert.match(lines[5], /^Total: about \$\d+ to \$\d+ and \d+(\.5)? to \d+(\.5)? hours, /);
+  assert.equal(lines[6], 'An estimate, not a measure: prices of 2026-11-03, Anthropic API, per million tokens, writing model opus. The durations scale from a measured short-track framing.');
 });
 
 test('recade cost estimate --phase prints the one line a phase command shows the owner', async () => {
   const root = fixture();
   const t = makeIO(root);
   assert.equal(await run(['cost', 'estimate', '--phase', 'docs', '--project', root], t.io), 0, t.stderr());
-  assert.match(t.stdout().split('\n')[0],
-    /^Estimated cost of this phase: about \$\d+ to \$\d+, \d+ to \d+ agent runs \(API prices; on a Claude subscription it counts against your usage limits instead\.\)$/);
+  const lines = t.stdout().split('\n');
+  assert.match(lines[0],
+    /^Estimated cost of this phase: about \$\d+ to \$\d+ and \d+(\.5)? to \d+(\.5)? hours, \d+ to \d+ agent runs \(API prices; on a Claude subscription it counts against your usage limits instead\.\)$/);
+  assert.match(lines[1], /^Usual time of each step: Step 3 \(D1\) \d+ (minutes )?to .*; Step 5 \(the stack decision\) .*; Step 9 \(render and G2\) .*\.$/);
 });
 
 test('recade cost estimate --json gives the figures, the runs of each kind and the price source', async () => {
@@ -292,7 +298,9 @@ test('recade cost estimate --json gives the figures, the runs of each kind and t
   assert.deepEqual([bible.runs.low, bible.runs.high, bible.rounded.low, bible.rounded.high], EXPECTED_FIXTURE.bible);
   assert.ok(bible.items.some((i) => i.agent === 'chief-reviewer' && i.stage === 'review' && i.model === 'claude-opus-5-5'));
   assert.ok(bible.items.some((i) => i.agent === 'bible-writer' && i.stage === 'translate' && i.model === 'claude-sonnet-5-5' && i.effort === 'medium'));
-  assert.deepEqual(Object.keys(out.total), ['runs', 'dollars', 'rounded']);
+  assert.deepEqual(Object.keys(out.total), ['runs', 'dollars', 'rounded', 'minutes']);
+  assert.equal(bible.steps.length, 7);
+  assert.ok(bible.minutes.low < bible.minutes.high);
 });
 
 test('recade cost estimate follows the writing model of the user config', async () => {
@@ -356,8 +364,9 @@ test('each phase command shows the estimate once, in one line, and never blocks 
   }
 });
 
-test('the mechanical stages are translate, glossary, apply-decisions and the format fixes; drafting and reviewing stay on the writer', () => {
-  assert.deepEqual(MECHANICAL_STAGES.map((m) => m.stage), ['translate', 'glossary', 'apply-decisions', 'fix']);
+test('the mechanical stages are translate, glossary, apply-decisions, the companion and the format fixes; drafting and reviewing stay on the writer', () => {
+  assert.deepEqual(MECHANICAL_STAGES.map((m) => m.stage), ['translate', 'glossary', 'apply-decisions', 'story', 'fix']);
+  assert.equal(stageTier('security-lead', 'story'), 'mechanical');
   assert.equal(stageTier('project-lead', 'translate'), 'mechanical');
   assert.equal(stageTier('project-lead', 'glossary'), 'mechanical');
   assert.equal(stageTier('bible-writer', 'apply-decisions'), 'mechanical');
@@ -389,4 +398,174 @@ test('recade models mechanical prints the alias and the effort of the mechanical
   assert.equal(await run(['models', 'mechanical', '--effort'], b.io), 0);
   assert.equal(b.stdout(), `${tiers.mechanical.effort}\n`);
   assert.deepEqual(tiers.mechanical, { model: 'sonnet', effort: 'medium' });
+});
+
+// ---------------------------------------------------------------------------------------------------------
+// Durations
+// ---------------------------------------------------------------------------------------------------------
+
+const trialState = { track: 'short' };
+const trial = () => estimatePhases(projectFacts(null, trialState), trialState, { ...ctx, phases: [...PHASE_IDS] });
+
+test('the durations of a short track with the facts of the trial hold every measured figure', () => {
+  // The trial ran its spikes.
+  const ran = { track: 'short', spikes: 'run' };
+  const result = estimatePhases(projectFacts(null, ran), ran, { ...ctx, phases: [...PHASE_IDS] });
+  const at = Object.fromEntries(result.phases.map((p) => [p.phase, p]));
+  for (const id of ['intake', 'team', 'bible', 'slices', 'harness']) {
+    const { low, high } = at[id].minutes;
+    assert.ok(low <= TRIAL_MINUTES[id] && TRIAL_MINUTES[id] <= high, `${id}: ${low} to ${high}, measured ${TRIAL_MINUTES[id]}`);
+  }
+  for (const step of at.docs.steps) {
+    const { low, high } = step.minutes;
+    assert.ok(low <= TRIAL_MINUTES[step.id] && TRIAL_MINUTES[step.id] <= high, `${step.id}: ${low} to ${high}, measured ${TRIAL_MINUTES[step.id]}`);
+  }
+  const docs = ['d1', 'direction', 'stack', 'd2', 'd3', 'plan', 'gate'].reduce((n, k) => n + TRIAL_MINUTES[k], 0);
+  assert.ok(at.docs.minutes.low <= docs && docs <= at.docs.minutes.high);
+});
+
+test('the durations are deterministic: the figures of the short track and of the full track', () => {
+  const figures = (r) => Object.fromEntries(r.phases.map((p) => [p.phase, [p.minutes.low, p.minutes.high]]));
+  assert.deepEqual(figures(trial()), {
+    intake: [5, 20], team: [10, 20], docs: [210, 450], bible: [20, 50], slices: [20, 90], harness: [25, 50],
+  });
+  const full = { track: 'full' };
+  const long = estimatePhases(projectFacts(null, full), full, { ...ctx, phases: [...PHASE_IDS] });
+  assert.deepEqual(figures(long), {
+    intake: [10, 25], team: [15, 30], docs: [330, 690], bible: [30, 60], slices: [30, 90], harness: [30, 90],
+  });
+  for (const p of long.phases) {
+    const short = trial().phases.find((q) => q.phase === p.phase);
+    assert.ok(p.minutes.low >= short.minutes.low && p.minutes.high >= short.minutes.high, p.phase);
+  }
+});
+
+test('each step of team, docs, bible and slices has its usual time, numbered as its command numbers it', () => {
+  const result = trial();
+  for (const [phase, first, of] of [['team', 3, 7], ['docs', 3, 9], ['bible', 3, 9], ['slices', 2, 6]]) {
+    const p = result.phases.find((q) => q.phase === phase);
+    assert.deepEqual(p.steps.map((s) => s.step), Array.from({ length: of - first + 1 }, (_, i) => first + i), phase);
+    assert.ok(p.steps.every((s) => s.of === of && s.minutes.low >= 5 && s.minutes.low <= s.minutes.high), phase);
+    if (PHASE_STEPS[phase][0].share !== undefined) assert.equal(Math.round(PHASE_STEPS[phase].reduce((n, s) => n + s.share, 0) * 100), 100, phase);
+  }
+  for (const phase of ['intake', 'harness']) assert.equal(result.phases.find((q) => q.phase === phase).steps, undefined, phase);
+  const docs = result.phases.find((q) => q.phase === 'docs');
+  const stack = docs.steps.find((s) => s.id === 'stack');
+  assert.ok(docs.steps.every((s) => s.minutes.high <= stack.minutes.high), 'the stack decision is the longest step');
+  assert.match(formatSteps(docs.steps), /^Step 3 \(D1\) .+; Step 4 \(the art direction\) .+; Step 5 \(the stack decision\) .+ hours; /);
+});
+
+test('a translation lengthens the render step, more spikes lengthen the stack step', () => {
+  const one = { track: 'short', languages: { deliverables: ['en'] } };
+  const two = { track: 'short', languages: { deliverables: ['en', 'fr'] } };
+  const gate = (state) => estimatePhases(projectFacts(null, state), state, { ...ctx, phases: ['docs'] }).phases[0].steps.find((s) => s.id === 'gate').minutes;
+  assert.ok(gate(two).high > gate(one).high);
+  const stack = (state) => estimatePhases(projectFacts(null, state), state, { ...ctx, phases: ['docs'] }).phases[0].steps.find((s) => s.id === 'stack').minutes;
+  const full = { track: 'full' };
+  assert.ok(stack(full).low > stack(one).low, 'the full track always spikes');
+});
+
+test('roundMinutes and formatDuration: 5 minutes under an hour, half hours above, plain words', () => {
+  assert.equal(roundMinutes(23, 'down'), 20);
+  assert.equal(roundMinutes(23, 'up'), 25);
+  assert.equal(roundMinutes(2, 'down'), 5);
+  assert.equal(roundMinutes(100, 'down'), 90);
+  assert.equal(roundMinutes(100, 'up'), 120);
+  assert.equal(formatDuration({ low: 20, high: 40 }), '20 to 40 minutes');
+  assert.equal(formatDuration({ low: 5, high: 5 }), '5 minutes');
+  assert.equal(formatDuration({ low: 45, high: 120 }), '45 minutes to 2 hours');
+  assert.equal(formatDuration({ low: 180, high: 300 }), '3 to 5 hours');
+  assert.equal(formatDuration({ low: 90, high: 210 }), '1.5 to 3.5 hours');
+  assert.equal(formatDuration({ low: 60, high: 60 }), '1 hour');
+  assert.equal(formatRange({ rounded: { low: 16, high: 95 }, runs: { low: 37, high: 84 }, minutes: { low: 180, high: 300 } }), 'about $16 to $95 and 3 to 5 hours, 37 to 84 agent runs');
+  assert.equal(formatRange({ rounded: { low: 1, high: 3 }, runs: { low: 9, high: 17 } }), 'about $1 to $3, 9 to 17 agent runs', 'a slice has no duration');
+});
+
+test('the second-opinion choice prices the second opinion of a slice on Fable', () => {
+  const opus = estimateSlice('sensitive', { harnessModels });
+  const fable = estimateSlice('sensitive', { harnessModels: withSecondOpinion(harnessModels, 'fable') });
+  const item = (r) => r.items.find((i) => i.agent === 'second-opinion');
+  assert.equal(item(opus).model, 'claude-opus-5-5');
+  assert.equal(item(fable).model, 'claude-fable-5-2');
+  assert.ok(item(fable).dollars.high > 1.5 * item(opus).dollars.high);
+  assert.equal(withSecondOpinion(harnessModels, 'opus'), harnessModels);
+});
+
+test('each phase command shows the cost line in its first message, translated, and keeps the step times for the progress lines', () => {
+  for (const f of ['new.md', 'team.md', 'docs.md', 'bible.md', 'slices.md', 'harness.md']) {
+    const text = read(f);
+    for (const part of ['<!-- shared:cost-line -->', 'in your next message, before any further question and before the first dispatch', '`languages.chat`', 'The owner does not see the output of a tool', '`Usual time of each step:`']) {
+      assert.ok(text.includes(part), `${f}: ${part}`);
+    }
+  }
+  for (const f of ['team.md', 'docs.md', 'bible.md', 'slices.md']) {
+    const text = read(f);
+    assert.ok(text.includes('**Progress line.**') && text.includes('<!-- shared:progress-time -->') && text.includes('how long the step usually takes'), f);
+  }
+  assert.ok(read('docs.md').includes('after each spike and after each layer how many are left'));
+});
+
+// ---------------------------------------------------------------------------------------------------------
+// The spike choice, the companions and the next increment
+// ---------------------------------------------------------------------------------------------------------
+
+const stackOf = (state, root = null) => {
+  const docs = estimatePhases(projectFacts(root, state), state, { ...ctx, phases: ['docs'] }).phases[0];
+  const spikes = docs.items.filter((i) => i.agent === 'spike-runner').reduce((n, i) => ({ low: n.low + i.runs.low, high: n.high + i.runs.high }), { low: 0, high: 0 });
+  return { minutes: docs.steps.find((s) => s.id === 'stack').minutes, spikes, dollars: docs.dollars };
+};
+
+test('the stack step counts no spike in the short track by default, and follows the spike choice of the state', () => {
+  const none = stackOf({ track: 'short' });
+  assert.deepEqual(none.spikes, { low: 0, high: 0 });
+  assert.ok(none.minutes.low < 90, `no spike: ${none.minutes.low} minutes, not the 1.5 hours of a trial with 3 spikes`);
+  const ran = stackOf({ track: 'short', spikes: 'run' });
+  assert.deepEqual(ran.spikes, { ...SHORT_SPIKES_RUN });
+  assert.ok(ran.minutes.low > none.minutes.low && ran.minutes.high > none.minutes.high, 'running the spikes takes longer');
+  assert.ok(ran.dollars.low > none.dollars.low, 'and costs more');
+  // Each spike adds its minutes, plus a setup once.
+  assert.ok(ran.minutes.high - none.minutes.high >= SHORT_SPIKES_RUN.high * SPIKE_MINUTES.low);
+  assert.equal(STACK_RESEARCH_MINUTES, TRIAL_MINUTES.stack - 3 * 4.5 - SPIKE_SETUP_MINUTES);
+  const full = stackOf({ track: 'full' });
+  const fullNone = stackOf({ track: 'full', spikes: 'none' });
+  assert.deepEqual(fullNone.spikes, { low: 0, high: 0 });
+  assert.ok(fullNone.minutes.high < full.minutes.high && fullNone.dollars.low < full.dollars.low);
+  // The tasks the analyst wrote set the count: two finalists for each close layer of the short track.
+  const root = fixture();
+  mkdirSync(join(root, 'spikes'), { recursive: true });
+  writeFileSync(join(root, 'spikes', 'TASK-framework.md'), '# Task\n');
+  assert.deepEqual(stackOf({ track: 'short', spikes: 'run' }, root).spikes, { low: 2, high: 2 });
+  assert.deepEqual(stackOf({ track: 'full' }, root).spikes, { low: 2, high: 3 });
+});
+
+test('recade state set spikes records the owner\'s answer, run or none', () => {
+  const s = setSetting({ version: 1, gates: {} }, 'spikes', 'none');
+  assert.equal(s.spikes, 'none');
+  assert.throws(() => setSetting(s, 'spikes', 'maybe'), /Invalid spikes: maybe\. Use run, none\./);
+});
+
+test('the companions are counted: four story runs in the docs phase, one in the bible, on the mechanical model', () => {
+  const root = fixture();
+  const state = { languages: { deliverables: ['en'] } };
+  const phase = (id) => estimatePhases(projectFacts(root, state), state, { ...ctx, phases: [id] }).phases[0];
+  const stories = (p) => p.items.filter((i) => i.stage === 'story');
+  assert.deepEqual(stories(phase('docs')).map((i) => [i.agent, i.runs.low, i.model]), [
+    ['project-lead', 2, 'claude-sonnet-5-5'], ['architect', 1, 'claude-sonnet-5-5'], ['security-lead', 1, 'claude-sonnet-5-5'],
+  ]);
+  assert.deepEqual(stories(phase('bible')).map((i) => [i.agent, i.runs.low, i.model]), [['bible-writer', 1, 'claude-sonnet-5-5']]);
+});
+
+test('the next increment has its own estimate, smaller than the slices phase, and is never in the list of phases left', async () => {
+  const root = fixture();
+  const state = { track: 'short', languages: { deliverables: ['en'] } };
+  const next = estimatePhases(projectFacts(root, state), state, { ...ctx, phases: ['next'] }).phases[0];
+  assert.equal(next.name, 'Next increment');
+  assert.deepEqual(next.items.map((i) => [i.agent, i.stage, i.model]), [['slicer', 'next', 'claude-opus-5-5'], ['slicer', 'revise', 'claude-opus-5-5']]);
+  assert.deepEqual(next.steps.map((s) => s.step), [3, 4, 5, 6]);
+  const all = estimatePhases(projectFacts(root, state), state, ctx);
+  assert.equal(all.phases.some((p) => p.phase === 'next'), false);
+  const t = makeIO(root);
+  assert.equal(await run(['cost', 'estimate', '--phase', 'next', '--project', root], t.io), 0, t.stderr());
+  assert.match(t.stdout(), /^Estimated cost of this phase: about \$[\d.]+ to \$[\d.]+ and .+, \d+ to \d+ agent runs/m);
+  assert.match(t.stdout(), /^Usual time of each step: Step 3 \(the cut\) /m);
 });

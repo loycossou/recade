@@ -2,7 +2,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parse, stringify } from 'yaml';
 import { configDir } from './paths.js';
-import { WRITER_CHOICES, isWriterChoice } from './models.js';
+import { SECOND_OPINION_CHOICES, WRITER_CHOICES, isSecondOpinionChoice, isWriterChoice } from './models.js';
 import { parseExtras } from './deliverables.js';
 
 export const DEFAULT_CONFIG = Object.freeze({
@@ -18,9 +18,47 @@ export const DEFAULT_CONFIG = Object.freeze({
   github_owner: null,
   projects_root: '~/projects',
   voice: 'randall-munroe',
-  models: Object.freeze({ writer: 'opus' }),
-  deliverables: Object.freeze({ extras: Object.freeze([]) }),
+  models: Object.freeze({ writer: 'opus', second_opinion: 'opus' }),
+  deliverables: Object.freeze({ extras: Object.freeze([]), pdf: false }),
+  // The owner's stack preferences: for each language, the framework the stack analyst puts first when it fits.
+  stack: Object.freeze({ prefer: Object.freeze({ php: 'symfony' }) }),
 });
+
+const PREFER_KEY = /^[a-z][a-z0-9+#.-]*$/;
+const PREFER_VALUE = /^[A-Za-z0-9][A-Za-z0-9 .+#/-]*$/;
+
+/**
+ * Parse `php=symfony,python=django` into a map of preferences. `none` (or an empty text) clears them all.
+ * Throws an Error with a one-line message on invalid input.
+ * @param {string} raw
+ * @returns {Record<string, string>}
+ */
+export function parsePreferences(raw) {
+  const text = raw.trim();
+  if (text === '' || text.toLowerCase() === 'none') return {};
+  const out = {};
+  for (const part of text.split(',').map((p) => p.trim()).filter(Boolean)) {
+    const at = part.indexOf('=');
+    const key = (at < 0 ? '' : part.slice(0, at)).trim().toLowerCase();
+    const value = (at < 0 ? '' : part.slice(at + 1)).trim();
+    if (!PREFER_KEY.test(key) || !PREFER_VALUE.test(value)) {
+      throw new Error(`Invalid preference: ${part}. Write language=framework, for example php=symfony,python=django, or none.`);
+    }
+    out[key] = value;
+  }
+  return out;
+}
+
+/**
+ * The owner's stack preferences of a config, one map of language to framework. A value `none` is no preference.
+ * @param {object} config
+ * @returns {Record<string, string>}
+ */
+export function stackPreferences(config) {
+  const prefer = config?.stack?.prefer;
+  if (!isMapping(prefer)) return {};
+  return Object.fromEntries(Object.entries(prefer).filter(([k, v]) => PREFER_KEY.test(k) && typeof v === 'string' && PREFER_VALUE.test(v.trim()) && v.trim().toLowerCase() !== 'none').map(([k, v]) => [k, v.trim()]));
+}
 
 const LANGUAGE_CODE = /^[a-z]{2}$/;
 const LANGUAGE_TAG = /^[a-z]{2,3}(-[A-Za-z0-9]{2,8})*$/;
@@ -75,7 +113,10 @@ export function loadConfig(env) {
       warnings: [`config.yaml is not valid YAML; using defaults. Fix or delete ${path}.`],
     };
   }
-  return { config: merge(DEFAULT_CONFIG, data), warnings: [] };
+  const config = merge(DEFAULT_CONFIG, data);
+  // The preferences of the file replace the shipped ones: a cleared map stays cleared.
+  if (isMapping(data.stack) && isMapping(data.stack.prefer)) config.stack.prefer = structuredClone(data.stack.prefer);
+  return { config, warnings: [] };
 }
 
 /**
@@ -102,6 +143,7 @@ function splitList(raw) {
  */
 export function setConfigValue(config, key, raw) {
   const path = key.split('.');
+  if (key === 'stack.prefer' || key.startsWith('stack.prefer.')) return setPreference(config, path.slice(2).join('.'), raw);
   let defaultValue = DEFAULT_CONFIG;
   for (const part of path) {
     if (!isMapping(defaultValue) || !Object.hasOwn(defaultValue, part)) {
@@ -127,6 +169,7 @@ export function setConfigValue(config, key, raw) {
     value = raw.trim();
     if (key === 'voice' && value === '') throw new Error('voice cannot be empty.');
     if (key === 'models.writer' && !isWriterChoice(value)) throw new Error(`models.writer must be ${WRITER_CHOICES.join(' or ')}.`);
+    if (key === 'models.second_opinion' && !isSecondOpinionChoice(value)) throw new Error(`models.second_opinion must be ${SECOND_OPINION_CHOICES.join(' or ')}.`);
   }
   if (LANGUAGE_KEYS.has(key)) {
     const tags = LIST_KEYS.has(key);
@@ -146,5 +189,25 @@ export function setConfigValue(config, key, raw) {
     target = target[part];
   }
   target[path.at(-1)] = value;
+  return next;
+}
+
+/**
+ * `stack.prefer` takes the whole map (`php=symfony,python=django`, or `none`). `stack.prefer.<language>` takes one
+ * framework, and `none` removes that language.
+ */
+function setPreference(config, language, raw) {
+  const next = structuredClone(config);
+  if (!isMapping(next.stack)) next.stack = {};
+  if (language === '') {
+    next.stack.prefer = parsePreferences(raw);
+    return next;
+  }
+  const lang = language.toLowerCase();
+  if (!PREFER_KEY.test(lang)) throw new Error(`Invalid language: ${language}. Use lower-case letters, for example php.`);
+  const prefer = isMapping(next.stack.prefer) ? { ...next.stack.prefer } : {};
+  if (raw.trim().toLowerCase() === 'none' || raw.trim() === '') delete prefer[lang];
+  else Object.assign(prefer, parsePreferences(`${lang}=${raw}`));
+  next.stack.prefer = prefer;
   return next;
 }

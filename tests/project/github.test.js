@@ -67,7 +67,7 @@ const stateOf = (root) => parse(readFileSync(join(root, 'recade', 'state.yaml'),
  */
 function fakeGh({ failOn = () => false, visibility = 'PRIVATE' } = {}) {
   const gh = {
-    repos: new Map(), projects: [], fields: [], issues: [], items: [], calls: [], gitCalls: [], nextId: 1,
+    repos: new Map(), projects: [], fields: [], issues: [], items: [], labels: [], calls: [], gitCalls: [], nextId: 1,
     hasCommit: true, origin: null, remoteRefs: false, gitFail: () => false,
     codeDirs: new Map(), // code repository folders: each has its own commit, origin and remote branches
   };
@@ -147,9 +147,44 @@ function fakeGh({ failOn = () => false, visibility = 'PRIVATE' } = {}) {
       return ok(gh.issues);
     }
     if (a === 'issue' && b === 'create') {
-      const i = { number: gh.issues.length + 1, title: flag(args, '--title'), url: `https://github.com/${flag(args, '--repo')}/issues/${gh.issues.length + 1}` };
+      const i = {
+        number: gh.issues.length + 1, title: flag(args, '--title'), url: `https://github.com/${flag(args, '--repo')}/issues/${gh.issues.length + 1}`,
+        body: flag(args, '--body'), state: 'OPEN', labels: args.includes('--label') ? [{ name: flag(args, '--label') }] : [],
+      };
       gh.issues.push(i);
       return ok(`${i.url}\n`);
+    }
+    if (a === 'issue' && ['edit', 'close', 'reopen', 'comment'].includes(b)) {
+      const i = gh.issues.find((x) => String(x.number) === args[2]);
+      if (i === undefined) return { code: 1, stdout: '', stderr: `could not resolve to an issue: ${args[2]}` };
+      if (b === 'edit') {
+        if (args.includes('--title')) i.title = flag(args, '--title');
+        if (args.includes('--body')) i.body = flag(args, '--body');
+      }
+      if (b === 'close') i.state = 'CLOSED';
+      if (b === 'reopen') i.state = 'OPEN';
+      if (b === 'comment') (i.comments ??= []).push(flag(args, '--body'));
+      return ok('');
+    }
+    if (a === 'label' && b === 'list') return ok(gh.labels);
+    if (a === 'label' && b === 'create') {
+      gh.labels.push({ name: args[2] });
+      return ok('');
+    }
+    if (a === 'api' && b !== 'graphql') {
+      // REST: GET repos/<o>/<r>/issues/<n> --jq .id, GET .../sub_issues, POST .../sub_issues -F sub_issue_id=<id>.
+      const method = args.includes('--method') ? flag(args, '--method') : 'GET';
+      const path = args.find((x) => x.startsWith('repos/'));
+      const m = /^repos\/([^/]+\/[^/]+)\/issues\/(\d+)(\/sub_issues)?(\?.*)?$/.exec(path);
+      const issue = gh.issues.find((i) => i.url === `https://github.com/${m[1]}/issues/${m[2]}`);
+      if (issue === undefined) return { code: 1, stdout: '', stderr: 'HTTP 404: Not Found' };
+      if (m[3] === undefined) return ok(`${1000 + issue.number}\n`);
+      if (method === 'GET') return ok(gh.issues.filter((i) => i.parent === issue.url).map((i) => ({ id: 1000 + i.number, number: i.number, html_url: i.url })));
+      const id = Number(args.find((x) => x.startsWith('sub_issue_id=')).split('=')[1]);
+      const sub = gh.issues.find((i) => 1000 + i.number === id);
+      if (sub.parent !== undefined && !args.includes('replace_parent=true')) return { code: 1, stdout: '', stderr: 'HTTP 422: Issue may not contain duplicate sub-issues and can only have one parent' };
+      sub.parent = issue.url;
+      return ok({ id: 1000 + issue.number });
     }
     if (a === 'project' && b === 'item-list') return ok({ items: gh.items, totalCount: gh.items.length });
     if (a === 'project' && b === 'item-add') {
@@ -174,10 +209,16 @@ function fakeGh({ failOn = () => false, visibility = 'PRIVATE' } = {}) {
   return gh;
 }
 
-const writes = (gh) => gh.calls.filter(([, a, b]) => (
-  (a === 'repo' && b === 'create') || (a === 'project' && ['create', 'field-create', 'item-add', 'item-edit'].includes(b))
-  || (a === 'issue' && b === 'create') || (a === 'api' && b === 'graphql')));
+const writes = (gh) => gh.calls.filter((c) => {
+  const [, a, b] = c;
+  return (a === 'repo' && b === 'create') || (a === 'project' && ['create', 'field-create', 'item-add', 'item-edit'].includes(b))
+    || (a === 'issue' && ['create', 'edit', 'close', 'reopen', 'comment'].includes(b)) || (a === 'label' && b === 'create')
+    || (a === 'api' && (b === 'graphql' || c.includes('--method')));
+});
 const itemOf = (gh, id) => gh.items.find((i) => i.title.startsWith(`[${id}]`));
+/** The issues of the stories and the slices: every issue but the epics. */
+const work = (gh) => gh.issues.filter((i) => !(i.labels ?? []).some((l) => l.name === 'epic'));
+const epicItems = (gh) => gh.items.filter((i) => /^\[[A-Z][A-Z0-9]*\] /.test(i.title));
 
 test('first run creates the repository, the project, the fields, the issues and the items, then records the state', async () => {
   const root = project();
@@ -190,11 +231,11 @@ test('first run creates the repository, the project, the fields, the issues and 
   const create = gh.calls.find(([, a, b]) => a === 'repo' && b === 'create');
   assert.deepEqual(create, ['gh', 'repo', 'create', 'fernhill/fernhill-lending', '--private', '--source', root, '--push']);
   assert.equal(gh.projects[0].title, 'Fernhill Lending delivery');
-  assert.deepEqual(gh.fields.map((f) => f.name).sort(), ['Due', 'Increment', 'Lane', 'Owner', 'Points', 'Priority', 'Sprint', 'Status']);
+  assert.deepEqual(gh.fields.map((f) => f.name).sort(), ['Due', 'Epic', 'Increment', 'Lane', 'Owner', 'Points', 'Priority', 'Sprint', 'Status']);
   assert.deepEqual(gh.issues.map((i) => i.title), [
-    '[LOAN-01] Apply for a loan', '[PAY-01] Schedule a payout', '[S-01] Slice S-01', '[S-02] Slice S-02',
+    '[LOAN] Core', '[PAY] Payments', '[LOAN-01] Apply for a loan', '[PAY-01] Schedule a payout', '[S-01] Slice S-01', '[S-02] Slice S-02',
   ]);
-  assert.equal(gh.items.length, 4);
+  assert.equal(gh.items.length, 6);
   assert.deepEqual(r.created.filter((c) => c.startsWith('repo') || c.startsWith('project')), ['repo fernhill/fernhill-lending', 'project 1']);
   assert.ok(r.created.includes('field Lane') && r.created.includes('issue [S-01]') && r.created.includes('item [S-01]'));
   assert.deepEqual(stateOf(root).github, { owner: 'fernhill', repo: 'fernhill-lending', project_number: 1 });
@@ -214,7 +255,7 @@ test('field values come from the sheets and the backlog, Sprint and Increment st
   assert.equal(itemOf(gh, 'LOAN-01').status, 'Backlog');
   assert.equal(itemOf(gh, 'LOAN-01').increment, undefined);
   assert.equal(itemOf(gh, 'LOAN-01').lane, undefined);
-  assert.equal(itemOf(gh, 'PAY-01').points, undefined);
+  assert.equal(itemOf(gh, 'PAY-01').points, 1, 'a story with no Points takes the points of its size');
   for (const item of gh.items) assert.equal(item.sprint, undefined);
 });
 
@@ -242,8 +283,8 @@ test('a second run creates nothing and does not write on GitHub', async () => {
   assert.equal(r.error, null);
   assert.deepEqual(r.created, []);
   assert.deepEqual(writes(gh), []);
-  assert.equal(gh.issues.length, 4);
-  assert.equal(gh.items.length, 4);
+  assert.equal(gh.issues.length, 6);
+  assert.equal(gh.items.length, 6);
   assert.deepEqual(stateOf(root).github, { owner: 'fernhill', repo: 'fernhill-lending', project_number: 1 });
 });
 
@@ -292,18 +333,18 @@ test('a failed project creation stops with the repository recorded, and the reru
 test('a failure in the middle of the issues stops there, and the rerun finishes the others', async () => {
   const root = project();
   let issueCalls = 0;
-  const gh = fakeGh({ failOn: (args) => args[0] === 'issue' && args[1] === 'create' && ++issueCalls === 3 });
+  const gh = fakeGh({ failOn: (args) => args[0] === 'issue' && args[1] === 'create' && !args.includes('--label') && ++issueCalls === 3 });
   const first = await initGithub(root, { owner: 'fernhill', exec: gh.exec });
   assert.ok(first.error);
-  assert.equal(gh.issues.length, 2);
-  assert.equal(gh.items.length, 2);
+  assert.equal(work(gh).length, 2);
+  assert.equal(gh.items.length, 4);
   assert.ok(first.created.includes('issue [PAY-01]') && !first.created.includes('issue [S-01]'));
   issueCalls = -100;
   const second = await initGithub(root, { owner: 'fernhill', exec: gh.exec });
   assert.equal(second.error, null);
   assert.deepEqual(second.created.filter((c) => c.startsWith('issue')), ['issue [S-01]', 'issue [S-02]']);
-  assert.equal(gh.issues.length, 4);
-  assert.equal(gh.items.length, 4);
+  assert.equal(gh.issues.length, 6);
+  assert.equal(gh.items.length, 6);
 });
 
 test('values missing on an existing item are filled, values already there are never overwritten', async () => {
@@ -470,12 +511,12 @@ test('an item is matched by issue number and repository when its URL differs', a
   const gh = fakeGh();
   await initGithub(root, { owner: 'fernhill', exec: gh.exec });
   const item = itemOf(gh, 'S-01');
-  item.content = { number: 3, repository: 'fernhill/fernhill-lending', type: 'Issue' };
+  item.content = { number: gh.issues.find((i) => i.title.startsWith('[S-01]')).number, repository: 'fernhill/fernhill-lending', type: 'Issue' };
   gh.calls.length = 0;
   const r = await initGithub(root, { owner: 'fernhill', exec: gh.exec });
   assert.equal(r.error, null);
   assert.deepEqual(writes(gh), []);
-  assert.equal(gh.items.length, 4);
+  assert.equal(gh.items.length, 6);
 });
 
 test('an unknown Lane value is skipped with a warning, the run goes on', async () => {
@@ -669,7 +710,7 @@ test('an existing issue the owner linked to a slice is added to the board, never
   gh.issues.push({ number: 7, title: 'Apply for a loan', url: 'https://github.com/fernhill/fernhill-lending/issues/7' });
   const r = await initGithub(root, { owner: 'fernhill', exec: gh.exec });
   assert.equal(r.error, null);
-  assert.deepEqual(gh.issues.map((i) => i.title), ['Apply for a loan', '[LOAN-01] Apply for a loan', '[PAY-01] Schedule a payout', '[S-02] Slice S-02']);
+  assert.deepEqual(gh.issues.map((i) => i.title), ['Apply for a loan', '[LOAN] Core', '[PAY] Payments', '[LOAN-01] Apply for a loan', '[PAY-01] Schedule a payout', '[S-02] Slice S-02']);
   assert.equal(gh.calls.some((c) => c[1] === 'issue' && c[2] === 'edit'), false, 'the title is not edited');
   const added = gh.calls.filter((c) => c[1] === 'project' && c[2] === 'item-add').map((c) => c[c.indexOf('--url') + 1]);
   assert.ok(added.includes('https://github.com/fernhill/fernhill-lending/issues/7'), 'the existing issue becomes the item of S-01');
@@ -767,7 +808,7 @@ test('workspace: the workspace repository is created with --private only, and th
   for (const flag of ['--public', '--internal']) assert.equal(creates(gh)[0].includes(flag), false);
   assert.equal(gh.projects[0].title, 'Fernhill Lending delivery', 'the board is named after the project, not after the workspace folder');
   const issueCalls = gh.calls.filter(([, a, b]) => a === 'issue' && b === 'create');
-  assert.equal(issueCalls.length, 4);
+  assert.equal(issueCalls.length, 6, 'two epics, two stories, two slices');
   for (const c of issueCalls) assert.equal(c[c.indexOf('--repo') + 1], 'fernhill/fernhill-lending-workspace');
   assert.deepEqual(stateOf(root).github, { owner: 'fernhill', repo: 'fernhill-lending-workspace', project_number: 1 });
   assert.equal(stateOf(root).repos.every((e) => e.remote === 'none'), true, 'no code repository is created unless the owner said yes to it');
@@ -1010,4 +1051,227 @@ test('workspace: an existing workspace repository with branches and no origin is
   const r = await initGithub(root, { owner: 'fernhill', exec: gh.exec });
   assert.match(r.error, /already.*branches/i);
   assert.equal(gh.gitCalls.some((c) => c[0] === 'push' || (c[0] === 'remote' && c[1] === 'add')), false);
+});
+
+// ---- epics ----
+
+const EPIC_PLAN = `---
+doc_id: PLAN
+project: "Fernhill Lending"
+---
+
+# Fernhill Lending, delivery plan
+
+## Increments
+
+| ID | Increment | Goal | Ends at |
+|---|---|---|---|
+| INC-1 | Desk loop | A loan from the desk | M1 |
+| INC-2 | Full shift | The whole shift | M2 |
+
+## Lots
+
+| Code | Lot | Goal |
+|---|---|---|
+| LOAN | Loans | Lend a tool and take it back |
+| PAY | Payments | Take the late fee |
+| FEE | Fees | Set the fee table |
+
+## Backlog
+
+| ID | Lot | Item | Size | Points | Depends on | Sprint | Phase | Status | Comment |
+|---|---|---|---|---|---|---|---|---|---|
+| LOAN-01 | Loans | Register a loan | M | 2 | | 1 | Build | todo | Loads the list |
+| PAY-01 | Payments | Take the fee | S | | LOAN-01 | 2 | Build | todo | |
+| FEE-01 | Fees | Fee table | S | 1 | | 2 | Build | todo | |
+
+### Story LOAN-01 Register a loan
+
+As a volunteer, I register a loan at the desk so that we know who has the tool.
+
+Acceptance criteria:
+- The loan shows the member and the tool.
+- A tool already out cannot be lent.
+
+## Sprints
+
+| Sprint | Start | End | Theme | Planned points | Capacity | Margin | Milestone |
+|---|---|---|---|---|---|---|---|
+| 1 | 2026-11-23 | 2026-12-04 | Desk loop | 2 | 8 | 6 | M1 |
+| 2 | 2026-12-07 | 2026-12-18 | Full shift | 2 | 8 | 6 | M2 |
+`;
+
+const scoped = (sheet, story) => sheet.replace('- LOAN-01 (the gist)', `- ${story} (the gist)`);
+
+function epicProject() {
+  const root = project({ plan: EPIC_PLAN });
+  writeFileSync(join(root, 'slices', 'S-02-payout.md'), scoped(SHEET('S-02', 'standard', 'S'), 'LOAN-01 and PAY-01'));
+  return root;
+}
+
+const epicOf = (gh, code) => gh.issues.find((i) => (i.body ?? '').includes(`<!-- recade:epic ${code} -->`));
+const issueOf = (gh, id) => gh.issues.find((i) => i.title.startsWith(`[${id}] `));
+const parentCode = (gh, id) => {
+  const parent = gh.issues.find((i) => i.url === issueOf(gh, id).parent);
+  return parent === undefined ? null : /recade:epic ([A-Z0-9]+)/.exec(parent.body)[1];
+};
+
+test('epics: init makes the label, one epic for each lot, the Epic field, and puts each story and slice under its epic, in that order', async () => {
+  const root = epicProject();
+  const gh = fakeGh();
+  const r = await initGithub(root, { owner: 'fernhill', exec: gh.exec });
+  assert.equal(r.error, null);
+  assert.deepEqual(gh.labels.map((l) => l.name), ['epic']);
+  assert.ok(gh.fields.some((f) => f.name === 'Epic'), 'the board has an Epic field');
+  assert.deepEqual(['LOAN', 'PAY', 'FEE'].map((c) => epicOf(gh, c).title), ['[LOAN] Loans', '[PAY] Payments', '[FEE] Fees']);
+  for (const c of ['LOAN', 'PAY', 'FEE']) assert.deepEqual(epicOf(gh, c).labels, [{ name: 'epic' }]);
+  const loan = epicOf(gh, 'LOAN').body;
+  assert.match(loan, /Goal: Lend a tool and take it back/);
+  assert.match(loan, /- LOAN-01 Register a loan/);
+  assert.match(loan, /Slices:\n- S-01 Slice S-01\n- S-02 Slice S-02/);
+  assert.match(epicOf(gh, 'PAY').body, /Also served by: S-02 \(under LOAN\)\./);
+  assert.match(issueOf(gh, 'S-02').body, /It also serves the lot PAY\./, 'a slice of two lots names the other one');
+  assert.deepEqual(['LOAN-01', 'PAY-01', 'FEE-01', 'S-01', 'S-02'].map((id) => parentCode(gh, id)), ['LOAN', 'PAY', 'FEE', 'LOAN', 'LOAN']);
+  assert.deepEqual(['LOAN-01', 'PAY-01', 'S-02'].map((id) => itemOf(gh, id).epic), ['LOAN', 'PAY', 'LOAN']);
+  assert.equal(gh.items.find((i) => i.title === '[PAY] Payments').epic, 'PAY', 'the epic is on the board too');
+  // The order: the label before the first epic, the epics before the stories, every link after both issues exist.
+  const at = (pred) => gh.calls.findIndex(pred);
+  const label = at(([, a, b]) => a === 'label' && b === 'create');
+  const firstEpic = at((c) => c[1] === 'issue' && c[2] === 'create' && c.includes('--label'));
+  const firstStory = at((c) => c[1] === 'issue' && c[2] === 'create' && !c.includes('--label'));
+  const lastCreate = gh.calls.findLastIndex((c) => c[1] === 'issue' && c[2] === 'create');
+  const links = gh.calls.map((c, i) => (c.includes('--method') ? i : -1)).filter((i) => i >= 0);
+  assert.ok(label < firstEpic && firstEpic < firstStory && lastCreate < links[0], 'label, epics, stories, then links');
+  assert.equal(links.length, 5);
+  const link = gh.calls[links[0]];
+  assert.deepEqual(link.slice(1, 5), ['api', '--method', 'POST', `repos/fernhill/fernhill-lending/issues/${epicOf(gh, 'LOAN').number}/sub_issues`]);
+  assert.match(link[6], /^sub_issue_id=\d+$/);
+});
+
+test('epics: a story issue carries what the PLAN says of it, and its board fields come from it', async () => {
+  const root = epicProject();
+  const gh = fakeGh();
+  await initGithub(root, { owner: 'fernhill', exec: gh.exec });
+  const body = issueOf(gh, 'LOAN-01').body;
+  assert.match(body, /^<!-- recade:story LOAN-01 -->\nBacklog story LOAN-01 of docs\/PLAN\.md, in the lot LOAN \(Loans\)\./);
+  assert.match(body, /As a volunteer, I register a loan at the desk/);
+  assert.match(body, /Acceptance criteria:\n- The loan shows the member and the tool\.\n- A tool already out cannot be lent\./);
+  assert.match(body, /- Estimate: M, 2 points/);
+  assert.match(body, /- Increment: INC-1/);
+  assert.match(body, /- Note: Loads the list/);
+  assert.match(issueOf(gh, 'PAY-01').body, /- Depends on: LOAN-01/);
+  assert.match(issueOf(gh, 'PAY-01').body, /- Increment: INC-2/, 'the increment that ends at the milestone of its sprint');
+  assert.deepEqual({ points: itemOf(gh, 'PAY-01').points, increment: itemOf(gh, 'PAY-01').increment }, { points: 1, increment: 'INC-2' });
+});
+
+test('epics: a second init creates nothing, edits nothing and links nothing', async () => {
+  const root = epicProject();
+  const gh = fakeGh();
+  await initGithub(root, { owner: 'fernhill', exec: gh.exec });
+  gh.calls.length = 0;
+  const r = await initGithub(root, { owner: 'fernhill', exec: gh.exec });
+  assert.equal(r.error, null);
+  assert.deepEqual(r.created, []);
+  assert.deepEqual(writes(gh), []);
+  assert.equal(gh.issues.length, 8);
+});
+
+test('epics: sync follows a renamed lot, a moved slice, a new lot and a removed lot, and a second sync does nothing', async () => {
+  const root = epicProject();
+  const gh = fakeGh();
+  await initGithub(root, { owner: 'fernhill', exec: gh.exec });
+  const plan = EPIC_PLAN
+    .replace('| LOAN | Loans | Lend a tool and take it back |', '| LOAN | Lending | Lend a tool for 7 days |')
+    .replace('| FEE | Fees | Set the fee table |\n', '| REP | Reports | Show what is late |\n')
+    .replace('| FEE-01 | Fees | Fee table | S | 1 | | 2 | Build | todo | |', '| REP-01 | Reports | Overdue report | M | 2 | | 2 | Build | todo | |')
+    .replace('| PAY-01 | Payments | Take the fee | S | |', '| PAY-01 | Payments | Take the late fee | S | 3 |');
+  writeFileSync(join(root, 'docs', 'PLAN.md'), plan);
+  writeFileSync(join(root, 'slices', 'S-02-payout.md'), scoped(SHEET('S-02', 'standard', 'S'), 'PAY-01'));
+  gh.calls.length = 0;
+  const r = await initGithub(root, { owner: 'fernhill', exec: gh.exec, sync: true });
+  assert.equal(r.error, null);
+  assert.equal(gh.calls.some(([, a, b]) => (a === 'repo' && b === 'create') || (a === 'project' && b === 'create')), false, 'a sync never creates a repository or a board');
+  // Renamed lot: the same epic, a new title and goal.
+  assert.equal(epicOf(gh, 'LOAN').title, '[LOAN] Lending');
+  assert.match(epicOf(gh, 'LOAN').body, /Goal: Lend a tool for 7 days/);
+  assert.doesNotMatch(epicOf(gh, 'LOAN').body, /S-02/, 'the moved slice left the list of LOAN');
+  // Moved slice: under the new epic, moved with replace_parent, its Epic field follows, its body no longer names another lot.
+  assert.equal(parentCode(gh, 'S-02'), 'PAY');
+  const move = gh.calls.find((c) => c.includes('--method') && c.includes('replace_parent=true'));
+  assert.ok(move !== undefined && move[4] === `repos/fernhill/fernhill-lending/issues/${epicOf(gh, 'PAY').number}/sub_issues`);
+  assert.equal(itemOf(gh, 'S-02').epic, 'PAY');
+  assert.equal(issueOf(gh, 'S-02').body, 'Slice sheet slices/S-02-payout.md.');
+  // A changed story: title, body and points follow the PLAN.
+  assert.equal(issueOf(gh, 'PAY-01').title, '[PAY-01] Take the late fee');
+  assert.match(issueOf(gh, 'PAY-01').body, /- Estimate: S, 3 points/);
+  assert.equal(itemOf(gh, 'PAY-01').points, 3);
+  // New lot: its epic, with its story under it.
+  assert.equal(epicOf(gh, 'REP').title, '[REP] Reports');
+  assert.equal(parentCode(gh, 'REP-01'), 'REP');
+  // Removed lot: closed with a comment, never deleted.
+  const fee = epicOf(gh, 'FEE');
+  assert.equal(fee.state, 'CLOSED');
+  assert.match(fee.comments[0], /The lot FEE is no longer in docs\/PLAN\.md/);
+  assert.equal(gh.calls.filter(([, a, b]) => a === 'issue' && b === 'close').length, 1);
+  assert.equal(gh.issues.filter((i) => (i.body ?? '').includes('recade:epic')).length, 4, 'no duplicate epic');
+  gh.calls.length = 0;
+  const again = await initGithub(root, { owner: 'fernhill', exec: gh.exec, sync: true });
+  assert.deepEqual(again.created, []);
+  assert.deepEqual(writes(gh), []);
+});
+
+test('epics: sync never edits an issue Recade did not write, and a story issue is found by its marker after a hand rename', async () => {
+  const root = epicProject();
+  const gh = fakeGh();
+  await initGithub(root, { owner: 'fernhill', exec: gh.exec });
+  // The owner renames the story issue: the marker still finds it, and the title comes back from the PLAN.
+  issueOf(gh, 'LOAN-01').title = 'Loans at the desk';
+  // An issue of the owner with an [ID] title and its own body is matched but never edited.
+  const slice = issueOf(gh, 'S-01');
+  slice.body = 'Our own notes';
+  slice.title = '[S-01] Our title';
+  gh.calls.length = 0;
+  const r = await initGithub(root, { owner: 'fernhill', exec: gh.exec, sync: true });
+  assert.equal(r.error, null);
+  const edits = gh.calls.filter(([, a, b]) => a === 'issue' && b === 'edit');
+  assert.equal(edits.length, 1);
+  assert.equal(issueOf(gh, 'LOAN-01').title, '[LOAN-01] Register a loan');
+  assert.equal(slice.body, 'Our own notes');
+  assert.equal(gh.issues.filter((i) => i.title.startsWith('[LOAN-01]')).length, 1);
+});
+
+test('epics: a dry run plans the label, the epics and the links and writes nothing', async () => {
+  const root = epicProject();
+  const gh = fakeGh();
+  const r = await initGithub(root, { owner: 'fernhill', exec: gh.exec, dryRun: true });
+  assert.equal(r.error, null);
+  assert.deepEqual(writes(gh), []);
+  const text = r.planned.join('\n');
+  assert.match(text, /gh label create epic --repo fernhill\/fernhill-lending/);
+  assert.match(text, /gh issue create --repo fernhill\/fernhill-lending --title '\[LOAN\] Loans' --body/);
+  assert.match(text, /gh api --method POST 'repos\/fernhill\/fernhill-lending\/issues\/<epic LOAN>\/sub_issues' -F 'sub_issue_id=<id of \[S-01\]>'/);
+});
+
+test('recade github sync: needs a recorded board, keeps it in line, and skips a project whose forge is not GitHub', async () => {
+  const root = epicProject();
+  const gh = fakeGh();
+  const before = cliIo(root, { exec: gh.exec });
+  assert.equal(await run(['github', 'sync', '--project', root], before.io), 1);
+  assert.match(before.err.join(''), /Run recade github init first/);
+  assert.equal(await run(['github', 'init', '--owner', 'fernhill', '--project', root], cliIo(root, { exec: gh.exec }).io), 0);
+  writeFileSync(join(root, 'docs', 'PLAN.md'), EPIC_PLAN.replace('| LOAN | Loans |', '| LOAN | Lending |'));
+  const dry = cliIo(root, { exec: gh.exec });
+  gh.calls.length = 0;
+  assert.equal(await run(['github', 'sync', '--dry-run', '--project', root], dry.io), 0, dry.err.join(''));
+  assert.match(dry.out.join(''), /gh issue edit \d+ --repo fernhill\/fernhill-lending --title '\[LOAN\] Lending'/);
+  assert.deepEqual(writes(gh), []);
+  const wet = cliIo(root, { exec: gh.exec });
+  assert.equal(await run(['github', 'sync', '--project', root], wet.io), 0, wet.err.join(''));
+  assert.match(wet.out.join(''), /Done: update epic LOAN/);
+  assert.equal(epicOf(gh, 'LOAN').title, '[LOAN] Lending');
+  const state = stateOf(root);
+  writeFileSync(join(root, 'recade', 'state.yaml'), stringify({ ...state, forge: 'local' }));
+  const local = cliIo(root, { exec: async () => assert.fail('no gh call for a local forge') });
+  assert.equal(await run(['github', 'sync', '--project', root], local.io), 0);
+  assert.match(local.out.join(''), /does not use GitHub/);
 });

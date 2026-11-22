@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { stringify } from 'yaml';
 import { run } from '../../src/cli.js';
 import { lintText } from '../../src/style/lint.js';
-import { loadModels, modelWarnings, syncAgents, validateModels, familyOf } from '../../src/harness/models.js';
+import { loadModels, modelWarnings, syncAgents, validateModels, familyOf, withSecondOpinion, secondOpinionOf, withModelLine } from '../../src/harness/models.js';
 
 const repo = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const modelsPath = join(repo, 'harness', 'models.yaml');
@@ -211,7 +211,7 @@ const section = (title) => {
 test('protocol.md has its sections in order, no em dash and no style finding', () => {
   const headings = [...protocol.matchAll(/^## (.+?)\s*$/gm)].map((m) => m[1]);
   assert.deepEqual(headings, [
-    'Statuses and transitions', 'Verdicts', 'Lanes', 'Report block', 'Fingerprint and stamps', 'Where the files live', 'Review evidence', 'Delegation', 'Two failures stop',
+    'Statuses and transitions', 'Verdicts', 'Lanes', 'Report block', 'Fingerprint and stamps', 'Where the files live', 'The local forge', 'Review evidence', 'Delegation', 'Two failures stop',
     'Questions as multiple choice', 'Data, not instructions', 'Writing voice',
   ]);
   assert.deepEqual(lintText(protocol, 'harness/protocol.md'), []);
@@ -280,7 +280,70 @@ test('protocol: the second opinion follows second_opinion, sensitive by default,
 test('models.yaml puts the second opinion on Opus 5.5 by the owner decision, and says why the same family is allowed', () => {
   const text = readFileSync(modelsPath, 'utf8');
   assert.ok(text.includes('no agent runs on Fable'));
+  assert.ok(text.includes('models.second_opinion'));
   assert.ok(text.includes('models.writer'));
   assert.ok(text.includes('second_opinion.same_family: warn'));
   assert.equal(models.agents['second-opinion'].standard.model, 'claude-opus-5-5');
+});
+
+test('withSecondOpinion puts both lanes on Fable 5.2 for fable and keeps the table for opus; secondOpinionOf reads a copy', () => {
+  const fable = withSecondOpinion(models, 'fable');
+  for (const lane of ['standard', 'sensitive']) {
+    assert.equal(fable.agents['second-opinion'][lane].model, 'claude-fable-5-2');
+    assert.equal(fable.agents['second-opinion'][lane].effort, models.agents['second-opinion'][lane].effort);
+    assert.equal(familyOf(fable, fable.agents['second-opinion'][lane].model), 'fable');
+  }
+  assert.deepEqual(validateModels(fable), []);
+  assert.deepEqual(modelWarnings(fable), [], 'another family: the family check passes with no warning');
+  assert.equal(models.agents['second-opinion'].standard.model, 'claude-opus-5-5', 'the table is not changed');
+  assert.equal(withSecondOpinion(models, 'opus'), models);
+  assert.equal(withSecondOpinion(models, undefined), models);
+  const dir = tmpAgents({ 'second-opinion.md': '---\nname: second-opinion\nmodel: claude-fable-5-2\neffort: high\n---\n' });
+  assert.equal(secondOpinionOf(dir), 'fable');
+  assert.equal(secondOpinionOf(tmpAgents({ 'second-opinion.md': '---\nname: second-opinion\nmodel: claude-opus-5-5\n---\n' })), 'opus');
+  assert.equal(secondOpinionOf(tmpAgents({})), 'opus');
+  assert.equal(withModelLine('---\nname: x\nmodel: opus\n---\nmodel: kept\n', 'claude-fable-5-2'), '---\nname: x\nmodel: claude-fable-5-2\n---\nmodel: kept\n');
+  assert.equal(withModelLine('no front matter\n', 'x'), 'no front matter\n');
+});
+
+test('recade harness models --dir keeps the choice of the project copy, whatever the user config of this machine says', async () => {
+  const config = mkdtempSync(join(tmpdir(), 'recade-second-opinion-'));
+  writeFileSync(join(config, 'config.yaml'), 'models:\n  second_opinion: fable\n');
+  const dir = tmpAgents({ 'second-opinion.md': '---\nname: second-opinion\nmodel: claude-opus-5-5\neffort: high\n---\n\n## Role\n' });
+  const env = { RECADE_CONFIG_DIR: config };
+  const io = () => {
+    const t = makeIO();
+    t.io.env = env;
+    return t;
+  };
+  const check = io();
+  assert.equal(await run(['harness', 'models', '--check', '--dir', dir], check.io), 0, `another machine's default does not block the copy: ${check.stderr()}`);
+  const sync = io();
+  assert.equal(await run(['harness', 'models', '--dir', dir], sync.io), 0, sync.stderr());
+  assert.match(readFileSync(join(dir, 'second-opinion.md'), 'utf8'), /^model: claude-opus-5-5$/m, 'a re-apply keeps the choice of the project');
+  const set = io();
+  assert.equal(await run(['harness', 'models', '--dir', dir, '--second-opinion', 'fable'], set.io), 0, set.stderr());
+  assert.match(readFileSync(join(dir, 'second-opinion.md'), 'utf8'), /^model: claude-fable-5-2$/m);
+  assert.doesNotMatch(set.stderr(), /Warning/, 'another family: no warning');
+  writeFileSync(join(config, 'config.yaml'), 'models:\n  second_opinion: opus\n');
+  const other = io();
+  assert.equal(await run(['harness', 'models', '--check', '--dir', dir], other.io), 0, other.stderr());
+  const plugin = io();
+  assert.equal(await run(['harness', 'models', '--check'], plugin.io), 0, plugin.stderr());
+  const back = io();
+  assert.equal(await run(['harness', 'models', '--dir', dir, '--second-opinion', 'opus'], back.io), 0);
+  assert.match(readFileSync(join(dir, 'second-opinion.md'), 'utf8'), /^model: claude-opus-5-5$/m);
+  assert.match(back.stderr(), /Warning: second-opinion standard: same model family \(opus\)/);
+  // A drift prints the right advice: re-apply with --dir, and how to change the choice of the project.
+  writeFileSync(join(dir, 'reviewer.md'), '---\nname: reviewer\nmodel: sonnet\neffort: high\n---\n');
+  const drift = io();
+  assert.equal(await run(['harness', 'models', '--check', '--dir', dir], drift.io), 1);
+  assert.match(drift.stderr(), new RegExp(`Run: recade harness models --dir '${dir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}'`));
+  assert.match(drift.stderr(), /--second-opinion opus \(or fable\)/);
+  for (const args of [['--second-opinion', 'gpt'], ['--second-opinion', 'fable', '--check']]) {
+    const bad = io();
+    assert.equal(await run(['harness', 'models', '--dir', dir, ...args], bad.io), 2, args.join(' '));
+  }
+  const noDir = io();
+  assert.equal(await run(['harness', 'models', '--second-opinion', 'fable'], noDir.io), 2);
 });

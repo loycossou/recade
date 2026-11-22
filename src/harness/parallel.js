@@ -5,6 +5,7 @@ import { frontMatterLength } from '../frontmatter-lines.js';
 import { loadState } from '../state.js';
 import { checkSlices } from '../project/slices.js';
 import { registryNames, reposOf, touchProblems, touchRepo, touchesOverlap } from '../project/touches.js';
+import { worktreeRel } from '../workspace/worktrees.js';
 
 /**
  * @typedef {{repo: string, path: string, branch: string}} Worktree
@@ -50,7 +51,7 @@ function readProject(root) {
 function worktreesOf(id, front, registry) {
   const branch = front.branch ?? `slice/${id.toLowerCase()}`;
   // only registered repositories get a worktree, whatever the touches say
-  return reposOf(front.touches, registry).filter((repo) => registry.includes(repo)).map((repo) => ({ repo, path: `repos/${repo}/.claude/worktrees/${id}`, branch }));
+  return reposOf(front.touches, registry).filter((repo) => registry.includes(repo)).map((repo) => ({ repo, path: worktreeRel(repo, id), branch }));
 }
 
 /** Do two slices share a hotspot repository? A hotspot whose repository is unknown clashes with every other one. */

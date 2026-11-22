@@ -103,8 +103,8 @@ const statusOf = (root, id) => new RegExp(`^\\| ${id} \\|.*$`, 'm').exec(readFil
  * A fake `gh` with a board, issues, items and pull requests. Field and option ids are made up, so the code
  * can only work when it reads them. `prs` maps a branch to its pull request. Every call is recorded.
  */
-function fakeBoard({ prs = {}, items = {}, failOn = () => false } = {}) {
-  const gh = { calls: [], comments: [], edits: [], items: [], issues: [] };
+function fakeBoard({ prs = {}, items = {}, failOn = () => false, epics = {} } = {}) {
+  const gh = { calls: [], comments: [], edits: [], items: [], issues: [], states: [] };
   const options = ['Backlog', 'Ready', 'In progress', 'In review', 'Done'].map((name, i) => ({ id: `opt_${100 + i}_${name.length}`, name }));
   gh.fields = [
     { id: 'PVTSSF_status_xyz', name: 'Status', type: 'ProjectV2SingleSelectField', options },
@@ -116,6 +116,11 @@ function fakeBoard({ prs = {}, items = {}, failOn = () => false } = {}) {
     const issue = { number: n, title: `[${id}] ${title}`, url: `https://github.com/fernhill/fernhill-lending/issues/${n}` };
     gh.issues.push(issue);
     if (items[id] !== null) gh.items.push({ id: `PVTI_${id}`, title: issue.title, status: items[id] ?? 'In progress', content: { url: issue.url, number: n, type: 'Issue' } });
+  }
+  // The epics: `{LOAN: 'OPEN'}` adds the epic issue of the lot LOAN, with its marker and that state.
+  for (const [code, state] of Object.entries(epics)) {
+    n++;
+    gh.issues.push({ number: n, title: `[${code}] Lot ${code}`, url: `https://github.com/fernhill/fernhill-lending/issues/${n}`, state, body: `<!-- recade:epic ${code} -->\nEpic of the lot ${code}.` });
   }
   gh.exec = (cmd) => {
     assert.equal(cmd[0], 'gh', `unexpected command ${cmd.join(' ')}`);
@@ -140,6 +145,12 @@ function fakeBoard({ prs = {}, items = {}, failOn = () => false } = {}) {
       gh.edits.push([item.title.slice(1, item.title.indexOf(']')), item.status, option.name]);
       item.status = option.name;
       return ok({});
+    }
+    if (a === 'issue' && (b === 'close' || b === 'reopen')) {
+      const issue = gh.issues.find((i) => String(i.number) === args[2]);
+      issue.state = b === 'close' ? 'CLOSED' : 'OPEN';
+      gh.states.push([issue.title.slice(1, issue.title.indexOf(']')), b, ...(b === 'close' ? [flag(args, '--reason')] : [])]);
+      return ok('');
     }
     if (a === 'issue' && b === 'comment') {
       gh.comments.push({ number: Number(args[2]), repo: flag(args, '--repo'), body: flag(args, '--body') });
@@ -286,6 +297,35 @@ test('reconcile: a failing board read stops with one error and writes nothing', 
   assert.equal(result.errors.length, 1);
   assert.match(result.errors[0], /field-list/);
   assert.equal(statusOf(root, 'S-01'), 'ready-to-merge');
+});
+
+test('reconcile: the epic of a lot closes when every slice that serves it is done, with a comment', () => {
+  const root = project({ 'S-01': { status: 'ready-to-merge', story: 'LOAN-01' }, 'S-02': { status: 'implementation', story: 'PAY-01' } });
+  const gh = fakeBoard({ prs: { 'slice/s-01-x': merged(12), 'slice/s-02-x': open(13) }, items: { 'S-01': 'In review', 'LOAN-01': 'In progress', 'S-02': 'In progress', 'PAY-01': 'In progress' }, epics: { LOAN: 'OPEN', PAY: 'OPEN' } });
+  const dry = reconcile(root, { exec: gh.exec });
+  assert.deepEqual(dry.epics.map((e) => [e.code, e.action]), [['LOAN', 'close']], 'the lot PAY still has a slice in work');
+  assert.match(formatReconcile(dry), /Epic LOAN: close, every slice of the lot is done \(S-01\)/);
+  assert.deepEqual(gh.states, [], 'a dry run closes nothing');
+  const result = reconcile(root, { exec: gh.exec, apply: true });
+  assert.deepEqual(result.errors, []);
+  assert.deepEqual(gh.states, [['LOAN', 'close', 'completed']]);
+  const epic = gh.issues.find((i) => i.title.startsWith('[LOAN]'));
+  assert.ok(gh.comments.some((c) => c.number === epic.number && /epic LOAN is closed/.test(c.body)));
+  // Closed once: the next run sees it closed and does nothing more.
+  const again = reconcile(root, { exec: gh.exec, apply: true });
+  assert.deepEqual(again.epics, []);
+  assert.deepEqual(gh.states, [['LOAN', 'close', 'completed']]);
+});
+
+test('reconcile: a closed epic reopens when a slice that serves its lot is not done, and an issue without the marker is never an epic', () => {
+  const root = project({ 'S-01': { status: 'done', story: 'LOAN-01' }, 'S-02': { status: 'todo', story: 'LOAN-01, PAY-01' } });
+  const gh = fakeBoard({ prs: { 'slice/s-01-x': merged(12) }, items: { 'S-01': 'Done', 'LOAN-01': 'Done', 'S-02': 'Backlog', 'PAY-01': 'Backlog' }, epics: { LOAN: 'CLOSED' } });
+  // An issue of the owner that looks like an epic but has no marker.
+  gh.issues.push({ number: 40, title: '[PAY] Payments', url: 'https://github.com/fernhill/fernhill-lending/issues/40', state: 'CLOSED', body: 'Our own epic' });
+  const result = reconcile(root, { exec: gh.exec, apply: true });
+  assert.deepEqual(result.errors, []);
+  assert.deepEqual(result.epics.map((e) => [e.code, e.action, e.reason]), [['LOAN', 'reopen', 'S-02 is not done']]);
+  assert.deepEqual(gh.states, [['LOAN', 'reopen']]);
 });
 
 test('reconcile: no recorded board is an error', () => {
@@ -674,7 +714,7 @@ test('/board: Step 0 finds the plugin root, and the CLI is called only through i
     assert.ok(s.includes(part), part);
   }
   for (const m of boardDoc.matchAll(/`recade ([a-z-]+)[^`]*`/g)) {
-    if (m[1] !== '<sub>') assert.ok(['state', 'board', 'github', 'version', 'workspace', 'repo'].includes(m[1]), m[1]);
+    if (m[1] !== '<sub>') assert.ok(['state', 'board', 'github', 'version', 'workspace', 'repo', 'slices'].includes(m[1]), m[1]);
   }
 });
 

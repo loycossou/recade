@@ -37,6 +37,14 @@ The headings and the column titles stay as written here: the render shows them i
 |---|---|---|---|
 | INC-1 | Walking skeleton | A thin slice runs from screen to database in a preview environment | M1 |
 
+## Lots
+
+<!-- replace the example rows. One row for each lot code of recade/state.yaml. The name is the one of the Lot column of the Backlog. Each lot becomes an epic on the GitHub board, with this goal. -->
+
+| Code | Lot | Goal |
+|---|---|---|
+| LOT | Core | Example goal of the lot, in one sentence |
+
 ## Summary
 
 | Item | Value |
@@ -54,6 +62,16 @@ The headings and the column titles stay as written here: the render shows them i
 | ID | Lot | Item | Size | Points | Depends on | Sprint | Phase | Status | Comment |
 |---|---|---|---|---|---|---|---|---|---|
 | LOT-01 | Core | Example story | M | 2 | | 1 | Build | todo | |
+
+<!-- Optional, one block for each story that needs more than its row: a ### heading with the word Story, the ID and the item, the user story in a sentence, then its acceptance criteria. The GitHub issue of the story carries it. -->
+
+### Story LOT-01 Example story
+
+As a user, I do the example task so that I get the example result.
+
+Acceptance criteria:
+- Example criterion one.
+- Example criterion two.
 
 ## Sprints
 

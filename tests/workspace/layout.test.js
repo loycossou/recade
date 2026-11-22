@@ -28,8 +28,8 @@ async function withRepo(parent = tmp(), name = 'api') {
   return { dir, repo, parent };
 }
 
-test('constants: the tracked tree, the four ignored entries and the link file', () => {
-  assert.deepEqual(IGNORED, ['repos/', 'artifacts/', 'tmp/', '.recade/']);
+test('constants: the tracked tree, the five ignored entries and the link file', () => {
+  assert.deepEqual(IGNORED, ['repos/', 'worktrees/', 'artifacts/', 'tmp/', '.recade/']);
   assert.equal(LINK_FILE, '.recade/workspace');
   for (const d of ['recade', 'intake', 'team', 'design', 'decisions', 'retros', 'docs/figures', 'docs/deliverables', 'docs/source', 'slices']) {
     assert.ok(WORKSPACE_TREE.some((t) => t === d || t.startsWith(`${d}/`)), d);

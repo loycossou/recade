@@ -7,32 +7,39 @@ import { writeOwnFile } from '../project/adopt.js';
  * The harness installs at two places: the workspace (the home of the project) and each code repository. This says
  * which files of the plugin template go where. Nothing here touches the disk, but the per-repository settings below.
  *
- * - `workspace`: the project commands, the agents that write documents, the guard, the git hooks of the documents
- *   (style, ID index) and the CI of the documents.
- * - `code`: the slice commands, every agent, the guard, the git hooks of the code (style of the staged files, gates)
- *   and the CI of the code.
+ * - `workspace`: every command and every agent, the protocol, the guard, the git hooks of the documents (style, ID
+ *   index) and the CI of the documents. Every session starts at the root of the workspace, so this is the one entry
+ *   point: `/slice <S-nn>` is typed there, and the owner never chooses a folder.
+ * - `code`: what belongs to the code itself: the git hooks of the code (style of the staged files, gates), its CI, the
+ *   guard (a session opened by hand in the repository stays held) and one pointer command, `/slice`, that tells the
+ *   owner to work from the workspace. No agent, no protocol and no second copy of a command.
  *
- * An install with no target (a project that is both, as before the workspace) takes the union of the two.
+ * An install with no target (a project that is both, as before the workspace) takes the whole harness.
  */
 
 export const TARGET_NAMES = Object.freeze(['workspace', 'code']);
 
+/** The pointer command of a code repository, in `harness/pointer/`. It is installed as `.claude/commands/<name>.md`. */
+export const POINTER_COMMANDS = Object.freeze(['slice']);
+/** The line that tells a pointer command from the real command of the same name. */
+export const POINTER_MARK = '<!-- recade-pointer -->';
+
 export const TARGETS = Object.freeze({
   workspace: Object.freeze({
-    commands: Object.freeze(['status', 'board', 'parallel', 'merge-order', 'retro', 'slice-write', 'slice-check', 'decision', 'inventory', 'design', 'amend']),
-    agents: Object.freeze(['board-keeper', 'merge-keeper', 'spec-writer', 'ux-designer', 'ui-designer', 'explorer', 'doc-writer', 'release-manager']),
+    /** Every command of `harness/commands/` (null: all of them, a test checks the folder). */
+    commands: null,
+    /** Every agent of `harness/agents/`. */
+    agents: null,
     /** The template of the pre-commit hook, in `harness/githooks/`. It is installed as `.githooks/pre-commit`. */
     preCommit: 'pre-commit-workspace',
+    protocol: true,
   }),
   code: Object.freeze({
-    commands: Object.freeze(['slice', 'review', 'second-opinion', 'explain']),
-    /** Every agent of the harness (a test checks the list against `harness/agents/`). */
-    agents: Object.freeze([
-      'board-keeper', 'code-teacher', 'design-reviewer', 'devops', 'doc-writer', 'domain-reviewer', 'explorer',
-      'implementer', 'implementer-critical', 'merge-keeper', 'product-reviewer', 'release-manager', 'reviewer', 'second-opinion',
-      'security-reviewer', 'spec-writer', 'test-engineer', 'test-runner', 'ui-designer', 'ux-designer',
-    ]),
+    commands: Object.freeze([]),
+    agents: Object.freeze([]),
+    pointers: POINTER_COMMANDS,
     preCommit: 'pre-commit',
+    protocol: false,
   }),
 });
 
@@ -43,13 +50,13 @@ export const WORKSPACE_WORKFLOW = '.github/workflows/workspace.yml';
  * The files of the template one target installs, from the lists of the plugin folder.
  * @param {string|undefined} target `workspace`, `code`, or undefined for the whole harness
  * @param {{commands: string[], agents: string[]}} available the names found in `harness/commands/` and `harness/agents/`
- * @returns {{commands: string[], agents: string[], preCommit: string}}
+ * @returns {{commands: string[], agents: string[], pointers: string[], protocol: boolean, preCommit: string}}
  */
 export function selectFor(target, available) {
-  if (target === undefined) return { commands: available.commands, agents: available.agents, preCommit: TARGETS.code.preCommit };
+  if (target === undefined) return { commands: available.commands, agents: available.agents, pointers: [], protocol: true, preCommit: TARGETS.code.preCommit };
   const t = TARGETS[target];
-  const keep = (names, wanted) => names.filter((n) => wanted.includes(n));
-  return { commands: keep(available.commands, t.commands), agents: keep(available.agents, t.agents), preCommit: t.preCommit };
+  const keep = (names, wanted) => (wanted === null ? [...names] : names.filter((n) => wanted.includes(n)));
+  return { commands: keep(available.commands, t.commands), agents: keep(available.agents, t.agents), pointers: [...(t.pointers ?? [])], protocol: t.protocol, preCommit: t.preCommit };
 }
 
 /** The template of the pre-commit hook for a target (the whole harness takes the code one). */

@@ -20,6 +20,14 @@ const REQUIRED = [
   { dir: 'commands', except: ['help'], blocks: ['cli-plugin'] },
   // The commands that talk to the owner about a project. help, languages, setup and start have no project yet.
   { dir: 'commands', except: ['help', 'languages', 'setup', 'start'], blocks: ['id-gist'] },
+  // The phase commands show the cost line in their first message.
+  { dir: 'commands', only: ['new', 'team', 'docs', 'bible', 'slices', 'harness'], blocks: ['cost-line'] },
+  // Every command that asks the owner something asks a closed choice. help, setup and status ask nothing.
+  { dir: 'commands', except: ['help', 'setup', 'status'], blocks: ['owner-choice'] },
+  // The commands whose progress lines say how long a step usually takes.
+  { dir: 'commands', only: ['team', 'docs', 'bible', 'slices'], blocks: ['progress-time'] },
+  // The offer to connect a design reference server: once at start, and before the art direction.
+  { dir: 'commands', only: ['start', 'docs'], blocks: ['design-servers'] },
   { dir: 'harness/commands', blocks: ['cli-harness', 'plugin-root-file', 'harness-plugin-root'] },
   // The harness amend command runs the amend flow of the plugin, which holds these blocks.
   { dir: 'harness/commands', except: ['amend'], blocks: ['id-gist', 'no-project'] },

@@ -22,7 +22,7 @@ Beyond a cap, split the slice. Aim for 3 to 5 slices that can run at the same ti
 ## Cutting rules
 
 1. **S-00 inventory** when code already exists (adopt mode, or code the owner brought). It reads the code and writes down what is there. It writes no feature, so its header says `lane: no-code`: `/inventory` closes it from `todo` to `done`, a move only that lane allows.
-2. **Walking skeleton first.** The first slices cross the whole chain: API, data, a minimal screen in the chosen art direction, CI, a deployment to a preview environment. Widen only after that. In the short track (`track: short` in `recade/state.yaml`), S-01 is that skeleton alone: the thinnest end-to-end path through the real stack, deployed where the owner can see it, with at most one business rule. Its header says `skeleton: true`, and `recade slices check` warns when it does not.
+2. **Walking skeleton first.** The first slices cross the whole chain: API, data, a minimal screen in the chosen art direction, CI, a deployment to a preview environment. Widen only after that. In the short track (`track: short` in `recade/state.yaml`), S-01 is that skeleton alone: the thinnest end-to-end path through the real stack, deployed where the owner can see it, with at most one business rule. Its header says `skeleton: true`, and `recade slices check` warns when it does not. The first increment of the short track holds S-01 plus at most 5 slices, 6 sheets in all (S-00 aside). The rest of the PLAN goes to `slices/BACKLOG.md` (see "The backlog of the short track").
 3. **Contract first.** No integration between two modules without a versioned contract. The slice that defines the contract comes before the slices that use it, and they depend on it.
 4. **One module, one agent that writes.** Slices that can run at the same time have disjoint `touches:`.
 5. **Every story in exactly one slice.** The Scope of the slice cites the story IDs of the PLAN Backlog, each with its gist.
@@ -67,7 +67,8 @@ Run it after every change. A line with `error` must be fixed.
 | `slice-overlap` | Two slices with no dependency path between them, in either direction, touch overlapping paths. Fix it by making one depend on the other, or by narrowing `touches:`. |
 | `slice-hotspot` (warning) | A slice touches a hotspot of `recade/state.yaml` (one warning for each slice and hotspot). Slices that touch the same hotspot run one after the other: chain them with `depends_on`. |
 | `slice-skeleton` (warning) | In the short track, S-01 is missing or its header has no `skeleton: true`. |
-| `story-uncovered`, `story-twice`, `plan-no-backlog`, `plan-missing` | Each story of the PLAN Backlog is cited in the Scope of exactly one slice. A PLAN with no Backlog section cannot be checked. |
+| `slice-cap` (warning) | In the short track, more than 6 sheets are open (not `done` in `slices/STATUS.md`), S-00 aside. Move the later slices to `slices/BACKLOG.md`. |
+| `story-uncovered`, `story-twice`, `plan-no-backlog`, `plan-missing` | Each story of the PLAN Backlog is cited in the Scope of exactly one slice. In the short track, a row of `slices/BACKLOG.md` covers its stories too, and a story in a sheet and in the backlog is `story-twice`. A PLAN with no Backlog section cannot be checked. |
 
 How the counts are read, so that a sheet counts true:
 
@@ -76,11 +77,27 @@ How the counts are read, so that a sheet counts true:
 - Screens: one list item for each screen under `## Design`. "None." counts for zero.
 - Stories: the story IDs found under `## Scope`. An ID cited in another section does not cover a story.
 
+### The backlog of the short track
+
+The short track cuts the whole PLAN but writes sheets for the first increment only. The later slices wait in `slices/BACKLOG.md`, written by the slicer:
+
+```
+# Slice backlog
+
+These slices are cut into sheets later, one increment at a time, by `/recade:slices`.
+
+| Slice | Gist | Stories |
+|---|---|---|
+| plot-waitlist | members join the waiting list of a plot | GARD-07 (join the waiting list), GARD-08 (offer a free plot) |
+```
+
+One row for each later slice, in the order they should come. The check reads the first table with a `Stories` column. `recade slices status` adds one line under `## Backlog` of `slices/STATUS.md` with the number of rows. When the first increment is done, or nearly, `/recade:slices` cuts the next one: the slicer, at the stage `next`, turns the first rows into sheets (6 open sheets at most), numbered after the last id, and removes those rows.
+
 ### Scope globs
 
 `touches:` holds path globs. They are compared one path segment at a time. Two literal segments must be equal. A segment with a wildcard (`*`, `?`, `[` or `{`) matches anything, and so does everything after it. A path that ends first sits above the other, so the two overlap. `src/api/**` and `src/api/users/**` overlap. `src/api/users/**` and `src/api/orders/**` do not. `src/api` and `src/apiary/**` do not. A glob that starts with a wildcard (`**/*.md`) overlaps everything, so avoid it. The check is deliberately simple and errs on the side of caution: when it flags two slices that cannot really collide, narrow the globs.
 
-Each glob starts with the name of the code repository it is in: `api:src/orders/**`, `web:src/pages/orders/**`. The prefix is the text before the first colon, when that text is a lower-case kebab name (letters, digits and single hyphens, no slash, no capital); it must name a repository of the registry, or the sheet gets `touch-repo`. Text that does not look like a name before the colon is part of the glob: `src/a:b/**` has no prefix. A drive path such as `c:/x` reads as the prefix `c` and is refused by `touch-repo`: write paths relative to the repository root. Globs of different repositories never overlap: `api:src/**` and `web:src/**` do not, `api:src/a/**` and `api:src/**` do. The prefix is required once the project has two repositories. With one repository it is optional and an unprefixed glob belongs to it. When a second repository is added, `recade repo add` prefixes the unprefixed globs of the slices that are not done with the first repository, and shows the changes. A slice that touches several repositories gets one worktree in each (`repos/<name>/.claude/worktrees/<S-nn>`), on the same branch.
+Each glob starts with the name of the code repository it is in: `api:src/orders/**`, `web:src/pages/orders/**`. The prefix is the text before the first colon, when that text is a lower-case kebab name (letters, digits and single hyphens, no slash, no capital); it must name a repository of the registry, or the sheet gets `touch-repo`. Text that does not look like a name before the colon is part of the glob: `src/a:b/**` has no prefix. A drive path such as `c:/x` reads as the prefix `c` and is refused by `touch-repo`: write paths relative to the repository root. Globs of different repositories never overlap: `api:src/**` and `web:src/**` do not, `api:src/a/**` and `api:src/**` do. The prefix is required once the project has two repositories. With one repository it is optional and an unprefixed glob belongs to it. When a second repository is added, `recade repo add` prefixes the unprefixed globs of the slices that are not done with the first repository, and shows the changes. A slice that touches several repositories gets one worktree in each, under the workspace (`worktrees/<name>/<S-nn>`), on the same branch: `/slice` opens them from `touches:`, and a glob `api:src/**` is `worktrees/api/<S-nn>/src/**` there.
 
 ### Slices across repositories
 

@@ -14,6 +14,8 @@ const skip = status.ok ? false : `Chromium is not installed (${status.fix})`;
 if (skip) console.log(`# pipeline tests needing Chromium are skipped: ${skip}`);
 const NO_CHROMIUM = () => ({ ok: false, path: null, fix: 'npx --prefix "/plug in" playwright install chromium', detail: 'No Chromium executable reported' });
 
+/** A config folder with no config file: the defaults, whatever the user running the tests has set. */
+const NO_CONFIG = join(tmpdir(), 'recade-no-config-for-render-tests');
 const EM = String.fromCharCode(0x2014);
 const SMALL = (extra = '') => `---
 doc_id: D2
@@ -43,36 +45,49 @@ async function cli(args, { cwd, ...io } = {}) {
   const err = [];
   const code = await run(['render', ...args], {
     stdout: { write: (s) => out.push(s) }, stderr: { write: (s) => err.push(s) },
-    cwd: cwd ?? tmpdir(), env: process.env, ...io,
+    cwd: cwd ?? tmpdir(), env: { ...process.env, RECADE_CONFIG_DIR: NO_CONFIG }, ...io,
   });
   return { code, out: out.join(''), err: err.join('') };
 }
 
 const deliverables = (root) => join(root, 'docs', 'deliverables');
-const listDeliverables = (root) => (existsSync(deliverables(root)) ? readdirSync(deliverables(root)).sort() : []);
+// The record of what Recade rendered (`.recade-rendered.json`) is left out: it is not a deliverable.
+const listDeliverables = (root) => (existsSync(deliverables(root)) ? readdirSync(deliverables(root)).filter((f) => !f.startsWith('.')).sort() : []);
+/** The files of a folder, the record of what Recade rendered aside. */
+const listed = (dir) => readdirSync(dir).filter((f) => f !== '.recade-rendered.json');
 const isZip = (file) => readFileSync(file).subarray(0, 2).toString() === 'PK';
 const isPdf = (file) => readFileSync(file).subarray(0, 5).toString() === '%PDF-';
 
 // ---------------------------------------------------------------------------------------------------------------
 // Rendering (Chromium needed: the Fernhill documents hold figures)
 
-test('renders Fernhill D1 to D1.docx and D1.pdf in docs/deliverables', { skip }, async (t) => {
+test('renders Fernhill D1 to D1_Product-Definition.docx and its HTML dossier with the index in docs/deliverables, and no PDF by default', { skip }, async (t) => {
   const root = project(t);
   const { code, out, err } = await cli([join(root, 'docs', 'D1.md')]);
   assert.equal(code, 0, err);
-  assert.deepEqual(listDeliverables(root), ['D1.docx', 'D1.pdf']);
-  assert.ok(isZip(join(deliverables(root), 'D1.docx')));
-  assert.ok(isPdf(join(deliverables(root), 'D1.pdf')));
-  assert.match(out, /D1\.docx/);
-  assert.match(out, /D1\.pdf/);
+  assert.deepEqual(listDeliverables(root), ['D1_Product-Definition.docx', 'D1_Product-Definition.html', 'INDEX_The-Project-Documents.html']);
+  assert.ok(isZip(join(deliverables(root), 'D1_Product-Definition.docx')));
+  assert.equal(out.match(/^Wrote .*$/gm).join('\n'), ['D1_Product-Definition.docx', 'D1_Product-Definition.html', 'INDEX_The-Project-Documents.html'].map((f) => `Wrote ${join(deliverables(root), f)}`).join('\n'));
 });
 
-test('PLAN.md also yields PLAN.xlsx', { skip }, async (t) => {
+test('with deliverables.pdf true in the user config, the PDF comes too', { skip }, async (t) => {
+  const root = project(t);
+  const config = mkdtempSync(join(tmpdir(), 'recade-config-'));
+  t.after(() => rmSync(config, { recursive: true, force: true }));
+  writeFileSync(join(config, 'config.yaml'), 'deliverables:\n  pdf: true\n');
+  const { code, out, err } = await cli([join(root, 'docs', 'D1.md')], { env: { ...process.env, RECADE_CONFIG_DIR: config } });
+  assert.equal(code, 0, err);
+  assert.deepEqual(listDeliverables(root), ['D1_Product-Definition.docx', 'D1_Product-Definition.html', 'D1_Product-Definition.pdf', 'INDEX_The-Project-Documents.html']);
+  assert.ok(isPdf(join(deliverables(root), 'D1_Product-Definition.pdf')));
+  assert.match(out, /D1_Product-Definition\.pdf/);
+});
+
+test('PLAN.md also yields its workbook, under the same name', { skip }, async (t) => {
   const root = project(t);
   const { code, err } = await cli([join(root, 'docs', 'PLAN.md')]);
   assert.equal(code, 0, err);
-  assert.deepEqual(listDeliverables(root), ['PLAN.docx', 'PLAN.pdf', 'PLAN.xlsx']);
-  assert.ok(isZip(join(deliverables(root), 'PLAN.xlsx')));
+  assert.deepEqual(listDeliverables(root), ['INDEX_The-Project-Documents.html', 'PLAN_Delivery-Plan.docx', 'PLAN_Delivery-Plan.html', 'PLAN_Delivery-Plan.xlsx']);
+  assert.ok(isZip(join(deliverables(root), 'PLAN_Delivery-Plan.xlsx')));
 });
 
 test('--format and --out pick the formats and the folder', { skip }, async (t) => {
@@ -80,7 +95,7 @@ test('--format and --out pick the formats and the folder', { skip }, async (t) =
   const out = join(root, 'out folder');
   const { code, err } = await cli([join(root, 'docs', 'D1.md'), '--format', 'pdf', '--out', out]);
   assert.equal(code, 0, err);
-  assert.deepEqual(readdirSync(out), ['D1.pdf']);
+  assert.deepEqual(listed(out), ['D1_Product-Definition.pdf']);
   assert.deepEqual(listDeliverables(root), []);
 });
 
@@ -92,20 +107,20 @@ test('a second render overwrites the outputs and does not relaunch the browser f
   const first = await cli(args, { withBrowser: counting });
   assert.equal(first.code, 0, first.err);
   assert.equal(launches, 1);
-  const docx = join(deliverables(root), 'D1.docx');
+  const docx = join(deliverables(root), 'D1_Product-Definition.docx');
   writeFileSync(docx, 'stale');
   const second = await cli(args, { withBrowser: counting });
   assert.equal(second.code, 0, second.err);
   assert.equal(launches, 1, 'cached figures never touch the browser');
   assert.ok(isZip(docx), 'the stale file was replaced');
-  assert.deepEqual(readdirSync(deliverables(root)), ['D1.docx'], 'no temp file is left behind');
+  assert.deepEqual(listed(deliverables(root)), ['D1_Product-Definition.docx'], 'no temp file is left behind');
 });
 
 test('figures and the PDF share one browser session', { skip }, async (t) => {
   const root = project(t);
   let launches = 0;
   const counting = (fn) => { launches += 1; return withBrowser(fn); };
-  const { code, err } = await cli([join(root, 'docs', 'D1.md')], { withBrowser: counting });
+  const { code, err } = await cli([join(root, 'docs', 'D1.md'), '--format', 'docx,pdf'], { withBrowser: counting });
   assert.equal(code, 0, err);
   assert.equal(launches, 1);
 });
@@ -129,7 +144,7 @@ test('a theme override under design/theme.json reaches the output', { skip }, as
   const { code, err } = await cli([join(root, 'docs', 'D1.md'), '--format', 'docx']);
   assert.equal(code, 0, err);
   const JSZip = (await import('jszip')).default;
-  const zip = await JSZip.loadAsync(readFileSync(join(deliverables(root), 'D1.docx')));
+  const zip = await JSZip.loadAsync(readFileSync(join(deliverables(root), 'D1_Product-Definition.docx')));
   const xml = (await Promise.all(Object.keys(zip.files).filter((n) => n.endsWith('.xml')).map((n) => zip.file(n).async('string')))).join('');
   assert.match(xml, /2F6FD0/i);
 });
@@ -165,7 +180,7 @@ test('only findings in the rendered file count', async (t) => {
   writeFileSync(other, readFileSync(other, 'utf8').replace('Next steps are in D2.', 'See FR-ZZZ-99.'));
   const { code, err } = await cli([join(root, 'docs', 'PLAN.md'), '--format', 'xlsx']);
   assert.equal(code, 0, err);
-  assert.deepEqual(listDeliverables(root), ['PLAN.xlsx']);
+  assert.deepEqual(listDeliverables(root), ['PLAN_Delivery-Plan.xlsx']);
 });
 
 test('warnings are printed and do not stop the render', async (t) => {
@@ -173,7 +188,7 @@ test('warnings are printed and do not stop the render', async (t) => {
   const { code, out } = await cli([join(root, 'docs', 'PLAN.md'), '--format', 'xlsx']);
   assert.equal(code, 0);
   assert.match(out, /^docs\/PLAN\.md:\d+:\d+ missing-gist /m);
-  assert.deepEqual(listDeliverables(root), ['PLAN.xlsx']);
+  assert.deepEqual(listDeliverables(root), ['PLAN_Delivery-Plan.xlsx']);
 });
 
 test('--no-check renders anyway', async (t) => {
@@ -185,7 +200,7 @@ test('--no-check renders anyway', async (t) => {
   assert.deepEqual(listDeliverables(root), []);
   const { code, err } = await cli([file, '--format', 'docx', '--no-check']);
   assert.equal(code, 0, err);
-  assert.deepEqual(listDeliverables(root), ['note.docx']);
+  assert.deepEqual(listDeliverables(root), ['note_Small-Note.docx']);
 });
 
 test('a missing figure file exits 1 naming the file and the line, and writes nothing', async (t) => {
@@ -211,23 +226,23 @@ test('without Chromium, a PDF is refused with the install hint and nothing is wr
   const root = project(t);
   const file = join(root, 'docs', 'note.md');
   writeFileSync(file, SMALL());
-  const { code, err } = await cli([file], { chromiumStatus: NO_CHROMIUM });
+  const { code, err } = await cli([file, '--format', 'docx,pdf'], { chromiumStatus: NO_CHROMIUM });
   assert.equal(code, 1);
   assert.match(err, /playwright install chromium/);
   assert.deepEqual(listDeliverables(root), []);
 });
 
-test('a docx-only render of a figure-free document works without Chromium', async (t) => {
+test('a default render of a figure-free document works without Chromium', async (t) => {
   const root = project(t);
   const file = join(root, 'docs', 'note.md');
   writeFileSync(file, SMALL());
-  const { code, err } = await cli([file, '--format', 'docx'], {
+  const { code, err } = await cli([file], {
     chromiumStatus: NO_CHROMIUM,
     withBrowser: () => { throw new Error('the browser must not launch'); },
   });
   assert.equal(code, 0, err);
-  assert.deepEqual(listDeliverables(root), ['note.docx']);
-  assert.ok(isZip(join(deliverables(root), 'note.docx')));
+  assert.deepEqual(listDeliverables(root), ['INDEX_The-Project-Documents.html', 'note_Small-Note.docx', 'note_Small-Note.html']);
+  assert.ok(isZip(join(deliverables(root), 'note_Small-Note.docx')));
 });
 
 test('several files are all or nothing', async (t) => {
@@ -273,7 +288,7 @@ test('relative paths resolve against the working directory', async (t) => {
   writeFileSync(file, SMALL());
   const { code, err } = await cli(['docs/note.md', '--format', 'docx', '--out', 'built'], { cwd: root });
   assert.equal(code, 0, err);
-  assert.deepEqual(readdirSync(join(root, 'built')), ['note.docx']);
+  assert.deepEqual(listed(join(root, 'built')), ['note_Small-Note.docx']);
 });
 
 test('without recade/state.yaml the project root is the folder of the file', async (t) => {
@@ -283,13 +298,13 @@ test('without recade/state.yaml the project root is the folder of the file', asy
   writeFileSync(file, SMALL());
   const { code, err } = await cli([file, '--format', 'docx']);
   assert.equal(code, 0, err);
-  assert.deepEqual(readdirSync(join(base, 'docs', 'deliverables')), ['note.docx']);
+  assert.deepEqual(listed(join(base, 'docs', 'deliverables')), ['note_Small-Note.docx']);
 });
 
 test('renderFile returns the output paths and the findings', async (t) => {
   const root = project(t);
   const { outputs, findings } = await renderFile(join(root, 'docs', 'PLAN.md'), { formats: ['xlsx'] });
-  assert.deepEqual(outputs, [join(deliverables(root), 'PLAN.xlsx')]);
+  assert.deepEqual(outputs, [join(deliverables(root), 'PLAN_Delivery-Plan.xlsx')]);
   assert.ok(findings.some((f) => f.rule === 'missing-gist'));
   assert.ok(findings.every((f) => f.file === 'docs/PLAN.md'));
 });
@@ -315,13 +330,13 @@ const leftovers = (dir) => readdirSync(dir).filter((n) => /\.(tmp|bak)$/.test(n)
 test('an output path that is already a folder exits 1, leaves previous outputs alone and no temp files', async (t) => {
   const root = project(t);
   const [a, b] = twoNotes(root);
-  mkdirSync(join(deliverables(root), 'b.docx'), { recursive: true });
-  writeFileSync(join(deliverables(root), 'a.docx'), 'previous');
+  mkdirSync(join(deliverables(root), 'b_Small-Note.docx'), { recursive: true });
+  writeFileSync(join(deliverables(root), 'a_Small-Note.docx'), 'previous');
   const { code, err } = await cli([a, b, '--format', 'docx']);
   assert.equal(code, 1);
   assert.equal(err.trim().split('\n').length, 1);
-  assert.match(err, /b\.docx.*folder/);
-  assert.equal(readFileSync(join(deliverables(root), 'a.docx'), 'utf8'), 'previous');
+  assert.match(err, /b_Small-Note\.docx.*folder/);
+  assert.equal(readFileSync(join(deliverables(root), 'a_Small-Note.docx'), 'utf8'), 'previous');
   assert.deepEqual(leftovers(deliverables(root)), []);
 });
 
@@ -347,16 +362,16 @@ test('a failed second rename restores every previous output and leaves no temp o
   const root = project(t);
   const [a, b] = twoNotes(root);
   mkdirSync(deliverables(root), { recursive: true });
-  writeFileSync(join(deliverables(root), 'a.docx'), 'previous a');
-  writeFileSync(join(deliverables(root), 'b.docx'), 'previous b');
+  writeFileSync(join(deliverables(root), 'a_Small-Note.docx'), 'previous a');
+  writeFileSync(join(deliverables(root), 'b_Small-Note.docx'), 'previous b');
   await assert.rejects(renderFiles([a, b], { formats: ['docx'], rename: failSecondRename() }), (err) => {
     assert.equal(err.exitCode, 1);
     assert.match(err.message, /disk said no/);
     return true;
   });
-  assert.equal(readFileSync(join(deliverables(root), 'a.docx'), 'utf8'), 'previous a');
-  assert.equal(readFileSync(join(deliverables(root), 'b.docx'), 'utf8'), 'previous b');
-  assert.deepEqual(readdirSync(deliverables(root)).sort(), ['a.docx', 'b.docx']);
+  assert.equal(readFileSync(join(deliverables(root), 'a_Small-Note.docx'), 'utf8'), 'previous a');
+  assert.equal(readFileSync(join(deliverables(root), 'b_Small-Note.docx'), 'utf8'), 'previous b');
+  assert.deepEqual(listed(deliverables(root)).sort(), ['a_Small-Note.docx', 'b_Small-Note.docx']);
 });
 
 test('a failed write removes the folders this run created, and only those', async (t) => {
@@ -369,18 +384,18 @@ test('a failed write removes the folders this run created, and only those', asyn
   // Through the CLI the failure is one line and exit 1.
   const ok = await cli([a, '--format', 'docx', '--out', out]);
   assert.equal(ok.code, 0, ok.err);
-  assert.deepEqual(readdirSync(out), ['a.docx'], 'a render into the same place works afterwards');
+  assert.deepEqual(listed(out), ['a_Small-Note.docx'], 'a render into the same place works afterwards');
 });
 
 test('a successful write leaves no backup of the file it replaced', async (t) => {
   const root = project(t);
   const [a] = twoNotes(root);
   mkdirSync(deliverables(root), { recursive: true });
-  writeFileSync(join(deliverables(root), 'a.docx'), 'previous');
+  writeFileSync(join(deliverables(root), 'a_Small-Note.docx'), 'previous');
   const { code, err } = await cli([a, '--format', 'docx']);
   assert.equal(code, 0, err);
-  assert.deepEqual(readdirSync(deliverables(root)), ['a.docx']);
-  assert.ok(isZip(join(deliverables(root), 'a.docx')));
+  assert.deepEqual(listed(deliverables(root)), ['a_Small-Note.docx']);
+  assert.ok(isZip(join(deliverables(root), 'a_Small-Note.docx')));
 });
 
 test('an empty --format list is a usage error and duplicate formats are rendered once', async (t) => {
@@ -391,8 +406,8 @@ test('an empty --format list is a usage error and duplicate formats are rendered
   await assert.rejects(renderFiles([a], { formats: [] }), (err) => err.exitCode === 2);
   const { code, out, err } = await cli([a, '--format', 'docx,docx']);
   assert.equal(code, 0, err);
-  assert.equal(out.match(/a\.docx/g).length, 1);
-  assert.deepEqual(listDeliverables(root), ['a.docx']);
+  assert.equal(out.match(/a_Small-Note\.docx/g).length, 1);
+  assert.deepEqual(listDeliverables(root), ['a_Small-Note.docx']);
 });
 
 test('render takes --project <dir>: relative sources are read from that project', async (t) => {
@@ -400,5 +415,82 @@ test('render takes --project <dir>: relative sources are read from that project'
   writeFileSync(join(root, 'docs', 'note.md'), SMALL());
   const { code, err } = await cli(['docs/note.md', '--format', 'docx', '--project', root]);
   assert.equal(code, 0, err);
-  assert.ok(isZip(join(deliverables(root), 'note.docx')));
+  assert.ok(isZip(join(deliverables(root), 'note_Small-Note.docx')));
+});
+
+// ---------------------------------------------------------------------------------------------------------------
+// File names in the language of the document, and the files of an older render
+
+const titled = (title, language = 'en') => SMALL().replace('title: Fernhill Lending, small note', `title: "${title}"\nlanguage: ${language}`);
+
+test('a French copy is named after its French title, accents dropped, next to the English one', async (t) => {
+  const root = project(t);
+  writeFileSync(join(root, 'docs', 'D2.md'), titled('Fernhill Lending, Technical Architecture'));
+  writeFileSync(join(root, 'docs', 'D2.fr.md'), titled('Fernhill Lending, Architecture technique détaillée', 'fr'));
+  const { code, err } = await cli([join(root, 'docs', 'D2.md'), join(root, 'docs', 'D2.fr.md')]);
+  assert.equal(code, 0, err);
+  // The dossiers and their index pages follow the same names: only the Word files are compared here.
+  assert.deepEqual(listDeliverables(root).filter((f) => !f.endsWith('.html')), ['D2_Architecture-Technique-Detaillee.docx', 'D2_Technical-Architecture.docx']);
+  assert.ok(listDeliverables(root).includes('D2_Architecture-Technique-Detaillee.html'));
+});
+
+test('a copy whose title gives the name of its source keeps its language at the end', async (t) => {
+  const root = project(t);
+  writeFileSync(join(root, 'docs', 'D2.md'), titled('Fernhill Lending, Architecture'));
+  writeFileSync(join(root, 'docs', 'D2.fr.md'), titled('Fernhill Lending, Architecture', 'fr'));
+  const { code, err } = await cli([join(root, 'docs', 'D2.fr.md')]);
+  assert.equal(code, 0, err);
+  assert.deepEqual(listDeliverables(root), ['D2_Architecture.fr.docx', 'D2_Architecture.fr.html', 'INDEX_Les-Documents-Du-Projet.html']);
+});
+
+test('the files of an older render are left as they were, and each is named once', async (t) => {
+  const root = project(t);
+  const file = join(root, 'docs', 'note.md');
+  writeFileSync(file, SMALL());
+  mkdirSync(deliverables(root), { recursive: true });
+  for (const name of ['note.docx', 'note.pdf', 'note_Small-Note.pdf', 'note.xlsx']) writeFileSync(join(deliverables(root), name), 'old');
+  const { code, out, err } = await cli([file]);
+  assert.equal(code, 0, err);
+  for (const name of ['note.docx', 'note.pdf', 'note_Small-Note.pdf']) {
+    assert.equal(readFileSync(join(deliverables(root), name), 'utf8'), 'old', `${name} is not deleted`);
+    assert.ok(out.includes(`Left as it was: ${join(deliverables(root), name)}. Recade no longer writes`), name);
+  }
+  assert.equal(out.includes('note.xlsx'), false, 'a name Recade never wrote for this source is not named');
+  assert.ok(isZip(join(deliverables(root), 'note_Small-Note.docx')));
+  // Formats given on the command line: a PDF not asked for is not called stale.
+  const again = await cli([file, '--format', 'docx']);
+  assert.equal(again.out.includes('note_Small-Note.pdf'), false);
+  assert.ok(again.out.includes('note.pdf'));
+});
+
+test('a renamed document leaves its old files, named as left, and the index lists the current one only', async (t) => {
+  const root = project(t);
+  const file = join(root, 'docs', 'note.md');
+  writeFileSync(file, SMALL());
+  assert.equal((await cli([file])).code, 0);
+  writeFileSync(join(deliverables(root), 'note_Mine.html'), '<html>not a dossier</html>');
+  writeFileSync(file, SMALL().replace('title: Fernhill Lending, small note', 'title: Fernhill Lending, short note'));
+  const { code, out, err } = await cli([file]);
+  assert.equal(code, 0, err);
+  for (const name of ['note_Small-Note.docx', 'note_Small-Note.html']) {
+    assert.ok(existsSync(join(deliverables(root), name)), `${name} is not deleted`);
+    assert.ok(out.includes(`Left as it was: ${join(deliverables(root), name)}.`), name);
+  }
+  assert.equal(out.includes('note_Mine.html'), false, 'a file Recade did not write is not named');
+  const index = readdirSync(deliverables(root)).find((f) => f.startsWith('INDEX_'));
+  const html = readFileSync(join(deliverables(root), index), 'utf8');
+  assert.equal((html.match(/class="card"/g) ?? []).length, 1, 'one card for the document');
+  assert.ok(html.includes('note_Short-Note.html'));
+  assert.equal(html.includes('note_Small-Note.html'), false);
+  const record = JSON.parse(readFileSync(join(deliverables(root), '.recade-rendered.json'), 'utf8'));
+  assert.deepEqual(record['docs/note.md'], { current: ['note_Short-Note.docx', 'note_Short-Note.html'], left: ['note_Small-Note.docx', 'note_Small-Note.html'] });
+  // A render of the docx only keeps the HTML as current, and still names the old files.
+  const again = await cli([file, '--format', 'docx']);
+  assert.ok(again.out.includes('note_Small-Note.docx'));
+  assert.equal(again.out.includes('note_Short-Note.html'), false);
+  // From a render before the record: the old dossier is proven by its embedded entry.
+  rmSync(join(deliverables(root), '.recade-rendered.json'));
+  const legacy = await cli([file]);
+  assert.ok(legacy.out.includes(`Left as it was: ${join(deliverables(root), 'note_Small-Note.html')}.`));
+  assert.ok(legacy.out.includes(`Left as it was: ${join(deliverables(root), 'note_Small-Note.docx')}.`));
 });

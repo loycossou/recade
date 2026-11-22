@@ -8,8 +8,8 @@ export const WORKSPACE_TREE = Object.freeze([
   'recade', 'intake/attachments', 'team', 'design', 'decisions', 'retros', 'docs/figures', 'docs/deliverables', 'docs/source', 'slices',
 ]);
 
-/** What the workspace `.gitignore` holds: the code repositories, the heavy outputs, the drafts and the per-machine state. */
-export const IGNORED = Object.freeze(['repos/', 'artifacts/', 'tmp/', '.recade/']);
+/** What the workspace `.gitignore` holds: the code repositories, the slice worktrees, the heavy outputs, the drafts and the per-machine state. */
+export const IGNORED = Object.freeze(['repos/', 'worktrees/', 'artifacts/', 'tmp/', '.recade/']);
 
 /** Where a code repository records its workspace: a per-machine file with one line, the workspace path. */
 export const LINK_FILE = '.recade/workspace';
@@ -53,7 +53,7 @@ export function assertParent(parent) {
 }
 
 /**
- * Create `<parent>/<slug>-workspace`: the tree, `git init -b main`, the `.gitignore` of the four ignored entries and
+ * Create `<parent>/<slug>-workspace`: the tree, `git init -b main`, the `.gitignore` of the five ignored entries and
  * a first `recade/state.yaml` that says `kind: workspace`. Refuses an existing folder that is not empty. If anything
  * fails, what this call created is removed.
  * @param {string} parent

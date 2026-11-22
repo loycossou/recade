@@ -20,6 +20,8 @@ Everything Recade writes has one voice. Read it from the project, apply the rule
 - Pleasant without being cheap. At most one touch of humour per section, and only when it serves the meaning: a comparison that is exact and unexpected, a consequence followed to its end.
 - Cite an ID with its gist each time you cite it, and cite it only where it applies. In running text, say the gist first and put the ID after it in parentheses: `upload a proof of income (FR-EX-01)`. The render draws the ID small and muted. In a table, the ID has its own first column.
 - Open each main section of a document with one short sentence in the voice, before any table or list. A reader should feel a person wrote it.
+- Write to a person, not to a form. Before a table, say in a sentence or two what it holds and why it matters. Say why a rule exists when the reason fits in one sentence.
+- Explain a hard idea twice when it helps: first an image from everyday life (a cloakroom ticket, a library card), then the real thing with its real names. The image is exact, short, and never replaces the precise text: the IDs, the numbers and the requirements stay as they are.
 - Headings and fixed words are in the language of the document. Translate the headings of D1, D2 and D3. Keep the English headings of the documents that code reads (the PLAN, the STACK tech sheet, the BIBLE, slice sheets).
 
 ## Size and audience
@@ -34,7 +36,7 @@ A document is read by a busy client, not by a lawyer with a free week. Each proj
 
 ## No humour at all
 
-Write plainly, with no joke, in:
+Plain is not cold. Keep the warm, direct sentences and the everyday images: an exact comparison is not a joke. Leave out only the jokes, in:
 
 - warnings and error messages;
 - security requirements and everything in D3;

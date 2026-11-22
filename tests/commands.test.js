@@ -56,7 +56,7 @@ test('every command file has a description and passes lint-style', () => {
 
 test('allowed-tools are limited as required', () => {
   const tools = (f) => frontmatter(read(f))['allowed-tools'];
-  assert.equal(tools('start.md'), 'Bash(node:*), Bash(npm ci:*), Bash(gh api user:*), Read, AskUserQuestion');
+  assert.equal(tools('start.md'), 'Bash(node:*), Bash(npm ci:*), Bash(gh api user:*), Bash(claude mcp list:*), Bash(claude mcp add:*), Read, AskUserQuestion');
   assert.equal(tools('setup.md'), 'Bash(node:*), Bash(npm ci:*)');
   assert.equal(tools('help.md'), 'Bash(node:*), Bash(npm ci:*)');
   assert.equal(tools('languages.md'), 'Bash(node:*), Bash(npm ci:*), AskUserQuestion');
@@ -69,11 +69,12 @@ test('allowed-tools are limited as required', () => {
     tools('team.md'),
     'Bash(node:*), Bash(npm ci:*), Bash(git:*), Read, Write, Edit, AskUserQuestion, Agent',
   );
-  assert.equal(tools('docs.md'), tools('team.md'));
-  assert.equal(tools('bible.md'), tools('docs.md'));
-  assert.equal(tools('slices.md'), tools('docs.md'));
+  // docs.md runs claude mcp add for a design reference server, only after the owner's yes.
+  assert.equal(tools('docs.md'), 'Bash(node:*), Bash(npm ci:*), Bash(git:*), Bash(claude mcp add:*), Read, Write, Edit, AskUserQuestion, Agent');
+  assert.equal(tools('bible.md'), tools('team.md'));
+  assert.equal(tools('slices.md'), tools('team.md'));
   assert.equal(tools('harness.md'), 'Bash(node:*), Bash(npm ci:*), Bash(git:*), Read, Glob, Write, Edit, AskUserQuestion, Agent');
-  assert.equal(tools('amend.md'), tools('docs.md'));
+  assert.equal(tools('amend.md'), tools('team.md'));
   assert.equal(tools('adopt.md'), 'Bash(node:*), Bash(npm ci:*), Bash(git:*), Read, Write, Edit, AskUserQuestion, Agent');
   assert.equal(tools('resume.md'), 'Bash(node:*), Bash(npm ci:*), Bash(git:*), Read, Write, Edit, AskUserQuestion');
 });
@@ -330,7 +331,7 @@ test('docs.md: the decision procedure uses the letter of the DEC file, DECs are 
   assert.ok(/On `Not yet`[^\n]*do point 2 again/.test(gate), 'translations are redone after a revision');
   assert.ok(gate.includes('then go back to point 3'), 'index check again after a render fix');
   assert.ok(gate.includes('An `error` in a file of `docs/reviews/` goes to the role named in the file name'));
-  assert.ok(gate.includes('Check that every source exists') && gate.includes('has its `docx` and `pdf`'));
+  assert.ok(gate.includes('Check that every source exists') && gate.includes('every source has its `docx`') && gate.includes('`Left as it was:`'));
   assert.ok(text.includes('`done` to Step 9, point 1'));
   assert.ok(text.includes('`domain-expert`'));
 });
@@ -401,9 +402,10 @@ test('slices.md requires G3, asks the slicing formula, dispatches the slicer, ch
   const steps = [...text.matchAll(/^## (Step \d+\. .+)$/gm)].map((m) => m[1]);
   assert.deepEqual(steps, [
     'Step 0. Dependencies', 'Step 1. The project, G3 and where to resume', 'Step 2. The slicing formula', 'Step 3. Cut',
-    'Step 4. Checks', 'Step 5. Graph and status', 'Step 6. GitHub and G4',
+    'Step 4. Checks', 'Step 5. Graph and status', 'Step 6. Where the code lives, and G4',
   ]);
-  assert.deepEqual(text.match(/recade state pass \S+/g), ['recade state pass G4']);
+  // One G4 for each forge: the local one (6.2) and the GitHub one (6.3).
+  assert.deepEqual(text.match(/recade state pass \S+/g), ['recade state pass G4', 'recade state pass G4']);
   assert.ok(text.includes('recade state can-start 4 --project'));
   assert.ok(text.indexOf('recade state can-start 4') < text.indexOf('Dispatch `slicer`, stage `cut`'));
   const formula = stepSection('slices.md', 2);
@@ -415,7 +417,15 @@ test('slices.md requires G3, asks the slicing formula, dispatches the slicer, ch
   assert.ok(checks.includes('recade slices check --project') && checks.includes('recade lint-style slices') && checks.includes('recade index check'));
   const graph = stepSection('slices.md', 5);
   assert.ok(graph.includes('recade slices graph') && graph.includes('recade slices status'));
-  const last = stepSection('slices.md', 6);
+  const step6 = stepSection('slices.md', 6);
+  // 6.1 asks where the code lives, once; 6.2 is the local forge, with no gh call; 6.3 is GitHub.
+  const forge = step6.slice(0, step6.indexOf('### 6.2'));
+  assert.ok(forge.includes('Where should the code live?') && forge.includes('`Local only (default)`') && forge.includes('`GitHub`') && forge.includes('forge_asked'));
+  assert.ok(forge.indexOf('Where should the code live?') < forge.indexOf("recade state set forge '<local or github>'"));
+  const localPart = step6.slice(step6.indexOf('### 6.2'), step6.indexOf('### 6.3'));
+  assert.equal(/recade github init --|gh auth|`gh /.test(localPart), false, 'the local part calls no gh');
+  assert.ok(localPart.indexOf('docs(slices): slice sheets') < localPart.indexOf('Approve the slices (gate G4)?') && localPart.indexOf('Approve the slices (gate G4)?') < localPart.indexOf('recade state pass G4'));
+  const last = step6.slice(step6.indexOf('### 6.3'));
   assert.ok(last.includes('recade github init --dry-run --project') && last.includes('recade github init --project'));
   assert.ok(last.indexOf('--dry-run') < last.indexOf('Create the private repository and the board now?'));
   assert.ok(last.indexOf('Create the private repository and the board now?') < last.indexOf('recade github init --project'));
@@ -808,14 +818,14 @@ test('harness.md installs the workspace target and each code repository, asks th
   const step = (n) => stepSection('harness.md', n);
   for (const part of ['Recade command may push the workspace after a commit', 'recade workspace auto-push']) assert.ok(text.includes(part), part);
   const one = step(1);
-  for (const part of ['recade repo list --json', 'recade repo check', 'no code repository', '`/recade:docs`']) assert.ok(one.includes(part), part);
+  for (const part of ['recade repo list --json', 'recade repo check', 'no code repository', '`/recade:docs`', "recade harness migrate --dry-run --project '<dir>'", "recade harness migrate --project '<dir>'", '`old layout`']) assert.ok(one.includes(part), part);
   const two = step(2);
   for (const part of ["recade harness install --target workspace --project '<dir>'", "recade harness install --target code --repo '<name>' --project '<dir>'", 'one repository at a time', 'Threshold file candidates', 'Protect these files as thresholds?',
     "recade harness set --threshold-files '<a,b>' --project '<dir>/repos/<name>'", '`.claude/recade.yaml`', 'Nothing is added unless the owner lists it', 'the table of that repository', "the workspace is Recade's own"]) {
     assert.ok(two.includes(part), part);
   }
   const four = step(4);
-  for (const part of ['refuses Edit and Write in `.claude/agents/` and `.claude/commands/`', "recade harness specialise agent '<agent>' --file '<dir>/tmp/<agent>.md' --target code --repo '<name>' --project '<dir>'",
+  for (const part of ['refuses Edit and Write in `.claude/agents/` and `.claude/commands/`', "recade harness specialise agent '<agent>' --file '<dir>/tmp/<agent>.md' --target workspace --project '<dir>'",
     "recade harness specialise command '<command>' --file '<dir>/tmp/<command>.md' --target workspace --project '<dir>'", 'only the main session', 'never an agent', '`.claude/protocol.md`', 'recade harness install` keeps it', '`unchanged`']) {
     assert.ok(four.includes(part), part);
   }
@@ -825,7 +835,8 @@ test('harness.md installs the workspace target and each code repository, asks th
   assert.equal(four.includes('No Recade command writes the specialisation'), false);
   assert.ok(four.indexOf('Write') < four.indexOf('recade harness specialise agent'));
   const five = step(5);
-  for (const part of ["recade harness models --check --dir '<dir>/.claude/agents'", "--dir '<dir>/repos/<name>/.claude/agents'", "recade claude-md refresh --target workspace --write --project '<dir>'", "recade claude-md refresh --target code --repo '<name>' --write --project '<dir>'"]) {
+  assert.equal(five.includes("--dir '<dir>/repos/<name>/.claude/agents'"), false, 'a code repository holds no agent');
+  for (const part of ["recade harness models --check --dir '<dir>/.claude/agents'", "recade claude-md refresh --target workspace --write --project '<dir>'", "recade claude-md refresh --target code --repo '<name>' --write --project '<dir>'"]) {
     assert.ok(five.includes(part), part);
   }
   const six = step(6);
@@ -839,7 +850,7 @@ test('harness.md installs the workspace target and each code repository, asks th
 
 test('recade help lists harness specialise with its shape', async () => {
   const text = await help();
-  assert.match(text, /recade harness .*install \| verify \| cases \[--run\] \| protect \[--apply\] \| set \| specialise <agent\|command> <name> --file <path> \| models/);
+  assert.match(text, /recade harness .*install \| verify \| cases \[--run\] \| protect \[--apply\] \| set \| specialise <agent\|command> <name> --file <path> \| models \| migrate \[--dry-run\]/);
 });
 
 test('an adopted project reaches G4 through team, docs, bible, slices and resume: no intake, the documents from the code, the PLAN of the remaining work', () => {
@@ -977,11 +988,11 @@ test('docs.md renders the extras after the usual render and lists them, amend.md
 });
 
 test('the plugin README, the design document and the changelog describe the extra deliverables', () => {
-  const parts = ['deliverables.extras', 'recade render extras', 'STACK-matrix.xlsx', 'DECISIONS.xlsx', 'REVIEWS.docx', 'design-<board>.pdf'];
+  const parts = ['deliverables.extras', 'recade render extras', 'STACK_<Title>.xlsx', 'DECISIONS_<Title>.docx', 'REVIEWS_<Title>.docx', 'DESIGN_<Board>.pdf', 'deliverables.pdf', 'Left as it was'];
   const readme = readFileSync(join(repo, 'README.md'), 'utf8');
   for (const part of parts) assert.ok(readme.includes(part), `README: ${part}`);
   const design = readFileSync(join(repo, 'docs', 'design.md'), 'utf8');
-  for (const part of ['deliverables.extras', 'recade render extras', 'STACK-matrix.xlsx', 'DECISIONS.xlsx', 'REVIEWS.docx', 'design-<board>.pdf', 'in memory']) assert.ok(design.includes(part), `design: ${part}`);
+  for (const part of [...parts, 'in memory']) assert.ok(design.includes(part), `design: ${part}`);
   const changelog = readFileSync(join(repo, 'CHANGELOG.md'), 'utf8');
   const unreleased = changelog.slice(changelog.indexOf('## Unreleased'), changelog.indexOf('\n## 1.0.0'));
   for (const part of ['deliverables.extras', 'recade render extras']) assert.ok(unreleased.includes(part), `CHANGELOG: ${part}`);
@@ -994,7 +1005,7 @@ test('docs.md Step 4 detects the design servers, asks the mode and the criteria,
   for (const kw of ['ToolSearch', 'mobbin', 'refero', 'nicelydone']) assert.ok(s.includes(kw), kw);
   assert.equal(s.toLowerCase().includes('screenrove'), false, 'Screenrove has no confirmed public MCP server');
   assert.ok(s.includes('https://mcp.nicelydone.club/mcp') && s.includes('claude mcp add --transport http'));
-  assert.ok(s.includes('Recade installs nothing') && s.includes('go on as before'));
+  assert.ok(s.includes('Recade never requires one') && s.includes('go on as before'));
   assert.ok(s.includes('https://api.mobbin.com/mcp') && s.includes('https://api.refero.design/mcp'));
   // Mode and criteria.
   for (const part of ['`The designer picks`', '`I give my criteria`', 'platform', 'product type', 'key screens', 'style', 'up to 4 questions in one call', 'multiSelect', 'apps the owner likes']) assert.ok(s.includes(part), part);
@@ -1028,7 +1039,7 @@ test('the design-direction skill and the ui-designer agent draw on references.md
 
 test('the README, the design document and the changelog describe the design references', () => {
   for (const [name, text] of [['README', readFileSync(join(repo, 'README.md'), 'utf8')], ['design', readFileSync(join(repo, 'docs', 'design.md'), 'utf8')]]) {
-    for (const part of ['design/references.md', 'design-references.pdf', 'Mobbin', 'Refero', 'Nicelydone', 'own account']) assert.ok(text.includes(part), `${name}: ${part}`);
+    for (const part of ['design/references.md', 'DESIGN_<Title>.docx', 'Mobbin', 'Refero', 'Nicelydone', 'own account']) assert.ok(text.includes(part), `${name}: ${part}`);
   }
   const changelog = readFileSync(join(repo, 'CHANGELOG.md'), 'utf8');
   const unreleased = changelog.slice(changelog.indexOf('## Unreleased'), changelog.indexOf('\n## 1.0.0'));
@@ -1056,4 +1067,75 @@ test('the reference questions split the candidates evenly into groups of 2 to 4,
   }
   const design = readFileSync(join(repo, 'docs', 'design.md'), 'utf8');
   assert.ok(design.includes("may ask the owner's permission the first time") && design.includes('outside the ID index'));
+});
+
+test('start.md and docs.md offer to connect a design reference server, run claude mcp add only after a yes, and store no key', () => {
+  const block = readFileSync(join(repo, 'tools', 'shared', 'design-servers.md'), 'utf8');
+  for (const part of [
+    'Mobbin', 'Refero', 'Nicelydone', "owner's own paid account", 'never asks for a key', '`Connect one now`', '`Show me how`', '`Go on without`',
+    'Only on `Yes, run it`',
+    'claude mcp add --transport http --scope user mobbin https://api.mobbin.com/mcp',
+    'claude mcp add --transport http --scope user refero https://api.refero.design/mcp',
+    'claude mcp add --transport http --scope user nicelydone https://mcp.nicelydone.club/mcp',
+    '`/mcp`', 'never in a file of a repository',
+  ]) assert.ok(block.includes(part), part);
+  assert.equal(/api[_-]?key|token|--header|-H /i.test(block), false, 'no key, token or header in the command');
+  const start = stepSection('start.md', 4);
+  assert.ok(start.includes('Design reference servers, optional. Run `claude mcp list`'));
+  assert.ok(start.indexOf('claude mcp list') < start.indexOf('<!-- shared:design-servers -->'));
+  const docs = stepSection('docs.md', 4);
+  assert.ok(docs.indexOf('If none is connected, say so in one line, then make the offer below. <!-- shared:design-servers -->') > 0);
+  assert.ok(docs.indexOf('<!-- shared:design-servers -->') < docs.indexOf('### The directions'));
+  assert.ok(docs.includes('run ToolSearch again'));
+});
+
+test('start.md asks the second-opinion model right after the writing model, with the trade-off, and saves it with config set', () => {
+  const step4 = stepSection('start.md', 4);
+  const writer = step4.indexOf('Writing model');
+  const second = step4.indexOf('Second-opinion model');
+  const extras = step4.indexOf('Extra files');
+  assert.ok(writer > 0 && writer < second && second < extras);
+  const text = step4.slice(second, extras);
+  for (const part of ['**Opus 5.5** (recommended)', '**Fable 5.2**', 'another family than the reviewer', 'about twice the price', 'recade config set models.second_opinion <opus or fable>', 'recade config set models.second_opinion fable', 'recade harness install']) {
+    assert.ok(text.includes(part), part);
+  }
+  assert.equal(step4.includes("by the owner's decision of 2026-11-21"), false);
+});
+
+test('the intake questionnaire is asked as closed choices, and the analyst writes each blocking gap with its options', () => {
+  const step4 = stepSection('new.md', 4);
+  assert.ok(step4.includes('Ask each one as a closed choice') && step4.includes('`Not known yet`') && step4.includes('free text by nature'));
+  assert.equal(step4.includes('when its answers are few'), false);
+  assert.ok(stepSection('new.md', 6).includes('with the options the analyst wrote for it'));
+  const analyst = readFileSync(join(repo, 'agents', 'intake-analyst.md'), 'utf8');
+  assert.ok(analyst.includes('as a closed choice: 2 to 4 options, the most likely first with its reason'));
+  assert.ok(analyst.includes('each with its options'));
+  const template = readFileSync(join(repo, 'templates', 'questionnaire.md'), 'utf8');
+  assert.ok(template.includes('each as a multiple choice'));
+});
+
+test('the owner-choice block says AskUserQuestion, 2 to 4 options, the recommended first, lettered options without the tool, and open only for free text', () => {
+  const block = readFileSync(join(repo, 'tools', 'shared', 'owner-choice.md'), 'utf8');
+  for (const part of ['`AskUserQuestion`', '2 to 4 options', 'the recommended one first, with its reason', 'lettered options (A, B, C', 'wait for the answer', 'free text by nature: a name, a path, a date']) {
+    assert.ok(block.includes(part), part);
+  }
+});
+
+test('the team decisions are challenged with one question, the same closed choice at G2-stack, G2 and G3', () => {
+  const block = '<!-- shared:team-challenge -->';
+  const docs = read('docs.md');
+  const stack = docs.split('## Step 5.')[1].split('## Step 6.')[0];
+  const gate = docs.split('## Step 9.')[1];
+  for (const [name, text] of [['stack', stack], ['G2', gate], ['G3', read('bible.md')]]) {
+    assert.ok(text.includes(block), name);
+    assert.ok(text.includes('`No, they stand` and `Yes, I will name them`'), name);
+  }
+  assert.equal(stack.includes('ask in the chat, as one question'), false);
+});
+
+test('/recade:slices names the writing model for the stage next, as for cut, and prices the next increment alone', () => {
+  const slices = read('slices.md');
+  assert.ok(slices.includes('(here the `slicer`, for `cut`, for `next` and for every `revise`)'));
+  assert.ok(slices.includes('the same writing model as `cut`'));
+  assert.ok(slices.includes("recade cost estimate --phase next --project '<dir>'"));
 });

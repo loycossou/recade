@@ -20,6 +20,15 @@ export { globsOverlap };
 /** Limits of spec 9.1. For a `large` slice they apply to each task, not to the whole sheet. */
 export const CAPS = Object.freeze({ lines: 300, decisions: 10, dod: 15, screens: 6, tasks: 12 });
 
+/**
+ * The short track keeps the first increment small: the walking skeleton S-01 plus at most 5 slices, 6 open sheets in
+ * all. The rest of the PLAN waits in `slices/BACKLOG.md`, one row for each later slice, and is cut later.
+ */
+export const SHORT_TRACK_CAP = 6;
+
+/** The file of the short track that lists the slices of the later increments, not cut into sheets yet. */
+export const BACKLOG_FILE = 'slices/BACKLOG.md';
+
 /** Header keys every sheet carries (templates/slice.md). */
 export const REQUIRED_KEYS = Object.freeze([
   'repos', 'branch', 'format', 'lane', 'implementer', 'increment', 'depends_on', 'blocks',
@@ -371,6 +380,41 @@ function readStatusFile(root) {
   return out;
 }
 
+/**
+ * The rows of `slices/BACKLOG.md`: one row for each later slice of the short track, with its name, its gist and the
+ * stories it will cover. The first table whose header has a `Stories` column. Absent gives null.
+ * @param {string} root
+ * @returns {{name: string, gist: string, stories: string, line: number}[]|null}
+ */
+export function readBacklog(root) {
+  let text;
+  try {
+    text = readFileSync(join(root, BACKLOG_FILE), 'utf8');
+  } catch {
+    return null;
+  }
+  const lines = blankComments(text).split('\n');
+  const out = [];
+  let header = null;
+  for (let i = 0; i < lines.length; i++) {
+    const c = cells(lines[i]);
+    if (c === null) {
+      if (header !== null) break;
+      continue;
+    }
+    if (header === null) {
+      const h = c.map((x) => plain(x).toLowerCase());
+      if (h.includes('stories')) header = h;
+      continue;
+    }
+    if (isSeparator(lines[i])) continue;
+    const at = (name) => (header.indexOf(name) >= 0 ? (c[header.indexOf(name)] ?? '').trim() : '');
+    const row = { name: plain(at('slice') || at('name')), gist: at('gist'), stories: at('stories'), line: i + 1 };
+    if (row.name !== '' || row.stories !== '') out.push(row);
+  }
+  return out;
+}
+
 function readSheets(root) {
   const dir = join(root, 'slices');
   if (!existsSync(dir)) return [];
@@ -471,12 +515,23 @@ export function checkSlices(root) {
       first.add('slice-skeleton', keyLine(first.raw, 'skeleton'), 'In the short track, S-01 is the walking skeleton: the thinnest end-to-end path through the real stack, deployed where the owner sees it, with one business rule at most. Mark it with `skeleton: true` in its header.', 'warn');
     }
   }
-  checkCoverage(root, state, sheets, findings);
+  const previous = readStatusFile(root);
+  const backlog = state.track === 'short' ? readBacklog(root) : null;
+  if (state.track === 'short') {
+    // The first increment stays small: the sheets not done yet, S-00 inventory aside, are 6 at most.
+    const open = sheets.filter((s) => !/^S-00[a-z]?$/.test(s.id) && (previous.get(s.id)?.status || 'todo') !== 'done');
+    if (open.length > SHORT_TRACK_CAP) {
+      findings.push({
+        file: 'slices', line: 1, column: 1, rule: 'slice-cap', severity: 'warn',
+        message: `The short track keeps ${SHORT_TRACK_CAP} open sheets at most, the walking skeleton and 5 slices, and there are ${open.length} (${open.map((s) => s.id).join(', ')}). Move the later slices to ${BACKLOG_FILE}, one row each, to cut them in a later increment.`,
+      });
+    }
+  }
+  checkCoverage(root, state, sheets, findings, backlog);
   const graph = {
     nodes: sheets.map((s) => ({ id: s.id, title: s.title, format: s.front.format ?? 'small' })),
     edges,
   };
-  const previous = readStatusFile(root);
   const status = sheets.map((s) => ({
     id: s.id,
     title: s.title,
@@ -497,11 +552,11 @@ export function checkSlices(root) {
       ? Object.fromEntries(Object.entries(s.front.merged).map(([k, v]) => [k, String(v)]))
       : {},
   }));
-  return { findings, graph, status };
+  return { findings, graph, status, backlog: backlog ?? [] };
 }
 
 /** Every backlog story of the PLAN is cited in the Scope of exactly one slice. */
-function checkCoverage(root, state, sheets, findings) {
+function checkCoverage(root, state, sheets, findings, backlog = null) {
   const found = findPlan(root);
   const planFile = found?.file ?? planFileOf(root);
   if (found === null) {
@@ -522,10 +577,15 @@ function checkCoverage(root, state, sheets, findings) {
     const cited = new Set(scope.lines.join('\n').match(buildIdPattern(lots)) ?? []);
     for (const id of cited) if (known.has(id)) covered.get(id).push(s.id);
   }
+  // In the short track a story of a later increment waits in the backlog, not in a sheet.
+  for (const row of backlog ?? []) {
+    const cited = new Set(row.stories.match(buildIdPattern(lots)) ?? []);
+    for (const id of cited) if (known.has(id)) covered.get(id).push(`${BACKLOG_FILE} (${row.name || `line ${row.line}`})`);
+  }
   for (const story of stories) {
     const by = covered.get(story.id);
     if (by.length === 0) {
-      findings.push({ file: planFile, line: story.line, column: 1, rule: 'story-uncovered', severity: 'error', message: `${story.id} (${story.title}) is in no slice. Put it in the Scope of exactly one.` });
+      findings.push({ file: planFile, line: story.line, column: 1, rule: 'story-uncovered', severity: 'error', message: `${story.id} (${story.title}) is in no slice. Put it in the Scope of exactly one${backlog === null ? '' : `, or in one row of ${BACKLOG_FILE}`}.` });
     } else if (by.length > 1) {
       findings.push({ file: planFile, line: story.line, column: 1, rule: 'story-twice', severity: 'error', message: `${story.id} (${story.title}) is in ${by.length} slices: ${by.join(', ')}. Keep it in exactly one.` });
     }
@@ -561,7 +621,7 @@ const IN_PROGRESS = /^in[ -]progress$/i;
  * @param {SliceRow[]} slices
  * @returns {string}
  */
-export function renderStatus(slices) {
+export function renderStatus(slices, backlog = []) {
   const out = [BANNER_STATUS, '', '# Slice status', '', 'One row for each slice. This file is the only place that holds the state of a slice. Running this command again keeps the states and the notes, and adds a new slice as todo.', ''];
   out.push('| Slice | Title | Format | Lane | Increment | State | Depends on | Size | Note |');
   out.push('|---|---|---|---|---|---|---|---|---|');
@@ -580,6 +640,10 @@ export function renderStatus(slices) {
   out.push('', '## In progress', '');
   if (running.length === 0) out.push('None.');
   else for (const s of running) out.push(`- ${s.id}: ${cell(s.title)}`);
+  if (backlog.length > 0) {
+    // The short track: the later slices wait in the backlog, and /recade:slices cuts them for the next increment.
+    out.push('', '## Backlog', '', `${backlog.length} later slice${backlog.length === 1 ? ' waits' : 's wait'} in ${BACKLOG_FILE}, not cut into sheets yet. \`/recade:slices\` cuts the next increment from it.`);
+  }
   return `${out.join('\n')}\n`;
 }
 
@@ -644,7 +708,8 @@ const BLOCKED_FROM = /^Blocked from ([a-z0-9-]+): /;
  */
 export function setStatus(root, id, status, options = {}) {
   if (!STATUSES.includes(status)) return { ok: false, message: `${status} is not a status. The statuses are: ${STATUSES.join(', ')}.` };
-  const rows = checkSlices(root).status;
+  const checked = checkSlices(root);
+  const rows = checked.status;
   const row = rows.find((r) => r.id === id);
   if (!row) return { ok: false, message: `No slice ${id} in ${join(root, 'slices')}.` };
   const from = row.status;
@@ -661,7 +726,7 @@ export function setStatus(root, id, status, options = {}) {
   else if (from === 'blocked') row.note = cause;
   else if (cause !== '') row.note = cause;
   row.status = status;
-  return { ok: true, from, to: status, text: renderStatus(rows) };
+  return { ok: true, from, to: status, text: renderStatus(rows, checked.backlog) };
 }
 
 // ---------------------------------------------------------------------------------------------------------

@@ -67,7 +67,7 @@ test('no harness agent or command keeps the tracking sheet, the journal or the P
     const w = writesOf(agent(n));
     assert.ok(w.includes('workspace:tmp/<S-nn>/tracking.md') && w.includes('workspace:tmp/<S-nn>/journal.md'), n);
   }
-  assert.deepEqual(writesOf(agent('release-manager')), ['workspace:artifacts/*/<S-nn>/**', 'workspace:tmp/<S-nn>/**']);
+  assert.deepEqual(writesOf(agent('release-manager')), ['workspace:artifacts/*/<S-nn>/**', 'workspace:tmp/<S-nn>/**', 'workspace:slices/reviews/<S-nn>.md']);
 });
 
 test('the PR body holds the technical summary, the test evidence and the issue URL only, never a DoD row, a decision or the sheet', () => {

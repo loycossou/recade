@@ -392,8 +392,11 @@ function configReason(args, i, sub, rest) {
 /** The reason a git command is refused, or null. `args` starts after `git`. */
 function checkGit(args, ctx) {
   let i = 0;
+  /** The folders of `-C`: a merge there lands on the branch of that checkout, not of the session. */
+  const folders = [];
   while (i < args.length && args[i].startsWith('-')) {
     const opt = args[i];
+    if (opt === '-C' && args[i + 1] !== undefined) folders.push(args[i + 1]);
     i += ['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--exec-path', '--super-prefix', '--config-env'].includes(opt) ? 2 : 1;
   }
   const sub = args[i];
@@ -427,6 +430,12 @@ function checkGit(args, ctx) {
   }
   if ((sub === 'merge' || sub === 'pull') && (onProtected(ctx.currentBranch) || /\b(switch|checkout)\b/.test(ctx.raw))) {
     return 'Merging into main is refused. A human merges the pull request.';
+  }
+  // `git -C <folder> merge` merges into the branch checked out in that folder, which may be main of another checkout
+  // (the main checkout of a code repository, seen from a slice worktree). The caller reads that branch.
+  if ((sub === 'merge' || sub === 'pull') && folders.length > 0 && typeof ctx.branchAt === 'function') {
+    const at = ctx.branchAt(folders[folders.length - 1]);
+    if (at === undefined || onProtected(at)) return 'Merging into main is refused. A human merges the pull request (on the local forge: recade slices merge, from the main session, after the owner\'s yes).';
   }
   if (sub === 'init') return '`git init` inside the project would hide its files behind another repository. Refused.';
   if (sub === 'rm' && positionals(rest).some(isTestPath)) return TEST_RM;
@@ -605,7 +614,7 @@ function scanCommand(command, ctx, depth = 0) {
  * @returns {string|null}
  */
 export function checkBash(command, deny = {}) {
-  const ctx = { currentBranch: deny.currentBranch ?? null, raw: command, isTracked: deny.isTracked };
+  const ctx = { currentBranch: deny.currentBranch ?? null, raw: command, isTracked: deny.isTracked, branchAt: deny.branchAt };
   const reason = scanCommand(command, ctx);
   if (reason) return reason;
   if (ctx.hooks && ctx.gitSeen) return ctx.hooks;
@@ -625,6 +634,144 @@ export function checkBash(command, deny = {}) {
     }
     if (tokenize(command).some(namesAgentFiles)) {
       return 'The agents and the commands of the harness (.claude/agents, .claude/commands) are not changed through the shell. `recade harness install` or a human does that.';
+    }
+  }
+  return null;
+}
+
+/* ---------- the refs of the default branch and of the other slices ---------- */
+
+/** The branch a ref names (`main`, `heads/main`, `refs/heads/main`, `+src:main`), or null for a ref that is not a branch. */
+function branchOfRef(ref) {
+  let r = String(ref).replace(/^\+/, '');
+  if (r.startsWith('refs/') && !r.startsWith('refs/heads/')) return null;
+  r = r.replace(/^refs\/heads\//, '').replace(/^heads\//, '');
+  return r === '' ? null : r;
+}
+
+/** Git options that take a value, by subcommand, so their value is not read as a branch. */
+const REF_VALUE_OPTIONS = {
+  'update-ref': ['-m'],
+  'symbolic-ref': ['-m'],
+  fetch: ['--depth', '--deepen', '--shallow-since', '--shallow-exclude', '-j', '--jobs', '--upload-pack', '-o', '--server-option', '--negotiation-tip', '--refmap', '--filter', '--recurse-submodules-default'],
+  push: ['-o', '--push-option', '--receive-pack', '--exec', '--repo'],
+  branch: ['--contains', '--no-contains', '--merged', '--no-merged', '--points-at', '--format', '--sort', '-u', '--set-upstream-to'],
+  checkout: ['--conflict', '--pathspec-from-file'],
+  switch: ['--conflict'],
+  rebase: ['--onto', '-s', '--strategy', '-X', '--strategy-option', '--exec', '-x'],
+  reset: ['--pathspec-from-file'],
+};
+
+/** The short flags of one word (`-fD` gives `f` and `D`), or the long option itself. */
+const flagsOf = (args) => args.flatMap((a) => (/^-[a-zA-Z]+$/.test(a) ? [...a.slice(1)].map((c) => `-${c}`) : a.startsWith('--') ? [a.split('=')[0]] : []));
+
+/**
+ * The reason a git command of an agent writes the default branch, or the branch of a slice that is not its own, or
+ * null. It reads `update-ref` (and `--stdin`), `symbolic-ref HEAD <ref>`, a `fetch` or `push` refspec into the branch,
+ * `branch -f`, `-m`, `-M`, `-c`, `-C`, `-d`, `-D` and the creation of a branch, `checkout -b`/`-B` and `switch -c`/`-C`,
+ * a switch to such a branch, `rebase <upstream> <branch>`, and `reset`, `commit`, `cherry-pick`, `revert`, `am`, `merge`,
+ * `pull` and `rebase` on a checkout that is on such a branch. On the local forge no branch protection backs this up.
+ * @param {string} command
+ * @param {{protectedBranches?: string[], own?: string[], currentBranch?: string|null, branchAt?: (folder: string) => string|null|undefined}} ctx
+ *   `protectedBranches`: the default branches; `own`: the branches the agent may write (the branches of its slices);
+ *   `currentBranch`: the branch where the shell runs; `branchAt`: the branch checked out in a folder given to `-C`
+ * @returns {string|null}
+ */
+export function checkRefWrites(command, ctx = {}, depth = 0) {
+  if (depth > 4) return 'The command nests too deeply to be read. Refused.';
+  const protectedList = ctx.protectedBranches ?? PROTECTED_BRANCHES;
+  const own = ctx.own ?? [];
+  const why = (branch, what) => (protectedList.includes(branch)
+    ? `${what} writes ${branch}, the default branch. No agent moves it: a human merges (on the local forge: recade slices merge, from the main session, after the owner's yes).`
+    : `${what} writes ${branch}, the branch of another slice. An agent writes only the branch of its own slice${own.length > 0 ? ` (${own.join(', ')})` : ''}.`);
+  const bad = (branch) => typeof branch === 'string' && (protectedList.includes(branch) || (/^slice\//.test(branch) && !own.includes(branch)));
+  let segments;
+  try {
+    segments = tokenize(command);
+  } catch {
+    return 'The command cannot be read, so it is refused for an agent.';
+  }
+  for (const tokens of segments) {
+    for (const t of tokens) {
+      if (t.includes('$(') || t.includes('`')) {
+        const inner = checkRefWrites(t.replace(/`/g, ' '), ctx, depth + 1);
+        if (inner) return inner;
+      }
+    }
+    for (let i = 0; i < tokens.length; i++) {
+      if (basename(tokens[i]) !== 'git') continue;
+      const args = tokens.slice(i + 1);
+      let k = 0;
+      let folder = null;
+      while (k < args.length && args[k].startsWith('-')) {
+        if (args[k] === '-C' && args[k + 1] !== undefined) folder = folder === null ? args[k + 1] : resolve(folder, args[k + 1]);
+        k += ['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--exec-path', '--super-prefix', '--config-env'].includes(args[k]) ? 2 : 1;
+      }
+      const sub = args[k];
+      if (sub === undefined) continue;
+      const rest = args.slice(k + 1);
+      const end = rest.indexOf('--');
+      const before = end === -1 ? rest : rest.slice(0, end);
+      const pos = positionals(before, REF_VALUE_OPTIONS[sub] ?? []);
+      const flags = flagsOf(before);
+      const has = (...names) => names.some((n) => flags.includes(n));
+      /** The branch checked out where this git command works: null when HEAD is detached, undefined when unknown. */
+      const here = () => (folder !== null && typeof ctx.branchAt === 'function' ? ctx.branchAt(folder) : ctx.currentBranch ?? null);
+      const hidden = (list) => list.some((a) => DYNAMIC.test(a));
+      const what = `git ${sub}`;
+      if (sub === 'update-ref') {
+        if (has('--stdin')) return 'git update-ref --stdin hides the refs it writes. Refused for an agent.';
+        if (hidden(pos)) return 'git update-ref with a variable, a substitution or a pattern hides the ref. Refused for an agent.';
+        const ref = pos[0];
+        if (ref === undefined) continue;
+        const branch = ref === 'HEAD' || ref === '@' ? here() : branchOfRef(ref);
+        if (branch === undefined) return 'git update-ref HEAD in a folder the guard cannot read is refused for an agent.';
+        if (bad(branch)) return why(branch, what);
+      } else if (sub === 'symbolic-ref') {
+        if (has('-d', '--delete') || pos.length >= 2) return 'git symbolic-ref that points HEAD at another branch (or deletes it) is refused for an agent: a commit would then land on that branch.';
+      } else if (sub === 'fetch' || sub === 'push') {
+        if (sub === 'fetch' && has('--multiple', '--all')) continue;
+        const specs = sub === 'push' && has('-d', '--delete') ? pos.slice(1).map((r) => `:${r}`) : pos.slice(1);
+        for (const spec of specs) {
+          if (sub === 'fetch' && !spec.includes(':')) continue;
+          const dst = spec.includes(':') ? spec.slice(spec.lastIndexOf(':') + 1) : spec;
+          if (DYNAMIC.test(dst)) return `${what} with a pattern or a variable in the refspec hides the branch it writes. Refused for an agent.`;
+          const branch = dst === 'HEAD' || dst === '@' ? here() : branchOfRef(dst);
+          if (bad(branch)) return why(branch, what);
+        }
+      } else if (sub === 'branch') {
+        const current = here();
+        let written = [];
+        if (has('-d', '-D', '--delete')) written = pos;
+        else if (has('-m', '-M', '--move', '-c', '-C', '--copy')) {
+          const moves = has('-m', '-M', '--move');
+          written = pos.length >= 2 ? [pos[1], ...(moves ? [pos[0]] : [])] : [pos[0], ...(moves ? [current] : [])];
+        } else if (has('-f', '--force')) written = pos.slice(0, 1);
+        else if (!has('-l', '--list', '-a', '--all', '-r', '--remotes', '--show-current', '-v', '--verbose', '--contains', '--no-contains', '--merged', '--no-merged', '--points-at', '--format', '--sort', '-u', '--set-upstream-to', '--unset-upstream', '--edit-description')) written = pos.slice(0, 1);
+        if (hidden(written.filter((b) => typeof b === 'string'))) return 'git branch with a variable, a substitution or a pattern hides the branch it writes. Refused for an agent.';
+        const hit = written.find(bad);
+        if (hit !== undefined) return why(hit, what);
+      } else if (sub === 'checkout' || sub === 'switch') {
+        const create = sub === 'checkout' ? ['-b', '-B', '--orphan'] : ['-c', '-C', '--create', '--force-create', '--orphan'];
+        const at = before.findIndex((a) => create.includes(a.split('=')[0]));
+        if (at >= 0) {
+          const name = before[at].includes('=') ? before[at].split('=')[1] : before[at + 1];
+          if (name !== undefined && DYNAMIC.test(name)) return `${what} with a variable in the branch name hides it. Refused for an agent.`;
+          if (bad(name)) return why(name, what);
+        } else if (end === -1 && pos.length === 1 && bad(pos[0])) return why(pos[0], `${what} to ${pos[0]}, then a commit there,`);
+      } else if (sub === 'rebase' && pos.length >= 2 && !has('--abort', '--continue', '--skip', '--quit', '--edit-todo', '--show-current-patch')) {
+        if (bad(pos[1])) return why(pos[1], what);
+      } else if (sub === 'worktree') continue;
+      if (['reset', 'commit', 'cherry-pick', 'revert', 'am', 'merge', 'pull', 'rebase'].includes(sub)) {
+        if (sub === 'reset') {
+          const moves = !has('-p', '--patch') && pos.length > 0 && !['HEAD', '@'].includes(pos[0]);
+          if (!moves) continue;
+        }
+        if (['--abort', '--quit'].some((f) => before.includes(f))) continue;
+        const branch = here();
+        if (branch === undefined) return `${what} in a folder the guard cannot read is refused for an agent: it cannot say which branch it moves.`;
+        if (bad(branch)) return why(branch, `${what} on the checkout of ${branch}`);
+      }
     }
   }
   return null;
@@ -736,19 +883,24 @@ function agentRefusal(tokens) {
  *   `git -C`, `--work-tree`, `tar -C`, `unzip -d`): a reason, or null. Without it, any folder is accepted.
  * @param {number} [depth] how deep in command substitutions the call is (internal)
  * @param {string} [agent] how a refusal names the agent, with its Writes: `the agent` by default
+ * @param {((abs: string) => boolean)|null} [nested] a path inside `root` that belongs to another checkout (a slice worktree
+ *   under the workspace): it is judged by `outside`, not by the globs
+ * @param {string|null} [start] the folder the shell runs in, where relative paths start (`root` by default; null when
+ *   the guard cannot tell, so every relative path is refused)
  * @returns {string|null}
  */
-export function checkRestrictedShell(command, allow, root, matchGlob, outside = () => null, folder = null, depth = 0, agent = 'the agent') {
+export function checkRestrictedShell(command, allow, root, matchGlob, outside = () => null, folder = null, depth = 0, agent = 'the agent', nested = null, start = root) {
   if (depth > 4) return 'The command nests too deeply to be read. Refused.';
   const held = `Shell writes are held to the Writes of ${agent} (${allow.globs.length > 0 ? allow.globs.join(', ') : 'no file'})`;
   const refuse = (target) => `${held}: ${target} is not among them.`;
   const lost = (target) => `${held}: after a cd the guard cannot follow, ${target} cannot be checked.`;
   const realRoot = realOf(root);
-  let base = root;
+  // The shell starts in the folder of the hook input (a worktree, when the session moved there), else at the root.
+  let base = start === undefined ? root : start;
   const judgeAbs = (abs, top, shown) => {
     const rel = relative(top, abs);
     if (rel === '') return refuse(shown);
-    if (rel === '..' || rel.startsWith('../') || isAbsolute(rel)) return outside(abs);
+    if (rel === '..' || rel.startsWith('../') || isAbsolute(rel) || (nested !== null && nested(abs))) return outside(abs);
     const p = rel.split('\\').join('/');
     return allow.globs.some((g) => matchGlob(g, p) || matchGlob(g, `${p}/x`)) ? null : refuse(p);
   };
@@ -767,6 +919,33 @@ export function checkRestrictedShell(command, allow, root, matchGlob, outside = 
     return judgeAbs(abs, root, target) ?? (real !== abs || realRoot !== root ? judgeAbs(real, realRoot, target) : null);
   };
   const check = (target) => checkFrom(target, base);
+  /**
+   * A path a command removes (`rm`, `rmdir`, the source of `mv`, `find -delete`, `git clean`, `git rm`, `git worktree
+   * remove`), judged like a write. A glob is read as the folder it lists: removing in it is writing in it.
+   */
+  const removes = (target, from = base) => {
+    if (target === undefined) return null;
+    if (/[$`]/.test(target) || target.startsWith('~')) return refuse(target);
+    const at = target.search(/[*?[{]/);
+    // A folder goes with everything in it: it is judged as a path inside it.
+    if (at === -1) {
+      if (from === null && !target.startsWith('/')) return lost(target);
+      if (!isDir(resolve(from ?? root, target))) return checkFrom(target, from);
+      if (checkFrom(`${target.replace(/\/+$/, '')}/x`, from) === null) return null;
+      return checkFrom(target, from) ?? refuse(target);
+    }
+    const folderOf = dirname(`${target.slice(0, at)}x`);
+    return checkFrom(`${folderOf}/x`, from) === null ? null : refuse(target);
+  };
+  /** The folder a git command works in: its last `-C`, read from the current folder. Undefined when it is lost. */
+  const gitFrom = (folders) => {
+    let at = base;
+    for (const f of folders) {
+      if (at === null && !f.startsWith('/')) return undefined;
+      at = resolve(at ?? root, f);
+    }
+    return at;
+  };
   const moveTo = (target) => {
     if (target === undefined || target === '-' || DYNAMIC.test(target) || target.startsWith('~')) return { base: null };
     if (base === null && !target.startsWith('/')) return { base: null };
@@ -789,7 +968,7 @@ export function checkRestrictedShell(command, allow, root, matchGlob, outside = 
     // A command substitution runs too: read it the same way, from the current folder.
     for (const t of tokens) {
       if (t.includes('$(') || t.includes('`')) {
-        const inner = checkRestrictedShell(t.replace(/`/g, ' '), allow, base ?? root, matchGlob, outside, folder, depth + 1, agent);
+        const inner = checkRestrictedShell(t.replace(/`/g, ' '), allow, root, matchGlob, outside, folder, depth + 1, agent, nested, base);
         if (inner) return inner;
       }
     }
@@ -836,6 +1015,24 @@ export function checkRestrictedShell(command, allow, root, matchGlob, outside = 
             if (r) return r;
           }
         }
+      } else if (['rm', 'rmdir', 'unlink', 'shred'].includes(name) && commandAt(tokens, i)) {
+        const args = untilRedirect(rest);
+        const end = args.indexOf('--');
+        const targets = end === -1 ? positionals(args) : [...positionals(args.slice(0, end)), ...args.slice(end + 1)];
+        for (const f of targets) {
+          const r = removes(f);
+          if (r) return r;
+        }
+      } else if (name === 'find' && commandAt(tokens, i) && rest.includes('-delete')) {
+        const paths = [];
+        for (const a of rest) {
+          if (a.startsWith('-') || a === '(' || a === '!') break;
+          paths.push(a);
+        }
+        for (const f of paths.length === 0 ? ['.'] : paths) {
+          const r = removes(f);
+          if (r) return r;
+        }
       } else if (name === 'cp' || name === 'mv' || name === 'install' || name === 'ln') {
         const args = untilRedirect(rest);
         const at = args.findIndex((a) => a === '-t' || a.startsWith('--target-directory'));
@@ -843,6 +1040,14 @@ export function checkRestrictedShell(command, allow, root, matchGlob, outside = 
         if (dest !== undefined) {
           const r = check(dest);
           if (r) return r;
+        }
+        if (name === 'mv') {
+          // A move removes its sources: each one is judged like a write too.
+          const sources = at >= 0 ? positionals(args).filter((a) => a !== dest) : positionals(args).slice(0, -1);
+          for (const src of sources) {
+            const r = removes(src);
+            if (r) return r;
+          }
         }
         if (name === 'ln' && dest !== undefined) {
           // Writing through a link writes what it points at: each source is judged as a write too. The target of a
@@ -874,6 +1079,22 @@ export function checkRestrictedShell(command, allow, root, matchGlob, outside = 
         if (!READ_ONLY_GIT.has(sub)) {
           for (const f of folders) {
             const r = inFolder(f);
+            if (r) return r;
+          }
+        }
+        const subArgs = rest.slice(rest.indexOf(sub) + 1);
+        const end = subArgs.indexOf('--');
+        const opts = end === -1 ? subArgs : subArgs.slice(0, end);
+        const paths = end === -1 ? positionals(subArgs, ['-e', '--exclude']) : [...positionals(opts, ['-e', '--exclude']), ...subArgs.slice(end + 1)];
+        const flags = opts.flatMap((a) => (/^-[a-zA-Z]+$/.test(a) ? [...a.slice(1)].map((c) => `-${c}`) : [a.split('=')[0]]));
+        const removed = sub === 'clean' && !flags.includes('-n') && !flags.includes('--dry-run') ? (paths.length === 0 ? ['.'] : paths)
+          : sub === 'rm' && !flags.includes('--cached') ? paths
+            : sub === 'worktree' && ['remove', 'move'].includes(subArgs[0]) ? positionals(subArgs.slice(1)).slice(0, 1)
+              : [];
+        if (removed.length > 0) {
+          const from = gitFrom(folders.filter((f) => !/^--/.test(f)));
+          for (const f of removed) {
+            const r = from === undefined && !f.startsWith('/') ? lost(f) : removes(f, from);
             if (r) return r;
           }
         }

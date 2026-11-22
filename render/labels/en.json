@@ -24,5 +24,28 @@
   "warning": "Warning",
   "decision": "Decision",
   "captionSeparator": ": ",
+  "registers": {
+    "decisions": "decision register",
+    "reviews": "review notes"
+  },
+  "dossier": {
+    "recap": "The recap in {n} sentences",
+    "recapSub": "Enough to hold the whole document in five minutes.",
+    "image": "The image",
+    "real": "The real thing",
+    "before": "Before",
+    "after": "After",
+    "decisions": "The decisions that matter",
+    "decision": "Decision",
+    "why": "Why",
+    "howToReadLead": "How to read.",
+    "howToRead": "Each hard idea comes twice: first an image from everyday life, then the real thing, with its real names.",
+    "about": "About this document",
+    "index": "Index",
+    "theme": "Light or dark",
+    "indexKicker": "The project documents",
+    "indexLede": "Each document as a dossier to read, with its Word or Excel file beside it.",
+    "read": "Read the dossier"
+  },
   "planTerms": {}
 }

@@ -1,7 +1,8 @@
-import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { parse } from 'yaml';
 import { frontMatterLength } from '../frontmatter-lines.js';
+import { SECOND_OPINION_MODELS } from '../models.js';
 
 /** @typedef {{model: string, effort: string}} Lane */
 /** @typedef {{agents: Record<string, {standard: Lane, sensitive: Lane}>, families: Record<string, string[]>, second_opinion?: {same_family?: 'error'|'warn'}}} Models */
@@ -158,4 +159,51 @@ export function syncAgents(dir, models, { check = false } = {}) {
   }
   if (errors.length > 0) throw new Error(errors.join('\n'));
   return { changed };
+}
+
+/**
+ * The table with the owner's choice for the second opinion (`models.second_opinion` of the user config): `fable` puts
+ * both lanes of `second-opinion` on Fable 5.2, another family than the reviewer, so the family check passes with no
+ * warning; `opus`, or no choice, returns the table as it is. The effort stays.
+ * @param {Models} models
+ * @param {string|undefined} choice
+ * @returns {Models}
+ */
+export function withSecondOpinion(models, choice) {
+  if (choice !== 'fable' || models?.agents?.['second-opinion'] === undefined) return models;
+  const next = structuredClone(models);
+  for (const lane of LANES) next.agents['second-opinion'][lane].model = SECOND_OPINION_MODELS.fable;
+  return next;
+}
+
+/**
+ * The second-opinion choice an installed copy holds: `fable` when `<dir>/second-opinion.md` runs on Fable 5.2,
+ * `opus` otherwise (also when the file is missing). Verify reads the project copy, which CI reads too, not the user
+ * config of one machine.
+ * @param {string} dir the agents folder of a project
+ * @returns {'opus'|'fable'}
+ */
+export function secondOpinionOf(dir) {
+  const path = join(dir, 'second-opinion.md');
+  if (!existsSync(path)) return 'opus';
+  const lines = readFileSync(path, 'utf8').split('\n');
+  const front = lines.slice(1, Math.max(1, frontMatterLength(lines) - 1));
+  const model = /^model:\s*(\S+)\s*$/.exec(front.find((l) => l.startsWith('model:')) ?? '')?.[1];
+  return model === SECOND_OPINION_MODELS.fable ? 'fable' : 'opus';
+}
+
+/**
+ * The text of an agent file with the `model:` line of its front matter set to `model`. A text with no front matter or
+ * no `model:` line is returned as it is.
+ * @param {string} text
+ * @param {string} model
+ * @returns {string}
+ */
+export function withModelLine(text, model) {
+  const lines = text.split('\n');
+  const end = frontMatterLength(lines) - 1;
+  const at = lines.findIndex((l, i) => i > 0 && i < end && l.startsWith('model:'));
+  if (at < 0) return text;
+  lines[at] = `model: ${model}`;
+  return lines.join('\n');
 }

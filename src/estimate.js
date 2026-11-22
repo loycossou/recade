@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { budgetsOf } from './budgets.js';
 import { dollarsOf, modelId, PRICES_SOURCE } from './pricing.js';
@@ -97,17 +97,30 @@ export const TOKENS_WORDS = 1500;
 export const SPIKE_LAYERS = pair(3, 5);
 export const FINALISTS = pair(2, 3);
 /**
- * The short track spikes a layer only when its two best totals are within 10 percent, which nobody knows before the
- * research: from no spike at all up to the full number.
+ * The short track decides from the research by default: spikes run only when a layer is close (its two best totals
+ * within 10 percent) and the owner then chooses to run them. The estimate counts none.
  */
-export const SHORT_SPIKES = pair(0, SPIKE_LAYERS.high * FINALISTS.high);
+export const SHORT_SPIKES = pair(0);
+/**
+ * The short track when the owner chose to run the spikes (`spikes: run` in the state): one or two close layers, two
+ * finalists each. A project whose analyst already wrote its tasks counts two finalists for each `spikes/TASK-<layer>.md`.
+ */
+export const SHORT_SPIKES_RUN = pair(2, 4);
 export const SPIKE_RESULT_WORDS = 800;
 export const LAYER_STAGES = pair(6, 9);
 export const OWNER_LAYERS = 5;
 /** The owner's own options in the layer loop, researched with the stage `other`. */
 export const OTHER_OPTIONS = pair(0, 2);
+/** The companion of a document (`<doc>.story.yaml`): a kicker, a lede, key facts, a recap. One run writes it for every language. */
+export const STORY_WORDS = 400;
+/** The next increment of the short track: at most 5 slices cut from the backlog, the backlog rewritten. */
+export const NEXT_SLICES = pair(3, 5);
 /** The slices of a PLAN, and the words of one sheet. */
 export const SLICES = pair(12, 25);
+/** The short track cuts the first increment only: the walking skeleton and at most 5 slices, the rest in a backlog. */
+export const SHORT_SLICES = pair(4, 6);
+/** The backlog of the short track: one line for each later slice. */
+export const BACKLOG_WORDS = 300;
 export const SHEET_WORDS = 600;
 /** The text each role replies with when it specialises the harness. */
 export const HARNESS_REPLY_WORDS = 500;
@@ -131,6 +144,29 @@ export const ESTIMATE_PHASES = Object.freeze([
   Object.freeze({ id: 'harness', name: 'Harness', command: 'harness', gates: Object.freeze(['G5']) }),
 ]);
 export const PHASE_IDS = Object.freeze(ESTIMATE_PHASES.map((p) => p.id));
+/**
+ * Estimates asked by name only, never part of the list of phases left: the next increment of the short track, cut by
+ * `/recade:slices` with the stage `next` once G4 is passed.
+ */
+export const EXTRA_ESTIMATES = Object.freeze([
+  Object.freeze({ id: 'next', name: 'Next increment', command: 'slices', gates: Object.freeze([]) }),
+]);
+export const ESTIMATE_IDS = Object.freeze([...PHASE_IDS, ...EXTRA_ESTIMATES.map((p) => p.id)]);
+
+/**
+ * The spikes the stack step counts: none when the owner chose to decide from the research (`spikes: none`); in the
+ * short track, none by default and SHORT_SPIKES_RUN (or two for each task already written) when the owner chose to
+ * run them; in the full track, every finalist of the layers with a choice.
+ */
+export function spikesOf(facts) {
+  if (facts.spikes === 'none') return pair(0);
+  const tasks = facts.spikeTasks ?? 0;
+  if (facts.track === 'short') {
+    if (facts.spikes !== 'run') return SHORT_SPIKES;
+    return tasks > 0 ? pair(2 * tasks) : SHORT_SPIKES_RUN;
+  }
+  return tasks > 0 ? scale(pair(tasks), FINALISTS) : scale(SPIKE_LAYERS, FINALISTS);
+}
 export const SLICE_LANES = Object.freeze(['standard', 'sensitive']);
 
 // ---------------------------------------------------------------------------------------------------------
@@ -170,7 +206,8 @@ function documentRuns(doc, budget, author, { draft = 'draft', reviewer, reads, c
   runs.push(framing(author, 'apply-decisions', 'edit', { writes: scale(budget, APPLY_SHARE), reads: sum(budget, DEC_WORDS) }));
   runs.push(framing(author, 'fix', 'edit', { count: pair(0, 2), writes: FIX_WORDS, reads: budget }));
   runs.push(framing(author, 'revise', 'edit', { count: pair(0, 1), writes: scale(budget, 0.3), reads: budget }));
-  return runs;
+  // The step of the documents phase each run belongs to, for the durations: `d1`, `d2`, `d3` or `plan`.
+  return runs.map((r) => ({ ...r, step: doc.toLowerCase() }));
 }
 
 /** The runs of one phase for the facts of a project. */
@@ -192,7 +229,7 @@ function phaseRuns(phase, facts) {
       const t = facts.translations;
       // The short track: two boards, a revise only for a blocker, spikes only for a close layer, the architect's opinion alone.
       const boards = short ? SHORT_BOARDS : BOARDS;
-      const spikes = short ? SHORT_SPIKES : scale(SPIKE_LAYERS, FINALISTS);
+      const spikes = spikesOf(facts);
       const opinions = short ? 1 : 2;
       const d1Reviewer = domain.high > 0 && domain.low > 0 ? 'domain-expert' : 'architect';
       const runs = [
@@ -234,6 +271,12 @@ function phaseRuns(phase, facts) {
           framing('security-lead', 'translate', 'edit', { count: t, writes: B.D3, reads: B.D3 }),
         );
       }
+      // The companions of Step 9, on the mechanical model: one run for each document, its translations included.
+      runs.push(
+        framing('project-lead', 'story', 'edit', { count: 2, writes: STORY_WORDS * (1 + t), reads: (B.D1 + B.PLAN) / 2 }),
+        framing('architect', 'story', 'edit', { writes: STORY_WORDS * (1 + t), reads: B.D2 }),
+        framing('security-lead', 'story', 'edit', { writes: STORY_WORDS * (1 + t), reads: B.D3 }),
+      );
       return runs;
     }
     case 'bible': {
@@ -248,12 +291,23 @@ function phaseRuns(phase, facts) {
         framing('bible-writer', 'fix', 'edit', { count: pair(0, 2), writes: FIX_WORDS, reads: B.BIBLE }),
       ];
       if (facts.translations > 0) runs.push(framing('bible-writer', 'translate', 'edit', { count: facts.translations, writes: B.PLAN, reads: B.PLAN }));
+      // The companions of the BIBLE and of the PLAN, in one run on the mechanical model.
+      runs.push(framing('bible-writer', 'story', 'edit', { writes: STORY_WORDS * (2 + facts.translations), reads: B.BIBLE + B.PLAN }));
       return runs;
     }
     case 'slices': {
-      const sheets = scale(SHEET_WORDS, SLICES);
+      const sheets = scale(SHEET_WORDS, short ? SHORT_SLICES : SLICES);
       return [
-        framing('slicer', 'cut', 'write', { writes: sheets, reads: B.PLAN + B.BIBLE + B.D1 + B.D2 + B.D3 + B.STACK + TEMPLATE_WORDS }),
+        framing('slicer', 'cut', 'write', { writes: short ? sum(sheets, BACKLOG_WORDS) : sheets, reads: B.PLAN + B.BIBLE + B.D1 + B.D2 + B.D3 + B.STACK + TEMPLATE_WORDS }),
+        framing('slicer', 'revise', 'edit', { count: pair(0, 2), writes: scale(sheets, 0.2), reads: sum(sheets, B.PLAN) }),
+      ];
+    }
+    case 'next': {
+      // The next increment: the slicer cuts it from the backlog with the stage `next`, then the checks loop.
+      const sheets = scale(SHEET_WORDS, NEXT_SLICES);
+      const existing = scale(SHEET_WORDS, SHORT_SLICES);
+      return [
+        framing('slicer', 'next', 'write', { writes: sum(sheets, BACKLOG_WORDS), reads: sum(B.PLAN + B.BIBLE + B.D1 + B.D2 + B.D3 + B.STACK + TEMPLATE_WORDS + BACKLOG_WORDS, existing) }),
         framing('slicer', 'revise', 'edit', { count: pair(0, 2), writes: scale(sheets, 0.2), reads: sum(sheets, B.PLAN) }),
       ];
     }
@@ -265,7 +319,7 @@ function phaseRuns(phase, facts) {
       ];
     }
     default:
-      throw new Error(`Unknown phase: ${phase}. Use ${PHASE_IDS.join(', ')}.`);
+      throw new Error(`Unknown phase: ${phase}. Use ${ESTIMATE_IDS.join(', ')}.`);
   }
 }
 
@@ -369,9 +423,10 @@ export function roundDollars(value, way) {
 const money = (n) => (Number.isInteger(n) ? `$${n}` : `$${n.toFixed(2)}`);
 const runsText = (r) => (r.low === r.high ? `${r.low} agent run${r.low === 1 ? '' : 's'}` : `${r.low} to ${r.high} agent runs`);
 
-/** One line: "about $12 to $30, 14 to 18 agent runs". */
+/** One line: "about $12 to $30, 14 to 18 agent runs", or "about $12 to $30 and 1 to 2 hours, 14 to 18 agent runs" with a duration. */
 export function formatRange(entry) {
-  return `about ${money(entry.rounded.low)} to ${money(entry.rounded.high)}, ${runsText(entry.runs)}`;
+  const time = entry.minutes === undefined ? '' : ` and ${formatDuration(entry.minutes)}`;
+  return `about ${money(entry.rounded.low)} to ${money(entry.rounded.high)}${time}, ${runsText(entry.runs)}`;
 }
 
 const finish = (priced) => ({
@@ -415,8 +470,19 @@ export function projectFacts(root, state, fallback = {}) {
     domainExpert: roster === null ? pair(0, 1) : pair(hasDomain),
     translations: Math.max(0, (Array.isArray(deliverables) ? deliverables.length : 1) - 1),
     secondOpinion: state?.second_opinion ?? 'sensitive',
+    spikes: state?.spikes === 'run' || state?.spikes === 'none' ? state.spikes : null,
+    spikeTasks: root === null ? 0 : spikeTasksOf(root),
     fromRoster: roster !== null,
   };
+}
+
+/** The tasks of the spikes the analyst wrote, `spikes/TASK-<layer>.md`: 0 when there is none yet. */
+function spikeTasksOf(root) {
+  try {
+    return readdirSync(join(root, 'spikes')).filter((n) => /^TASK-[^/]+\.md$/.test(n)).length;
+  } catch {
+    return 0;
+  }
 }
 
 /** True when every gate of the phase is passed in the state. */
@@ -434,15 +500,16 @@ export function estimatePhases(facts, state, ctx) {
     ids = ESTIMATE_PHASES.filter((p) => !passed(state, p) && !(p.id === 'intake' && state?.mode === 'adopt')).map((p) => p.id);
   }
   const phases = ids.map((id) => {
-    const phase = ESTIMATE_PHASES.find((p) => p.id === id);
-    if (phase === undefined) throw new Error(`Unknown phase: ${id}. Use ${PHASE_IDS.join(', ')}.`);
-    return { phase: id, name: phase.name, ...finish(priceRuns(phaseRuns(id, facts), ctx)) };
+    const phase = [...ESTIMATE_PHASES, ...EXTRA_ESTIMATES].find((p) => p.id === id);
+    if (phase === undefined) throw new Error(`Unknown phase: ${id}. Use ${ESTIMATE_IDS.join(', ')}.`);
+    return { phase: id, name: phase.name, ...finish(priceRuns(phaseRuns(id, facts), ctx)), ...phaseDuration(id, facts) };
   });
   const total = finish({
     runs: { low: phases.reduce((n, p) => n + p.runs.low, 0), high: phases.reduce((n, p) => n + p.runs.high, 0) },
     dollars: { low: phases.reduce((n, p) => n + p.dollars.low, 0), high: phases.reduce((n, p) => n + p.dollars.high, 0) },
   });
-  return { estimate: true, prices: PRICES_SOURCE, writer: ctx.writer, phases, total: { runs: total.runs, dollars: total.dollars, rounded: total.rounded } };
+  const minutes = roundPair({ low: phases.reduce((n, p) => n + p.minutes.low, 0), high: phases.reduce((n, p) => n + p.minutes.high, 0) });
+  return { estimate: true, prices: PRICES_SOURCE, writer: ctx.writer, phases, total: { runs: total.runs, dollars: total.dollars, rounded: total.rounded, minutes } };
 }
 
 /**
@@ -454,4 +521,187 @@ export function estimateSlice(lane, ctx) {
   if (!SLICE_LANES.includes(lane)) throw new Error(`Unknown lane: ${lane}. Use ${SLICE_LANES.join(' or ')}.`);
   const priced = finish(priceRuns(sliceRuns(lane, ctx.secondOpinion ?? 'sensitive'), ctx));
   return { estimate: true, prices: PRICES_SOURCE, slice: lane, ...priced };
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// Durations
+// ---------------------------------------------------------------------------------------------------------
+
+/**
+ * Wall-clock minutes of each step in a real short-track framing (trust mode, 57 agent runs, the owner's answers
+ * included): the reference every duration scales from. The stack step of that trial ran 3 spikes. The harness was not
+ * part of the trial: its figure is an assumption until a project measures it.
+ */
+export const TRIAL_MINUTES = Object.freeze({
+  intake: 10, team: 14, d1: 25, direction: 29, stack: 114, d2: 42, d3: 43, plan: 23, gate: 17, bible: 27, slices: 28, harness: 30,
+  // Not measured: the cut, the checks and the issues of the slices phase, with no formula to choose.
+  next: 21,
+});
+export const TRIAL_SPIKES = 3;
+/** The minutes of one spike in the trial, run one after the other, and of what any spike needs once: the sentence, the room check, the cleanup. */
+export const SPIKE_MINUTES = pair(4, 5);
+export const SPIKE_SETUP_MINUTES = 5;
+/**
+ * The stack step without its spikes: the layers, the research, the matrix, the opinions and the owner's answers. The
+ * trial's 114 minutes held 3 spikes of about 4.5 minutes each and their setup.
+ */
+export const STACK_RESEARCH_MINUTES = TRIAL_MINUTES.stack - TRIAL_SPIKES * ((SPIKE_MINUTES.low + SPIKE_MINUTES.high) / 2) - SPIKE_SETUP_MINUTES;
+/** The full track writes and reads documents twice as long: each run takes longer, on top of the extra runs. */
+export const FULL_TRACK_TIME = 1.3;
+/** The range around the scaled measure: the owner's pace, the machine, a retry. */
+export const DURATION_SPREAD = pair(0.85, 1.2);
+/**
+ * How much of a step's time follows its number of runs. The rest (the owner reading and answering, the checks, the
+ * commits) stays: twice the runs is 1.4 times the minutes.
+ */
+export const RUN_WEIGHT = 0.4;
+/** The minutes of one agent run in a step the trial ran with no agent (the translations of the render step). */
+export const MINUTES_PER_RUN = 5;
+
+/**
+ * The steps of a phase as its command numbers them in its progress lines. The documents phase was measured step by
+ * step; the other phases split their measure by `share`, an assumption. Intake and harness have no progress line.
+ */
+export const PHASE_STEPS = Object.freeze({
+  team: Object.freeze([
+    { id: 'lead', step: 3, of: 7, name: 'the project lead', share: 0.2 },
+    { id: 'roster', step: 4, of: 7, name: 'the roster', share: 0.2 },
+    { id: 'doctrines', step: 5, of: 7, name: 'the doctrines', share: 0.45 },
+    { id: 'check', step: 6, of: 7, name: 'the check', share: 0.05 },
+    { id: 'gate', step: 7, of: 7, name: 'the review and G1', share: 0.1 },
+  ]),
+  docs: Object.freeze([
+    { id: 'd1', step: 3, of: 9, name: 'D1' },
+    { id: 'direction', step: 4, of: 9, name: 'the art direction' },
+    { id: 'stack', step: 5, of: 9, name: 'the stack decision' },
+    { id: 'd2', step: 6, of: 9, name: 'D2' },
+    { id: 'd3', step: 7, of: 9, name: 'D3' },
+    { id: 'plan', step: 8, of: 9, name: 'the PLAN' },
+    { id: 'gate', step: 9, of: 9, name: 'render and G2' },
+  ]),
+  bible: Object.freeze([
+    { id: 'bible', step: 3, of: 9, name: 'the BIBLE', share: 0.35 },
+    { id: 'plan', step: 4, of: 9, name: 'the PLAN', share: 0.15 },
+    { id: 'review', step: 5, of: 9, name: 'the review', share: 0.15 },
+    { id: 'decisions', step: 6, of: 9, name: 'the open decisions', share: 0.15 },
+    { id: 'translate', step: 7, of: 9, name: 'the translations', share: 0.05 },
+    { id: 'checks', step: 8, of: 9, name: 'the checks and the ID index', share: 0.05 },
+    { id: 'gate', step: 9, of: 9, name: 'render and G3', share: 0.1 },
+  ]),
+  next: Object.freeze([
+    { id: 'cut', step: 3, of: 6, name: 'the cut', share: 0.6 },
+    { id: 'checks', step: 4, of: 6, name: 'the checks', share: 0.2 },
+    { id: 'graph', step: 5, of: 6, name: 'the graph and the status', share: 0.05 },
+    { id: 'issues', step: 6, of: 6, name: 'the issues of the new slices', share: 0.15 },
+  ]),
+  slices: Object.freeze([
+    { id: 'formula', step: 2, of: 6, name: 'the slicing formula', share: 0.1 },
+    { id: 'cut', step: 3, of: 6, name: 'the cut', share: 0.5 },
+    { id: 'checks', step: 4, of: 6, name: 'the checks', share: 0.15 },
+    { id: 'graph', step: 5, of: 6, name: 'the graph and the status', share: 0.05 },
+    { id: 'gate', step: 6, of: 6, name: 'G4', share: 0.2 },
+  ]),
+});
+
+/** The step of the documents phase a run belongs to. `documentRuns` tags its own runs. */
+function docsStepOf(run) {
+  if (run.step !== undefined) return run.step;
+  if (run.stage === 'translate' || run.stage === 'story') return 'gate';
+  if (run.agent === 'ui-designer' || (run.agent === 'ux-designer' && run.stage === 'review')) return 'direction';
+  if (run.agent === 'project-lead' && run.stage === 'glossary') return 'd1';
+  if ((run.agent === 'architect' && run.stage === 'link') || (run.agent === 'security-lead' && run.stage === 'contribute')) return 'd3';
+  if (run.agent === 'stack-analyst' && run.stage === 'revise') return 'plan';
+  return 'stack';
+}
+
+/** The runs of a list, low and high. */
+const countRuns = (runs) => pair(...BOUNDS.map((b) => runs.reduce((n, r) => n + pick(r.count, b), 0)));
+
+/** The runs of each unit the trial measured: the steps of the documents phase, or the whole phase. */
+function measuredUnits(phase, facts) {
+  const runs = phaseRuns(phase, facts);
+  if (phase !== 'docs') return { [phase]: { all: countRuns(runs), spikes: pair(0) } };
+  const units = {};
+  for (const { id } of PHASE_STEPS.docs) {
+    const mine = runs.filter((r) => docsStepOf(r) === id);
+    units[id] = { all: countRuns(mine), spikes: countRuns(mine.filter((r) => r.agent === 'spike-runner')) };
+  }
+  return units;
+}
+
+/**
+ * The facts of the trial: short track, no roster yet, documents in one language. Its 57 runs sit at the low count of
+ * the model for those facts (no revise round, no retry), plus its 3 spikes, counted apart: that low count is the reference.
+ */
+const TRIAL_FACTS = () => projectFacts(null, { track: 'short' });
+
+/**
+ * Minutes, low and high, of each measured unit of a phase: the trial's minutes, scaled by the runs of this project
+ * against the runs of the trial with RUN_WEIGHT, by the track, and spread.
+ */
+function unitMinutes(phase, facts) {
+  const reference = measuredUnits(phase, TRIAL_FACTS());
+  const units = measuredUnits(phase, facts);
+  const track = facts.track === 'short' ? 1 : FULL_TRACK_TIME;
+  const out = {};
+  for (const [id, unit] of Object.entries(units)) {
+    const ref = reference[id];
+    // The spikes are timed apart: the rest of the step scales with its own runs.
+    const refRuns = ref.all.low - ref.spikes.low;
+    const measured = id === 'stack' ? STACK_RESEARCH_MINUTES : TRIAL_MINUTES[id];
+    out[id] = pair(...BOUNDS.map((b) => {
+      const runs = unit.all[b] - unit.spikes[b];
+      const scaled = refRuns > 0 ? measured * (1 + RUN_WEIGHT * (runs / refRuns - 1)) : measured + runs * MINUTES_PER_RUN;
+      const spikes = unit.spikes[b] > 0 ? unit.spikes[b] * SPIKE_MINUTES[b] + SPIKE_SETUP_MINUTES : 0;
+      return scaled * track * DURATION_SPREAD[b] + spikes;
+    }));
+  }
+  return out;
+}
+
+/**
+ * Round a duration for the owner: the low figure down, the high one up, to 5 minutes under an hour and to half an
+ * hour above.
+ * @param {number} minutes
+ * @param {'down'|'up'} way
+ */
+export function roundMinutes(minutes, way) {
+  const step = minutes < 60 ? 5 : 30;
+  const n = way === 'down' ? Math.floor(minutes / step + 1e-9) * step : Math.ceil(minutes / step - 1e-9) * step;
+  return Math.max(5, n);
+}
+
+const roundPair = (p) => ({ low: roundMinutes(p.low, 'down'), high: roundMinutes(p.high, 'up') });
+
+/** The duration of a phase and of each of its steps, rounded: `{minutes, steps?}`. */
+function phaseDuration(phase, facts) {
+  const units = unitMinutes(phase, facts);
+  const steps = PHASE_STEPS[phase];
+  if (phase === 'docs') {
+    const total = pair(...BOUNDS.map((b) => Object.values(units).reduce((n, u) => n + u[b], 0)));
+    return { minutes: roundPair(total), steps: steps.map((s) => ({ ...s, minutes: roundPair(units[s.id]) })) };
+  }
+  const whole = units[phase];
+  if (steps === undefined) return { minutes: roundPair(whole) };
+  return {
+    minutes: roundPair(whole),
+    steps: steps.map(({ share, ...s }) => ({ ...s, minutes: roundPair(pair(whole.low * share, whole.high * share)) })),
+  };
+}
+
+const hours = (m) => {
+  const h = m / 60;
+  return `${Number.isInteger(h) ? h : h.toFixed(1)} hour${h === 1 ? '' : 's'}`;
+};
+
+/** "20 to 40 minutes", "3 to 5 hours", "45 minutes to 2 hours". */
+export function formatDuration({ low, high }) {
+  if (high < 60) return low === high ? `${low} minutes` : `${low} to ${high} minutes`;
+  if (low < 60) return `${low} minutes to ${hours(high)}`;
+  return low === high ? hours(high) : `${hours(low).replace(/ hours?$/, '')} to ${hours(high)}`;
+}
+
+/** "Step 3 (D1) 20 to 35 minutes; Step 4 (the art direction) 25 to 45 minutes". */
+export function formatSteps(steps) {
+  return steps.map((s) => `Step ${s.step} (${s.name}) ${formatDuration(s.minutes)}`).join('; ');
 }

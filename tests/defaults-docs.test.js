@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { budgetsText, codeDefaults, modelName, parseBlocks, syncShared } from '../tools/sync-shared.js';
+import { SECOND_OPINION_MODELS } from '../src/models.js';
 
 const repo = join(dirname(fileURLToPath(import.meta.url)), '..');
 const DOCS = ['README.md', 'docs/design.md', 'docs/delivery.md', 'commands/start.md', 'commands/slices.md', 'skills/writing-voice/SKILL.md'];
@@ -48,8 +49,8 @@ function problems(d, texts) {
     }
   }
 
-  // the model of the second-opinion agent
-  const ids = new Set(Object.values(d.secondOpinionModel));
+  // the model of the second-opinion agent: the one of harness/models.yaml, or Fable, the other choice of models.second_opinion
+  const ids = new Set([...Object.values(d.secondOpinionModel), SECOND_OPINION_MODELS.fable]);
   const shown = new Set([...ids].map(modelName));
   for (const file of ['README.md', 'docs/design.md', 'docs/delivery.md', 'commands/start.md']) {
     let seen = 0;

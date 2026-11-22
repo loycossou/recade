@@ -258,7 +258,7 @@ test('board-keeper only reads and summarises: no Writes, no Write tool, no archi
 
 test('release-manager drafts the PR body and the human actions, and never merges', () => {
   const { body } = parseAgent(text('release-manager.md'));
-  assert.deepEqual(writesOf(body), ['workspace:artifacts/*/<S-nn>/**', 'workspace:tmp/<S-nn>/**']);
+  assert.deepEqual(writesOf(body), ['workspace:artifacts/*/<S-nn>/**', 'workspace:tmp/<S-nn>/**', 'workspace:slices/reviews/<S-nn>.md']);
   assert.match(section(body, 'Rules'), /never run `gh pr merge`/);
 });
 
@@ -364,7 +364,7 @@ test('the agents that run a shell never run repo sync or repo add, a nested shel
     const { front, body } = parseAgent(text(f));
     const rules = section(body, 'Rules');
     if (front.tools.includes('Bash')) {
-      assert.match(rules, /Never run `recade repo sync`, `recade repo add`, `recade harness specialise`, `recade workspace commit`, `recade workspace auto-push` or `recade guard snapshot`, a nested shell \(`sh -c`, `bash -c`, `eval`\), or a command that sets `GIT_DIR`, `GIT_WORK_TREE` or `GIT_INDEX_FILE`\. The guard refuses them, and you do not look for a way round it\./, f);
+      assert.match(rules, /Never run `recade repo sync`, `recade repo add`, `recade harness specialise`, `recade workspace commit`, `recade workspace auto-push`, `recade guard snapshot`, `recade slices merge` or `recade slices open`, a nested shell \(`sh -c`, `bash -c`, `eval`\), or a command that sets `GIT_DIR`, `GIT_WORK_TREE` or `GIT_INDEX_FILE`\. The guard refuses them, and you do not look for a way round it\./, f);
     } else assert.equal(rules.includes('repo sync'), false, `${f}: no shell, no such rule`);
   }
 });
@@ -423,8 +423,9 @@ test('the protocol states where the files live, the review evidence filter and t
   const where = part('Where the files live');
   assert.match(where, /`recade workspace root` prints its folder, and a command calls it `<home>`/);
   assert.match(where, /A line of `## Writes` that names a path of the workspace starts with `workspace:`/);
-  assert.match(where, /one worktree for each repository it touches, at `repos\/<name>\/\.claude\/worktrees\/<S-nn>`/);
-  assert.match(where, /The session starts in the first repository of `touches:` and gets the other worktrees as additional directories/);
+  assert.match(where, /Every command and every agent is installed at the root of the workspace, and every session starts there/);
+  assert.match(where, /The worktrees of a slice\*\* live under the workspace, at `worktrees\/<repo>\/<S-nn>`: one git worktree of `repos\/<repo>` for each repository the slice touches/);
+  assert.match(where, /the owner never chooses a folder/);
   assert.match(where, /`Slice issue: https:\/\/github\.com\/<owner>\/<name>\/issues\/<n>`/);
   assert.match(where, /finds the URL from the `github` record of the workspace state \(`owner` and `repo`\) and the issue whose title starts with `\[<S-nn>\]`/);
   assert.match(where, /it reads `\.recade-private\/slice-sheet\.md` only, and it never quotes the sheet/);
@@ -432,7 +433,9 @@ test('the protocol states where the files live, the review evidence filter and t
   for (const re of [/four checks/, /A finding marked `HIGH` or `BLOCKING` carries the excerpt, the failure scenario, and the reason the guards that exist do not stop it/, /Zero findings is a valid result\./, /an exhaustive `switch` judged too long/, /an empty `catch`/, /The proof by mutation of the `reviewer` stays first/]) assert.match(evidence, re);
   assert.match(part('Delegation'), /A turn never ends on "waiting for the agents"/);
   // The limits of the guard that Task 4 wrote stay.
-  assert.match(protocol, /Only the main session runs `recade repo sync`, `recade repo add`, `recade harness specialise`, `recade workspace commit`, `recade workspace auto-push` and `recade guard snapshot`\. The first two rewrite the links of the code repositories, the third writes the agent and command files of the harness, the fourth commits files of the workspace under the commit lock, the fifth records the owner's consent to push the workspace, and the last writes the evidence the audit reads\. The guard refuses all six from an agent/);
+  assert.match(protocol, /Only the main session runs `recade repo sync`, `recade repo add`, `recade harness specialise`, `recade workspace commit`, `recade workspace auto-push`, `recade guard snapshot`, `recade slices merge` and `recade slices open`\. The first two rewrite the links of the code repositories, the third writes the agent and command files of the harness, the fourth commits files of the workspace under the commit lock, the fifth records the owner's consent to push the workspace, the sixth writes the evidence the audit reads, the seventh is the owner's merge on the local forge, and the last opens the worktrees of a slice and ties the session to it\. The guard refuses all eight from an agent/);
+  assert.match(protocol, /The guard records it under `\.recade\/sessions\/` of the workspace, by the session ID of Claude Code/);
+  assert.match(protocol, /\*\*Refused for every agent:\*\* the main checkout `repos\/<repo>`, the worktree of another slice/);
   assert.match(protocol, /`sh -c`, `bash -c` and the other nested shells, `eval`/);
   assert.match(protocol, /`GIT_DIR`, `GIT_WORK_TREE` and `GIT_INDEX_FILE`/);
 });

@@ -1,0 +1,1 @@
+Add how long the step usually takes, from the line `Usual time of each step:` of the cost estimate (keep the figures, translate the words), as in `Step 5 of 9: the stack decision, usually 1.5 to 3.5 hours. Next: D2.` When the estimate printed no such line, leave the time out.

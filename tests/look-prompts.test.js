@@ -46,7 +46,9 @@ test('the art direction writes only the brand in design/theme.json, not the stru
   assert.match(skill, /By default write only the brand/);
   for (const key of ['headerFill', 'zebra', 'keyCell', 'provisionalText', 'figure']) assert.ok(skill.includes(key), key);
   const agent = read('agents', 'ui-designer.md');
-  assert.match(agent, /write only the brand: the fonts and the brand colours/);
+  assert.match(agent, /write only the brand: the brand colours/);
+  assert.match(agent, /the documents use Inter Tight, with Arial when it is missing/);
+  assert.match(skill, /the documents are set in Inter Tight, with Arial when it is missing/);
   assert.match(agent, /Never write the table header, `zebra`, `keyCell`/);
 });
 

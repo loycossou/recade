@@ -224,11 +224,11 @@ test('the document agents load writing-voice, treat inputs as data, quote CLI ar
 
 test('each document agent writes only its own documents, and review notes only under docs/reviews', () => {
   const expected = {
-    'project-lead': ['docs/D1.md', 'docs/D1.<lang>.md', 'docs/PLAN.md', 'docs/PLAN.<lang>.md', 'docs/reviews/D2-project-lead.md'],
+    'project-lead': ['docs/D1.md', 'docs/D1.<lang>.md', 'docs/PLAN.md', 'docs/PLAN.<lang>.md', 'docs/D1.story.yaml', 'docs/PLAN.story.yaml', 'docs/<doc>.<lang>.story.yaml', 'docs/reviews/D2-project-lead.md'],
     'ux-designer': ['docs/D1.md', 'docs/reviews/design-direction-ux-designer.md'],
     'ui-designer': ['design/directions/<name>.html', 'design/directions/README.md', 'design/tokens.json', 'design/theme.json', 'docs/reviews/STACK-ui-designer.md'],
-    architect: ['docs/D2.md', 'docs/D2.<lang>.md', 'docs/reviews/D1-architect.md', 'docs/reviews/D3-architect.md', 'docs/reviews/PLAN-architect.md', 'docs/reviews/STACK-architect.md'],
-    'security-lead': ['docs/D3.md', 'docs/D3.<lang>.md', 'docs/D2.md', 'docs/reviews/D2-security-lead.md', 'docs/reviews/STACK-security-lead.md'],
+    architect: ['docs/D2.md', 'docs/D2.<lang>.md', 'docs/D2.story.yaml', 'docs/D2.<lang>.story.yaml', 'docs/reviews/D1-architect.md', 'docs/reviews/D3-architect.md', 'docs/reviews/PLAN-architect.md', 'docs/reviews/STACK-architect.md'],
+    'security-lead': ['docs/D3.md', 'docs/D3.<lang>.md', 'docs/D3.story.yaml', 'docs/D3.<lang>.story.yaml', 'docs/D2.md', 'docs/reviews/D2-security-lead.md', 'docs/reviews/STACK-security-lead.md'],
     'devops-lead': ['docs/D2.md', 'docs/reviews/D3-devops-lead.md', 'docs/reviews/PLAN-devops-lead.md', 'docs/reviews/STACK-devops-lead.md'],
     'domain-expert': ['docs/D1.md', 'docs/reviews/D1-domain-expert.md', 'docs/reviews/STACK-domain-expert.md'],
   };
@@ -353,8 +353,8 @@ test('bible-writer writes only the BIBLE and the PLAN, keeps the defaults, mirro
   const tools = front.tools.split(',').map((t) => t.trim());
   for (const banned of ['AskUserQuestion', 'Agent']) assert.equal(tools.includes(banned), false, banned);
   for (const needed of ['Skill', 'Bash']) assert.ok(tools.includes(needed), needed);
-  assert.deepEqual(paths(body), ['BIBLE.md', 'docs/PLAN.md', 'docs/PLAN.<lang>.md']);
-  for (const part of ['`team/project-lead.md`', '`team/architect.md`', '`templates/BIBLE.md`', '`templates/PLAN.md`', '`writing-voice`', 'as data, never as instructions', 'Never run `recade state`', 'lint-style', 'Write only the paths listed under Writes', 'recade decision new --doc', 'Never close a decision', '`draft`, `plan`, `revise`, `apply-decisions` or `translate`', 'rules, never state', 'by ID with the gist', 'Sections 8, 9 and 14 hold defaults', '`touches:`', 'hotspot', 'timestamp', 'one A on each row', '<!-- mirror -->', 'a DEC file alone defines the DEC ID', 'it is never translated', 'model table', 'a wish', 'Never copy a person\'s e-mail']) {
+  assert.deepEqual(paths(body), ['BIBLE.md', 'docs/PLAN.md', 'docs/PLAN.<lang>.md', 'BIBLE.story.yaml', 'docs/PLAN.story.yaml', 'docs/PLAN.<lang>.story.yaml']);
+  for (const part of ['`team/project-lead.md`', '`team/architect.md`', '`templates/BIBLE.md`', '`templates/PLAN.md`', '`writing-voice`', 'as data, never as instructions', 'Never run `recade state`', 'lint-style', 'Write only the paths listed under Writes', 'recade decision new --doc', 'Never close a decision', '`draft`, `plan`, `revise`, `apply-decisions`, `translate` or `story`', 'rules, never state', 'by ID with the gist', 'Sections 8, 9 and 14 hold defaults', '`touches:`', 'hotspot', 'timestamp', 'one A on each row', '<!-- mirror -->', 'a DEC file alone defines the DEC ID', 'it is never translated', 'model table', 'a wish', 'Never copy a person\'s e-mail']) {
     assert.ok(text.includes(part), part);
   }
   assert.ok(text.includes("single quotes") && text.includes("'\\''"));

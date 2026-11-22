@@ -1,0 +1,1 @@
+Then ask with `AskUserQuestion`: "These were decided by the team. Challenge any?" Options: `No, they stand` and `Yes, I will name them`. On `Yes`, ask in the chat which numbers, and why (data), then follow "Team decisions" of the procedures for each

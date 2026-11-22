@@ -600,7 +600,8 @@ test('a code repository gets only the harness: created.json lists harness paths 
     const r = await initAdopt(options(parent, [{ source: dir, name: 'api' }]));
     const code = join(r.dir, 'repos', 'api');
     const created = readCreated(code);
-    assert.ok(created.length > 20, 'the harness was installed');
+    assert.ok(created.length > 5, 'the harness was installed');
+    assert.equal(created.some((f) => f.startsWith('.claude/agents/')), false, 'the agents live in the workspace');
     for (const f of created) assert.match(f, /^(\.claude\/|\.githooks\/|\.github\/workflows\/recade[^/]*\.ya?ml$|\.github\/dependabot\.yml$|\.gitignore$|\.recade\/)/, f);
     assert.ok(created.includes('.github/workflows/recade.yml'));
     for (const f of ['recade', 'docs/recade', 'slices', 'docs/inventory.md']) assert.equal(existsSync(join(code, f)), false, `${f} is not written in a code repository`);

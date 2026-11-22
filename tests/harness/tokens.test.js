@@ -362,8 +362,8 @@ test('/slice Step 13 passes the session transcript to the cost record and says h
   const step = slice.slice(slice.indexOf('## Step 13. End'), slice.indexOf('## Step 14.'));
   assert.match(step, /--transcript '<transcript>'/);
   assert.match(step, /--since <Started>/);
-  assert.match(step, /--session-dir '<worktree>'/);
-  assert.match(step, /git rev-parse --show-toplevel/);
+  assert.match(step, /--session-dir '<home>'/);
+  assert.match(step, /`<home>` is the folder this session was started in/);
   assert.match(step, /several sessions|more than one session/i);
   assert.match(step, /`transcript_path`/);
   assert.match(step, /`auto`/);

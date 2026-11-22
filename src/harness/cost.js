@@ -3,7 +3,8 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } fr
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { loadState } from '../state.js';
-import { firstSliceLine } from '../project/state.js';
+import { firstSliceLine, forgeOf } from '../project/state.js';
+import { mergedBranches } from './localforge.js';
 import { registryNames } from '../project/touches.js';
 import { checkSlices } from '../project/slices.js';
 import { listProvisionals } from '../project/provisionals.js';
@@ -347,6 +348,21 @@ function listMerged(repo, base, exec) {
 }
 
 /**
+ * The merged slice branches of the local forge, in the shape of `listMerged`, from git only, by the rule the board uses
+ * (`mergedBranches`): a merge commit of `base` has the tip of the branch as a parent, or the `merged:` record of the
+ * sheet names it. `entries` are the branches of the sheets. Its first commit is the oldest commit the merge brought in.
+ * There is no pull request, so `number` is null.
+ */
+function listMergedLocal(repo, base, exec, entries) {
+  return mergedBranches(exec, repo, base, entries).flatMap(({ branch, merge: m }) => {
+    if (m.parents.length < 2 || !Number.isFinite(m.at)) return [];
+    const r = exec(['git', 'log', '--format=%cI', `${m.parents[0]}..${m.parents[1]}`, '--'], { cwd: repo });
+    const dates = r.code === 0 ? r.stdout.split('\n').map((d) => Date.parse(d)).filter(Number.isFinite) : [];
+    return [{ number: null, title: m.subject, branch, mergedAt: m.at, oid: m.oid, firstCommit: dates.length > 0 ? Math.min(...dates) : null }];
+  });
+}
+
+/**
  * The first-parent history of the base branch, newest first, with the files each commit changed (a merge commit
  * against its first parent).
  * @returns {{oid: string, at: number, subject: string, files: Set<string>}[]}
@@ -404,12 +420,17 @@ function slicesOf(root, inc) {
 export function doraMetrics(root, inc, { exec = defaultExec, base } = {}) {
   if (!INC_ID.test(inc)) throw new Error(`Invalid increment: ${JSON.stringify(inc)}. Use INC-1 style.`);
   if (base !== undefined && !BRANCH.test(base)) throw new Error(`Invalid base branch: ${JSON.stringify(base)}.`);
-  const ids = new Set(slicesOf(root, inc).map((s) => s.id));
+  const rows = slicesOf(root, inc);
+  const ids = new Set(rows.map((s) => s.id));
+  /** The branches of the sheets, with the merge each `merged:` record names in the repository `name` (any one for a legacy project). */
+  const entries = (name) => rows.map((s) => ({ branch: s.branch, recorded: (name === null ? Object.values(s.merged ?? {})[0] : s.merged?.[name]) ?? null }));
   const state = loadState(root) ?? {};
+  // The local forge reads the merges from git only: no gh call (docs/design.md, section 6.8).
+  const local = forgeOf(state) === 'local';
   const names = registryNames(state).filter((n) => /^[a-z0-9]+(-[a-z0-9]+)*$/.test(n) && n !== 'workspace');
   if (names.length === 0) {
     const own = base ?? 'main';
-    const found = collect(root, ids, own, exec);
+    const found = collect(root, ids, own, exec, local, entries(null));
     return summarize(inc, own, found.merges, found.failed);
   }
   const defaults = new Map((Array.isArray(state.repos) ? state.repos : []).filter((e) => e !== null && typeof e === 'object').map((e) => [e.name, e.default_branch]));
@@ -422,7 +443,7 @@ export function doraMetrics(root, inc, { exec = defaultExec, base } = {}) {
     const own = base ?? (typeof defaults.get(name) === 'string' && BRANCH.test(defaults.get(name)) ? defaults.get(name) : 'main');
     let found;
     try {
-      found = collect(dir, ids, own, exec);
+      found = collect(dir, ids, own, exec, local, entries(name));
     } catch (err) {
       throw new Error(`${name}: ${firstLine(err?.message ?? err)}`);
     }
@@ -436,8 +457,8 @@ export function doraMetrics(root, inc, { exec = defaultExec, base } = {}) {
 }
 
 /** The merges of the slices `ids` into `base` of the repository at `dir`, and the ones that failed. */
-function collect(dir, ids, base, exec) {
-  const merged = listMerged(dir, base, exec);
+function collect(dir, ids, base, exec, local = false, entries = []) {
+  const merged = local ? listMergedLocal(dir, base, exec, entries) : listMerged(dir, base, exec);
   const history = mainHistory(dir, resolveBase(dir, base, exec), exec);
   const titleOf = new Map(merged.map((p) => [p.oid, p.title]));
   const labelled = history.map((c) => ({ ...c, label: titleOf.get(c.oid) ?? c.subject }));

@@ -39,7 +39,7 @@ Only the dispatching command runs this, and only in trust mode. An agent never c
 The layers are sorted by the same test, with what the analyst knows of the finalists:
 
 - A layer goes to the owner when its finalists differ in money (a licence, a paid service, a hosting tier) or in lock-in (what leaving the option later costs). It is asked as in `stack-selection`: the top 5, then one question.
-- A layer with no spike has no finalists (in the short track, a layer whose leader is clear). Compare its top 3 ranked options instead: the layer goes to the owner when they differ in money or in lock-in.
+- A layer with no spike has no finalists (in the short track, a layer whose leader is clear). Compare its top 3 ranked options instead: the layer goes to the owner when they differ in money or in lock-in. The same holds for a layer whose spikes did not run, because the owner chose to decide from the research or the machine had no room for them.
 - Any other layer is `team`: the analyst takes rank 1, records it with `recade decision team add --doc 'STACK'` and its reason, and no question is asked.
 - A layer imposed by a source or by the owner stays imposed.
 

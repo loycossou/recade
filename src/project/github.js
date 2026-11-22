@@ -1,8 +1,10 @@
+import { readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { parse } from 'yaml';
 import { loadState, saveState } from '../state.js';
 import { findPlan } from './plan.js';
-import { checkSlices, parseBacklogPoints } from './slices.js';
+import { checkSlices } from './slices.js';
+import { parseLots, parseStories, storyBody, storyOfBody } from './backlog.js';
 import { slugify } from './scaffold.js';
 
 /**
@@ -24,7 +26,107 @@ export const FIELDS = Object.freeze([
   { name: 'Priority', kind: 'select', options: ['P0', 'P1', 'P2', 'P3'] },
   { name: 'Due', kind: 'date' },
   { name: 'Owner', kind: 'text' },
+  { name: 'Epic', kind: 'text' },
 ]);
+
+// ---- epics: one issue for each lot of the PLAN ----
+
+/** The label of an epic issue. */
+export const EPIC_LABEL = 'epic';
+/** The marker that makes an issue the epic of a lot: Recade finds its epics by it, and only by it. */
+export const epicMarker = (code) => `<!-- recade:epic ${code} -->`;
+const EPIC_MARK = /<!-- recade:epic ([A-Z][A-Z0-9]*) -->/;
+/** The lot code of an epic issue body, or null for any other issue. */
+export const epicCode = (body) => EPIC_MARK.exec(String(body ?? ''))?.[1] ?? null;
+const STORY_IN_TEXT = /\b[A-Z][A-Z0-9]*-\d{2,3}\b/g;
+
+/** The section `## <name>` of a sheet, as text, without its comments. */
+function sheetSection(text, name) {
+  const lines = String(text).replace(/<!--[\s\S]*?-->/g, '').split(/\r?\n/);
+  const start = lines.findIndex((l) => new RegExp(`^##\\s+${name}\\s*$`, 'i').test(l));
+  if (start === -1) return '';
+  const end = lines.findIndex((l, i) => i > start && /^##\s/.test(l));
+  return lines.slice(start + 1, end === -1 ? undefined : end).join('\n');
+}
+
+/**
+ * The epics of a project, from the PLAN and the slice sheets as they are now. A lot is a code of the `## Lots` table of the
+ * PLAN (with its name and goal) or of a backlog story. Its stories are the backlog rows of that code. A slice sits under the
+ * lot of the first story its Scope cites, and the other lots it serves are named in `also`. A slice that cites no story has no epic.
+ * @param {string} root
+ * @returns {{file: string|null, lots: {code: string, name: string, goal: string, stories: {id: string, title: string}[], slices: {id: string, title: string}[], servedBy: string[]}[],
+ *   lotOf: Map<string, string>, also: Map<string, string[]>, sliceLots: Map<string, string[]>}}
+ */
+export function epicPlan(root) {
+  const found = findPlan(root);
+  const stories = found === null ? [] : parseStories(found.text);
+  const table = found === null ? new Map() : parseLots(found.text);
+  const codes = [...new Set([...table.keys(), ...stories.map((s) => s.lot)])];
+  const lots = codes.map((code) => ({
+    code,
+    name: table.get(code)?.name || stories.find((s) => s.lot === code && s.lotName !== '')?.lotName || '',
+    goal: table.get(code)?.goal ?? '',
+    stories: stories.filter((s) => s.lot === code).map((s) => ({ id: s.id, title: s.title })),
+    slices: [],
+    servedBy: [],
+  }));
+  const byCode = new Map(lots.map((l) => [l.code, l]));
+  const storyLot = new Map(stories.map((s) => [s.id, s.lot]));
+  const lotOf = new Map(stories.map((s) => [s.id, s.lot]));
+  const also = new Map();
+  const sliceLots = new Map();
+  for (const s of checkSlices(root).status) {
+    let text = '';
+    try {
+      text = readFileSync(join(root, s.file), 'utf8');
+    } catch { /* an unreadable sheet has no epic */ }
+    const served = [...new Set((sheetSection(text, 'Scope').match(STORY_IN_TEXT) ?? []).filter((id) => storyLot.has(id)).map((id) => storyLot.get(id)))];
+    sliceLots.set(s.id, served);
+    if (served.length === 0) continue;
+    lotOf.set(s.id, served[0]);
+    also.set(s.id, served.slice(1));
+    byCode.get(served[0]).slices.push({ id: s.id, title: s.title });
+    for (const code of served.slice(1)) byCode.get(code).servedBy.push(s.id);
+  }
+  return { file: found?.file ?? null, lots, stories, lotOf, also, sliceLots };
+}
+
+/** The title of the epic of a lot: its code in brackets and its name. */
+export const epicTitle = (lot) => `[${lot.code}] ${lot.name || `Lot ${lot.code}`}`;
+
+/** The body of the epic of a lot: the marker, the goal, the stories and the slices. Rebuilt the same way each time. */
+export function epicBody(lot, plan) {
+  const out = [epicMarker(lot.code), `Epic of the lot ${lot.code}${lot.name ? ` (${lot.name})` : ''}, from ${plan.file ?? 'the PLAN'}.`, ''];
+  out.push(lot.goal ? `Goal: ${lot.goal}` : 'Goal: the PLAN gives none yet.', '');
+  out.push('Stories:', ...(lot.stories.length > 0 ? lot.stories.map((s) => `- ${s.id} ${s.title}`) : ['- none yet']), '');
+  out.push('Slices:', ...(lot.slices.length > 0 ? lot.slices.map((s) => `- ${s.id} ${s.title}`) : ['- none yet']));
+  if (lot.servedBy.length > 0) out.push('', `Also served by: ${lot.servedBy.map((id) => `${id} (under ${plan.lotOf.get(id)})`).join(', ')}.`);
+  return out.join('\n');
+}
+
+/**
+ * Did Recade write this issue for this story or slice? A story issue carries the story marker, or the one-line body of
+ * earlier versions; a slice issue carries its `[ID]` title and the body Recade writes. Only such an issue is ever edited.
+ */
+function madeByRecade(issue, t) {
+  if (issue === null || !Number.isInteger(issue.number) || typeof issue.body !== 'string') return false;
+  if (t.story && storyOfBody(issue.body) === t.id) return true;
+  const titled = typeof issue.title === 'string' && (issue.title === `[${t.id}]` || issue.title.startsWith(`[${t.id}] `));
+  if (!titled) return false;
+  return t.story ? issue.body.startsWith(`Backlog story ${t.id} of `) && storyOfBody(issue.body) === null : issue.body.startsWith('Slice sheet ');
+}
+
+/** The body of the issue of a slice. A slice that serves several lots names the others. */
+const sliceBody = (file, others) => `Slice sheet ${file}.${others.length > 0 ? ` It also serves the lot${others.length === 1 ? '' : 's'} ${others.join(', ')}.` : ''}`;
+
+/**
+ * The gh call that attaches an issue to its epic as a sub-issue (REST: POST /repos/{owner}/{repo}/issues/{issue_number}/sub_issues
+ * with the numeric id of the sub-issue). `replace` moves an issue that already has a parent. Every sub-issue write goes through here.
+ */
+export const subIssueArgs = (repo, epicNumber, subIssueId, replace = false) => [
+  'api', '--method', 'POST', `repos/${repo}/issues/${epicNumber}/sub_issues`, '-F', `sub_issue_id=${subIssueId}`,
+  ...(replace ? ['-F', 'replace_parent=true'] : []),
+];
 
 const DATA_TYPE = { text: 'TEXT', number: 'NUMBER', date: 'DATE', select: 'SINGLE_SELECT' };
 const SIZE_POINTS = { S: 1, M: 2, L: 3 };
@@ -68,23 +170,27 @@ function projectName(root, slug) {
   return slug.replace(/-workspace$/, '').split('-').filter(Boolean).map((w) => w[0].toUpperCase() + w.slice(1)).join(' ') || 'Project';
 }
 
-/** The things that become issues: each backlog story of the PLAN, then each slice. */
-function targets(root) {
+/** The things that become issues: each backlog story of the PLAN, then each slice. `epics` (from `epicPlan`) adds the Epic value. */
+function targets(root, epics = null) {
   const out = [];
   const found = findPlan(root);
-  const plan = found === null ? null : found.text; // no PLAN: only the slices
-  for (const s of plan === null ? [] : parseBacklogPoints(plan)) {
+  // No PLAN: only the slices. A story carries what the PLAN says of it, and its board fields follow the PLAN.
+  const lotName = (story) => epics?.lots.find((l) => l.code === story.lot)?.name ?? story.lotName;
+  for (const s of found === null ? [] : parseStories(found.text)) {
     const values = { Status: 'Backlog' };
-    if (/^\d+(\.\d+)?$/.test(s.points)) values.Points = Number(s.points);
-    out.push({ id: s.id, title: s.title, body: `Backlog story ${s.id} of ${found.file}.`, values });
+    if (s.points !== null) values.Points = s.points;
+    if (s.priority !== '') values.Priority = s.priority;
+    if (s.increment !== '') values.Increment = s.increment;
+    out.push({ id: s.id, title: s.title, body: storyBody(s, found.file, lotName(s)), values, story: true, follow: ['Points', 'Priority', 'Increment', 'Epic'] });
   }
   for (const s of checkSlices(root).status) {
     const values = { Status: 'Backlog' };
     if (String(s.lane).trim() !== '') values.Lane = String(s.lane).trim();
     if (String(s.increment).trim() !== '') values.Increment = String(s.increment).trim();
     if (SIZE_POINTS[String(s.size).trim()] !== undefined) values.Points = SIZE_POINTS[String(s.size).trim()];
-    out.push({ id: s.id, title: s.title, body: `Slice sheet ${s.file}.`, values });
+    out.push({ id: s.id, title: s.title, body: sliceBody(s.file, epics?.also.get(s.id) ?? []), values, slice: true, follow: ['Epic'] });
   }
+  if (epics !== null) for (const t of out) if (epics.lotOf.has(t.id)) t.values.Epic = epics.lotOf.get(t.id);
   return out;
 }
 
@@ -106,11 +212,18 @@ function targets(root) {
  * `<owner>/<project>-<name>`, pushed, and its remote recorded in the registry. A code repository whose remote is already a
  * GitHub repository is only checked (never created, never pushed to), and one whose remote is elsewhere is skipped with
  * a warning. The issues always land on the workspace repository: a slice sheet is private and never reaches a code repository.
+ * The epics come with the issues: the label `epic`, one epic issue for each lot of the PLAN (`epicPlan`), each story and slice
+ * issue under the epic of its lot as a sub-issue, and the `Epic` field. The title and the body of an epic, and of a story or slice
+ * issue Recade wrote, follow the documents, as do the `Epic` field and the `Points`, `Priority` and `Increment` of a story. The epic
+ * of a lot that left the PLAN is closed with a comment, never deleted. An issue Recade did not write is never edited; a linked
+ * one is only put under its epic.
+ * With `sync` (`recade github sync`), the repository and the board must be recorded already: nothing is created or pushed but
+ * the epics, the issues, the items and the links that the documents call for.
  * @param {string} root the project folder (its name is the repository name)
- * @param {{owner: string, exec: Exec, dryRun?: boolean, repos?: string[]}} options
+ * @param {{owner: string, exec: Exec, dryRun?: boolean, repos?: string[], sync?: boolean}} options
  * @returns {Promise<GithubResult>}
  */
-export async function initGithub(root, { owner, exec, dryRun = false, repos = [] }) {
+export async function initGithub(root, { owner, exec, dryRun = false, repos = [], sync = false }) {
   const created = [];
   const planned = [];
   const warnings = [];
@@ -317,13 +430,19 @@ export async function initGithub(root, { owner, exec, dryRun = false, repos = []
       }
       return exists;
     };
-    // The workspace repository, and a project that is not a workspace, are always private.
-    const repoExists = await ensure({ full: repo, dir: root, visibility: 'private' });
+    // The workspace repository, and a project that is not a workspace, are always private. A sync never creates or pushes:
+    // the repository and the board must be the ones `recade github init` recorded.
+    let repoExists = true;
+    if (sync) {
+      if (typeof recorded.repo !== 'string' || !Number.isInteger(recorded.project_number)) throw new GhError('No board is recorded in recade/state.yaml. Run recade github init first.');
+      const view = await readJson(['repo', 'view', repo, '--json', 'name,visibility']);
+      if (typeof view?.visibility === 'string' && view.visibility.toUpperCase() !== 'PRIVATE') throw new GhError(`The repository ${repo} is not private. Recade only uses private repositories.`);
+    } else repoExists = await ensure({ full: repo, dir: root, visibility: 'private' });
     result.repo = repo;
     record({ owner, repo: repoName });
 
     // The code repositories the owner said yes to, one yes each, after the workspace repository.
-    for (const entry of wanted) {
+    for (const entry of sync ? [] : wanted) {
       const { full, own } = entry;
       const dir = join(root, 'repos', entry.name);
       await ensure({ full, dir, visibility: entry.visibility, label: entry.name, manage: own, mayCreate: own });
@@ -413,10 +532,81 @@ export async function initGithub(root, { owner, exec, dryRun = false, repos = []
     }
     if (changed && !dryRun) fields = await listFields();
 
-    // Issues and items. The issues are listed once and matched here by the exact [ID] prefix.
+    // Issues and items. The issues are listed once and matched here by the exact [ID] prefix, the epics by their marker.
     const issues = repoExists
-      ? complete(asArray(await readJson(['issue', 'list', '--repo', repo, '--state', 'all', '--limit', String(LIST_LIMIT), '--json', 'number,title,url'])), LIST_LIMIT, 'issues')
+      ? complete(asArray(await readJson(['issue', 'list', '--repo', repo, '--state', 'all', '--limit', String(LIST_LIMIT), '--json', 'number,title,url,body,state'])), LIST_LIMIT, 'issues')
       : [];
+    const epics = epicPlan(root);
+    const inPlan = new Set(epics.lots.map((l) => l.code));
+    /** The epic issue of each lot code, open or closed: only an issue with the marker, so only one Recade created. */
+    const epicIssues = new Map();
+    for (const i of issues) {
+      const code = epicCode(i.body);
+      if (code !== null && !epicIssues.has(code)) epicIssues.set(code, i);
+    }
+    /** Add an issue to the board when it is not there, and keep its Epic value in line. */
+    const placeEpic = async (issue, ref, code) => {
+      let item = issue === null ? null : (items.find((i) => i.content?.url === issue.url) ?? null);
+      if (item === null) {
+        const out = await write(['project', 'item-add', String(projectRef), '--owner', owner, '--url', issue?.url ?? `<issue ${ref}>`, '--format', 'json']);
+        if (!dryRun) {
+          try {
+            item = { ...JSON.parse(out), content: { url: issue.url } };
+          } catch {
+            throw new GhError('gh project item-add did not print JSON.');
+          }
+          items.push(item);
+          created.push(`item ${ref}`);
+        }
+      }
+      if (item?.epic === code) return;
+      if (dryRun) {
+        planned.push(`${show(['project', 'item-edit', '--id', `<item ${ref}>`, '--project-id', '<project id>', '--field-id', '<Epic>'])} (Epic = ${code})`);
+        return;
+      }
+      const field = named('Epic');
+      if (field === undefined) throw new GhError('The board has no Epic field.');
+      await write(['project', 'item-edit', '--id', item.id, '--project-id', project.id, '--field-id', field.id, '--text', code]);
+      item.epic = code;
+    };
+    const numberOf = (url) => Number(/\/issues\/(\d+)$/.exec(String(url ?? ''))?.[1] ?? NaN);
+    if (epics.lots.length > 0) {
+      // The label first: an issue cannot be created with a label that does not exist.
+      const labels = repoExists ? complete(asArray(await readJson(['label', 'list', '--repo', repo, '--json', 'name', '--limit', String(LIST_LIMIT)])), LIST_LIMIT, 'labels') : [];
+      if (!labels.some((l) => String(l?.name).toLowerCase() === EPIC_LABEL)) {
+        await write(['label', 'create', EPIC_LABEL, '--repo', repo, '--color', '5319E7', '--description', 'A lot of the PLAN, kept by Recade']);
+        if (!dryRun) created.push(`label ${EPIC_LABEL}`);
+      }
+    }
+    for (const lot of epics.lots) {
+      const title = epicTitle(lot);
+      const body = epicBody(lot, epics);
+      const ref = `epic ${lot.code}`;
+      let issue = epicIssues.get(lot.code) ?? null;
+      if (issue === null) {
+        const out = await write(['issue', 'create', '--repo', repo, '--title', title, '--body', body, '--label', EPIC_LABEL]);
+        if (!dryRun) {
+          const url = firstLine(out.split(/\r?\n/).filter(Boolean).pop());
+          if (!/^https:\/\//.test(url)) throw new GhError('gh issue create did not print the issue URL.');
+          issue = { url, number: numberOf(url), title, body, state: 'OPEN' };
+          epicIssues.set(lot.code, issue);
+          created.push(`issue ${ref}`);
+        }
+      } else {
+        // A renamed lot or a changed goal, story list or slice list: the epic follows the PLAN.
+        const edit = [];
+        if (issue.title !== title) edit.push('--title', title);
+        if (String(issue.body ?? '').trim() !== body.trim()) edit.push('--body', body);
+        if (edit.length > 0) {
+          await write(['issue', 'edit', String(issue.number), '--repo', repo, ...edit]);
+          if (!dryRun) {
+            Object.assign(issue, { title, body });
+            created.push(`update ${ref}`);
+          }
+        }
+      }
+      await placeEpic(issue, ref, lot.code);
+    }
     // An issue of an adopted repository that the owner linked to a slice (`recade adopt board`) is that slice's issue,
     // whatever its title. It is never renamed, never copied: the slice is added to the board through it.
     const links = recorded.links !== null && typeof recorded.links === 'object' ? recorded.links : {};
@@ -426,9 +616,13 @@ export async function initGithub(root, { owner, exec, dryRun = false, repos = []
       const r = typeof e?.remote === 'string' ? GITHUB_REMOTE.exec(e.remote.trim()) : null;
       if (r !== null) linkable.add(`${r[1]}/${r[2]}`.toLowerCase());
     }
-    for (const t of targets(root)) {
+    /** The issue of each story and slice, and the repository it lives in, for the sub-issue links. */
+    const placed = new Map();
+    for (const t of targets(root, epics)) {
       const prefix = `[${t.id}]`;
-      let issue = issues.find((i) => typeof i.title === 'string' && (i.title === prefix || i.title.startsWith(`${prefix} `))) ?? null;
+      // A story issue is found by its marker first, so a renamed title does not make a second one.
+      let issue = (t.story ? issues.find((i) => storyOfBody(i.body) === t.id) : undefined)
+        ?? issues.find((i) => typeof i.title === 'string' && (i.title === prefix || i.title.startsWith(`${prefix} `))) ?? null;
       if (issue === null && Number.isInteger(links[t.id])) {
         issue = issues.find((i) => i.number === links[t.id]) ?? null;
         if (issue === null) warnings.push(`${prefix}: the linked issue #${links[t.id]} was not found in ${repo}, so a new issue is created.`);
@@ -440,6 +634,7 @@ export async function initGithub(root, { owner, exec, dryRun = false, repos = []
         else if (!linkable.has(m[1].toLowerCase())) warnings.push(`${prefix}: the link ${links[t.id]} is not an issue of the workspace repository or of a code repository of this project, so it is ignored and the slice gets an issue of its own.`);
         else issue = { url: links[t.id] };
       }
+      const createdNow = issue === null;
       if (issue === null) {
         const out = await write(['issue', 'create', '--repo', repo, '--title', `${prefix} ${t.title}`, '--body', t.body]);
         if (!dryRun) {
@@ -447,7 +642,21 @@ export async function initGithub(root, { owner, exec, dryRun = false, repos = []
           if (!/^https:\/\//.test(issue.url)) throw new GhError('gh issue create did not print the issue URL.');
           created.push(`issue ${prefix}`);
         }
+      } else if (madeByRecade(issue, t)) {
+        // The title and the body Recade wrote follow the PLAN and the sheets. An issue Recade did not write is never edited.
+        const edit = [];
+        const title = `${prefix} ${t.title}`;
+        if (issue.title !== title) edit.push('--title', title);
+        if (String(issue.body ?? '').trim() !== t.body.trim()) edit.push('--body', t.body);
+        if (edit.length > 0) {
+          await write(['issue', 'edit', String(issue.number), '--repo', repo, ...edit]);
+          if (!dryRun) {
+            Object.assign(issue, { title, body: t.body });
+            created.push(`update ${prefix}`);
+          }
+        }
       }
+      placed.set(t.id, { issue, ref: prefix, linked: !createdNow && !madeByRecade(issue, t) });
       let item = issue === null ? null : (items.find((i) => i.content?.url === issue.url
         || (issue.number !== undefined && i.content?.number === issue.number && i.content?.repository === repo)) ?? null);
       const isNew = item === null;
@@ -465,7 +674,8 @@ export async function initGithub(root, { owner, exec, dryRun = false, repos = []
       }
       for (const [name, value] of Object.entries(t.values)) {
         const current = item?.[name.toLowerCase()];
-        if (current !== undefined && current !== null && current !== '') continue;
+        // The Epic value follows the PLAN; any other value already on the board is the owner's and stays.
+        if (t.follow.includes(name) ? current === value : (current !== undefined && current !== null && current !== '')) continue;
         if (dryRun) {
           planned.push(`${show(['project', 'item-edit', '--id', `<item ${prefix}>`, '--project-id', '<project id>', '--field-id', `<${name}>`])} (${name} = ${value})`);
           continue;
@@ -486,6 +696,59 @@ export async function initGithub(root, { owner, exec, dryRun = false, repos = []
         await write(args);
         item[name.toLowerCase()] = value;
         if (!isNew) created.push(`set ${name} on ${prefix}`);
+      }
+    }
+
+    // Sub-issues: each story and slice under the epic of its lot. The sub-issues of every epic Recade made are read first, so
+    // an issue already in place gets no call, and one under another epic is moved (`replace_parent`), never doubled.
+    const parentOf = new Map();
+    for (const [code, epic] of epicIssues) {
+      if (!Number.isInteger(epic.number)) continue;
+      const subs = complete(asArray(await readJson(['api', `repos/${repo}/issues/${epic.number}/sub_issues?per_page=100`])), 100, `sub-issues of the epic ${code}`);
+      for (const sub of subs) if (typeof sub?.html_url === 'string') parentOf.set(sub.html_url, code);
+    }
+    for (const [id, { issue, ref, linked }] of placed) {
+      const code = epics.lotOf.get(id);
+      const epic = code === undefined ? null : epicIssues.get(code) ?? null;
+      if (code === undefined || (issue !== null && parentOf.get(issue.url) === code)) continue;
+      const from = issue === null ? undefined : parentOf.get(issue.url);
+      if (dryRun && (issue === null || epic === null)) {
+        planned.push(show(subIssueArgs(repo, `<epic ${code}>`, `<id of ${ref}>`, from !== undefined)));
+        continue;
+      }
+      // The numeric id of the issue, read from its own repository (an adopted issue may live in a code repository).
+      const where = ISSUE_URL.exec(issue.url);
+      if (where === null) throw new GhError(`${ref}: ${issue.url} is not a GitHub issue URL.`);
+      const subId = firstLine(await read(['api', `repos/${where[1]}/issues/${where[2]}`, '--jq', '.id']));
+      if (!/^\d+$/.test(subId)) throw new GhError(`gh api did not print the id of ${ref}.`);
+      const args = subIssueArgs(repo, epic.number, subId, from !== undefined);
+      if (dryRun) {
+        planned.push(show(args));
+        continue;
+      }
+      const r = await call(args);
+      if (r.code !== 0) {
+        // An adopted issue may already have a parent of its own: Recade does not take it away.
+        if (linked) {
+          warnings.push(`${ref}: the linked issue ${issue.url} could not be put under the epic ${code} (${firstLine(r.stderr) || `exit ${r.code}`}). Attach it by hand if you want it there.`);
+          continue;
+        }
+        throw fail(args, r);
+      }
+      parentOf.set(issue.url, code);
+      created.push(from === undefined ? `sub-issue ${ref} under epic ${code}` : `move ${ref} from epic ${from} to epic ${code}`);
+    }
+
+    // A lot that left the PLAN: its epic is closed with a comment, never deleted. It is reopened if the lot comes back.
+    for (const [code, epic] of epicIssues) {
+      const open = String(epic.state ?? 'OPEN').toUpperCase() !== 'CLOSED';
+      if (!inPlan.has(code) && open) {
+        await write(['issue', 'comment', String(epic.number), '--repo', repo, '--body', `The lot ${code} is no longer in ${epics.file ?? 'the PLAN'}, so Recade closes this epic. It is kept, not deleted.`]);
+        await write(['issue', 'close', String(epic.number), '--repo', repo, '--reason', 'not planned']);
+        if (!dryRun) {
+          epic.state = 'CLOSED';
+          created.push(`close epic ${code}`);
+        }
       }
     }
   } catch (err) {
