@@ -215,6 +215,9 @@ export async function runE2E({ mode, tmp, exec = defaultExec, example = EXAMPLE,
   const dir = join(projects, adopt ? 'fernhill-desk-workspace' : 'fernhill-lending-workspace');
   /** The adopt mode keeps the original where the owner has it: outside the parent folder of the workspace. */
   const original = join(originals, 'fernhill-desk');
+  // The owner merges locally with git, which needs a name and an e-mail. A CI runner has none: give the made-up owner one.
+  const ownerMail = ['owner', 'fernhill.invalid'].join(String.fromCharCode(64));
+  for (const [k, v] of [['GIT_AUTHOR_NAME', 'Fernhill Owner'], ['GIT_AUTHOR_EMAIL', ownerMail], ['GIT_COMMITTER_NAME', 'Fernhill Owner'], ['GIT_COMMITTER_EMAIL', ownerMail]]) process.env[k] ??= v;
   const env = { ...process.env, RECADE_CONFIG_DIR: config };
   /** The code repositories of the run: asked from the owner's answers, or the one adopted. */
   const repoNames = adopt ? ['fernhill-desk'] : (answers.repos ?? []).map((r) => r.name);

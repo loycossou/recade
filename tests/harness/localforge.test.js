@@ -359,3 +359,11 @@ test('prompts: /board shows the dry run and merges only on the yes, /slice never
     assert.match(prompt(rel), /forge/, `${rel} reads the forge before any gh call`);
   }
 });
+
+test('a local merge refused for a missing git identity says how to set it, not to run /merge-order', async () => {
+  const { runLocalMerge } = await import('../../src/harness/localmerge.js');
+  assert.equal(typeof runLocalMerge, 'function');
+  const src = (await import('node:fs')).readFileSync(new URL('../../src/harness/localmerge.js', import.meta.url), 'utf8');
+  assert.match(src, /identity unknown/);
+  assert.match(src, /git config --global user\.name and user\.email/);
+});

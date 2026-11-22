@@ -112,7 +112,12 @@ export function runLocalMerge(root, id, { exec = defaultExec } = {}) {
     const r = call(exec, ['git', '-C', step.dir, 'merge', '--no-ff', '--no-edit', step.branch], step.dir);
     if (r.code !== 0) {
       call(exec, ['git', '-C', step.dir, 'merge', '--abort'], step.dir);
-      result.errors.push(`${label}: git merge failed and was aborted: ${firstLine(r.stderr) || firstLine(r.stdout) || `exit ${r.code}`}. Run /merge-order to bring the branch up to date, then merge again.`);
+      const why = firstLine(r.stderr) || firstLine(r.stdout) || `exit ${r.code}`;
+      // Git refuses a merge commit without a name and an e-mail: that is not a conflict, and /merge-order cannot fix it.
+      const advice = /identity unknown|user\.email|user\.name/i.test(`${r.stderr}\n${r.stdout}`)
+        ? 'Git has no name and e-mail for the merge commit: set them with git config --global user.name and user.email, then merge again.'
+        : 'Run /merge-order to bring the branch up to date, then merge again.';
+      result.errors.push(`${label}: git merge failed and was aborted: ${why}. ${advice}`);
       break;
     }
     step.merged = revParse(exec, step.dir, `refs/heads/${step.base}`);
