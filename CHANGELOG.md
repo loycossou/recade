@@ -6,6 +6,7 @@ This file is curated by hand for each release. At tag time, `recade release-note
 
 ### Opus 5.5 instead of Fable
 
+- The writing agents run on the latest Opus by default (`models.writer: opus`). Fable stays a choice: `/recade:start` offers Opus first, and `recade config set models.writer fable` switches.
 - No agent runs on Fable by default any more: the second opinion of the harness runs on `claude-opus-5-5` in both lanes, and the fallback of the writer agents (`agents/models.json`) is `claude-opus-5-5`.
 - `harness/models.yaml` takes `second_opinion.same_family` (`error`, the default, or `warn`). With `warn`, a second opinion in the reviewer's family is reported as a warning by `recade harness models` and `recade harness verify` instead of being refused.
 

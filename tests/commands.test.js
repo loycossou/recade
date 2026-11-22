@@ -893,17 +893,17 @@ test('bible.md puts the owner\'s writing model, not the default of models.json, 
   assert.ok(step2.includes('replace the `model` of its `writer` entry with the full id that `recade models writer --id` prints'));
 });
 
-test('start.md asks the writing model once, Fable first and recommended, Opus second, and saves it with config set', () => {
+test('start.md asks the writing model once, Opus first and recommended, Fable second, and saves it with config set', () => {
   const step4 = stepSection('start.md', 4);
   assert.ok(step4.includes('Skip this step if `recade config get started` prints `true`.'));
   for (const part of [
     'Writing model, the model of the agents that write and review the documents. Ask with `AskUserQuestion`: "Which model should write your documents?"',
-    '- **Fable** (recommended): the most capable writer, at high effort. Saved as `fable`.',
-    '- **Opus**: the latest Opus, at the same high effort. Saved as `opus`.',
-    'Save with `recade config set models.writer <fable or opus>`.',
-    '`recade config set models.writer opus` changes it later',
+    '- **Opus** (recommended): the latest Opus, at high effort. Saved as `opus`.',
+    '- **Fable**: Fable, at the same high effort. Saved as `fable`.',
+    'Save with `recade config set models.writer <opus or fable>`.',
+    '`recade config set models.writer fable` changes it later',
   ]) assert.ok(step4.includes(part), part);
-  assert.ok(step4.indexOf('**Fable**') < step4.indexOf('**Opus**'));
+  assert.ok(step4.indexOf('**Opus**') < step4.indexOf('**Fable**'));
   assert.ok(step4.indexOf('Writing model') < step4.indexOf('Writing voice'));
 });
 

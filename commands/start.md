@@ -61,10 +61,10 @@ Skip this step if `recade config get started` prints `true`.
 1. GitHub owner, the account or organization where private project repositories are created. Get the default with `gh api user --jq .login`. If that command fails, ask the user for the GitHub owner instead. Otherwise ask with `AskUserQuestion`: the default, or another name. Save with `recade config set github_owner <name>`.
 2. Projects root, the folder that holds your projects. Default `~/projects`. Ask, then save with `recade config set projects_root <path>`.
 3. Writing model, the model of the agents that write and review the documents. Ask with `AskUserQuestion`: "Which model should write your documents?"
-   - **Fable** (recommended): the most capable writer, at high effort. Saved as `fable`.
-   - **Opus**: the latest Opus, at the same high effort. Saved as `opus`.
+   - **Opus** (recommended): the latest Opus, at high effort. Saved as `opus`.
+   - **Fable**: Fable, at the same high effort. Saved as `fable`.
 
-   AskUserQuestion adds "Other" by itself; if the answer is neither, ask again once, then save `fable`. Save with `recade config set models.writer <fable or opus>`. Say in one line that `recade config set models.writer opus` changes it later, and that the second opinion of the harness runs on Opus 5.5 whatever the answer, by the owner's decision of 2026-11-21.
+   AskUserQuestion adds "Other" by itself; if the answer is neither, ask again once, then save `opus`. Save with `recade config set models.writer <opus or fable>`. Say in one line that `recade config set models.writer fable` changes it later, and that the second opinion of the harness runs on Opus 5.5 whatever the answer, by the owner's decision of 2026-11-21.
 4. Extra files, the optional deliverables for your stakeholders. Ask with `AskUserQuestion` with `multiSelect` on: "Which extra files should Recade render for your stakeholders? D1, D2, D3 and the PLAN are always rendered."
    - **Stack**: the stack decision as `STACK.docx` and `STACK.pdf`, and its weighted matrix as `STACK-matrix.xlsx`. Saved as `stack`.
    - **Decisions**: one register of every decision (`DEC-*`) as `DECISIONS.docx`, `DECISIONS.pdf` and `DECISIONS.xlsx`. Saved as `decisions`.

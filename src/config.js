@@ -18,7 +18,7 @@ export const DEFAULT_CONFIG = Object.freeze({
   github_owner: null,
   projects_root: '~/projects',
   voice: 'randall-munroe',
-  models: Object.freeze({ writer: 'fable' }),
+  models: Object.freeze({ writer: 'opus' }),
   deliverables: Object.freeze({ extras: Object.freeze([]) }),
 });
 
