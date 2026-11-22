@@ -1,0 +1,1 @@
+In `--options`, `calendar` is the effect on the dates and `repo` is the files and documents that change. Use the id it prints. Never close a decision and never write a Decision box: the owner answers through the dispatcher.

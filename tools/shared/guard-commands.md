@@ -1,0 +1,1 @@
+Never run `recade repo sync`, `recade repo add`, `recade harness specialise`, `recade workspace commit`, `recade workspace auto-push` or `recade guard snapshot`, a nested shell (`sh -c`, `bash -c`, `eval`), or a command that sets `GIT_DIR`, `GIT_WORK_TREE` or `GIT_INDEX_FILE`. The guard refuses them, and you do not look for a way round it.

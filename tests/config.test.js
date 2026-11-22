@@ -366,10 +366,10 @@ test('recade models writer names the bad value of a hand-edited config and exits
   assert.equal(await run(['models', 'writer'], t.io), 1);
   assert.equal(t.stdout(), '');
   assert.match(t.stderr(), /models\.writer is "gpt" in .*config\.yaml\. Use fable or opus: recade config set models\.writer fable/);
-  for (const args of [[], ['reviewer'], ['writer', '--json'], ['writer', '--id', 'x']]) {
+  for (const args of [[], ['reviewer'], ['writer', '--json'], ['writer', '--id', 'x'], ['mechanical', '--id'], ['mechanical', '--effort', 'x']]) {
     const u = makeIO(dir, env);
     assert.equal(await run(['models', ...args], u.io), 2, args.join(' '));
-    assert.equal(u.stderr(), 'Usage: recade models writer [--id]\n');
+    assert.equal(u.stderr(), 'Usage: recade models writer [--id] | mechanical [--effort]\n');
   }
   rmSync(dir, { recursive: true });
 });

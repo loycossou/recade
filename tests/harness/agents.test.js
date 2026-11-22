@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { run } from '../../src/cli.js';
 import { lintText } from '../../src/style/lint.js';
 import { loadModels, syncAgents } from '../../src/harness/models.js';
+import { stripMarkers } from '../../tools/sync-shared.js';
 
 const repo = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const agentsDir = join(repo, 'harness', 'agents');
@@ -135,7 +136,7 @@ test('every agent names .claude/protocol.md under Reads', () => {
 
 test('each agent calls the Recade CLI through the plugin root, with single-quoted arguments', () => {
   for (const f of files) {
-    const src = text(f);
+    const src = stripMarkers(text(f));
     // The one bullet that forbids `recade harness specialise` names it, and runs nothing.
     for (const line of src.split('\n').filter((l) => !l.startsWith('- Never run `recade repo sync`'))) {
       assert.equal(/(^|[^.\w/"])recade (gate|board|lint-style|slices|state|harness|index)\b/.test(line.replaceAll('`', '')), false, `${f}: bare recade command: ${line.slice(0, 80)}`);

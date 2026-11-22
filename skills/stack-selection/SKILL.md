@@ -74,12 +74,21 @@ After the owner's answers, write the sections 8 to 12 of `STACK.md`:
 
 D2 section 12 mirrors the ADRs of section 8. The ids are defined once, in `STACK.md`.
 
+## Short track
+
+When `recade/state.yaml` says `track: short`, the six steps run lighter. Everything else holds: the criteria, the dated research, the fresh spike runners, the DEC for each owner layer, the gate.
+
+- **Top 3, not top 5.** Each layer with a real choice gets a ranked top 3, as `### 2.n Top 3 for <layer>`. Read "top 5" as "top 3" in the rest of this skill. A DEC still holds 2 or 3 different options.
+- **A first matrix from the research.** At the stage `draft`, score the top 3 of each layer in section 5 from the research of section 3, before any spike.
+- **A spike only when it is close.** A layer gets a spike only when its two best totals are within 10 percent: the second total is at least 90 percent of the first. Its finalists are those two, with one task as in step 4. Any other layer has no spike and no task: section 4 says "no spike, short track: the leader is ahead by more than 10 percent", with the two totals. The stage `matrix` then updates section 5 for the layers that had a spike.
+- **One opinion.** The architect alone gives the independent opinion on the stack.
+
 ## Ask the owner, layer by layer
 
 The owner is not an engineer. The questions come in a fixed order and in plain words. Mode adopt asks no layer question: the stack exists.
 
 - **Layers announced first.** The layers are announced before any analysis. List them: language, framework, database, data access, hosting, authentication, CI and test tools, plus any layer that D1 needs (payments, search, mobile, offline). The owner is asked once, in the chat, what is imposed or preferred for each. Each answer is written in section 1 of `STACK.md` as a constraint with source `owner`. A layer the owner imposed is not studied as a choice: it has no spike.
-- **Owner or team.** Language, framework, database, data access and hosting are the owner's. Any other layer that is reversible and that no later layer depends on (a test tool, a linter, a CI service) is decided by the team: the analyst picks it, records it with `recade decision team add --doc 'STACK'` and a one-line reason, and the owner reads it in the list of team decisions at the gate. The aim is 10 owner DECs at most for the whole documents phase, the layers included.
+- **Owner or team.** In ask mode, language, framework, database, data access and hosting are the owner's. Any other layer that is reversible and that no later layer depends on (a test tool, a linter, a CI service) is decided by the team: the analyst picks it, records it with `recade decision team add --doc 'STACK'` and a one-line reason, and the owner reads it in the list of team decisions at the gate. The aim is 10 owner DECs at most for the whole documents phase, the layers included. In trust mode, "The stack in trust mode" of the `decision-sorting` skill replaces this point: a layer goes to the owner only when its finalists differ in money or in lock-in (its top 3 ranked options when it has no spike), and the team takes rank 1 of any other layer.
 - **Questions in dependency order.** Language, framework, database, data access, hosting, then the rest. Each answer is given to the analyst before the next question, so the later layers are re-ranked: the top 5 of a layer is ranked again against the layers already chosen, an option that no longer fits drops out with the reason, and the next one comes in.
 - **The top 5 is shown first.** Before the question, the owner reads the ranked top 5 of the layer in the chat: the rank, the option, why it is in this place, its main drawback, the recommended one first, and a plain word beside every term or ID. The question tool allows at most 4 options, so the options are ranks 1 to 4, and the question says that the 5th can be picked by typing its name in `Other`.
 - **One plain line for each option.** The owner reads one plain line for each option: cost, skills to hire, hosting and lock-in. No jargon without a plain word beside it.

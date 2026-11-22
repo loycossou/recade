@@ -1,0 +1,1 @@
+You cannot ask the human. Write each question as a closed multiple choice (two to four lettered options, one recommended with its reason, one default, the safest) under Human actions in the report. The main session asks.

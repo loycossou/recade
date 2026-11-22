@@ -1,7 +1,7 @@
 ---
 role: "ux-designer"
 inspired_by: "Hollis Brandt"
-model: "claude-fable-5-2"
+model: "claude-opus-5-5"
 effort: "high"
 sources:
   - { title: "Hollis Brandt, working note 1", url: "https://example.org/notes/ux-designer-1", accessed: "2026-11-18" }

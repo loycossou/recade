@@ -1,0 +1,1 @@
+The aim is 10 owner DECs at most for the whole phase, and the dispatcher tells you how many exist: when in doubt, ask whether the client could not undo it or would be surprised by it. If so it is `owner`, if not it is `team`.

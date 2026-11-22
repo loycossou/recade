@@ -1,0 +1,1 @@
+Read each report block. Show the owner the Human actions, in order. An agent never asks the owner: when its report holds a question, ask it yourself with `AskUserQuestion`, as a closed multiple choice with a recommended option and a safe default.

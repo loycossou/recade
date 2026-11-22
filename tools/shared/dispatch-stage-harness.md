@@ -1,0 +1,1 @@
+the stage or mode name, the slice ID and its lane, the branch and the folder it works in, `<home>` (the full path of the workspace, where the documents named in the agent files are read), and today's date;

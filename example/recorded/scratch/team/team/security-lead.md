@@ -1,7 +1,7 @@
 ---
 role: "security-lead"
 inspired_by: "Odile Marchetti"
-model: "claude-fable-5-2"
+model: "claude-opus-5-5"
 effort: "high"
 sources:
   - { title: "Odile Marchetti, working note 1", url: "https://example.org/notes/security-lead-1", accessed: "2026-11-18" }

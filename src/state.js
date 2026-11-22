@@ -75,3 +75,32 @@ export function saveState(projectDir, state) {
     throw err;
   }
 }
+
+const DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * Is the day of the first delivered slice still to record? True when the project has a state and it holds no
+ * `first_slice_done:` yet. A state that cannot be read says false: the slice moves all the same.
+ * @param {string} projectDir
+ */
+export function firstSliceDue(projectDir) {
+  try {
+    const state = loadState(projectDir);
+    return state !== null && !DATE.test(String(state.first_slice_done ?? ''));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Record `first_slice_done: <date>` in the state, the first time a slice becomes done. Never overwrites a date
+ * already there. Returns true when it wrote the state.
+ * @param {string} projectDir
+ * @param {string} date YYYY-MM-DD
+ */
+export function noteFirstSliceDone(projectDir, date) {
+  if (typeof date !== 'string' || !DATE.test(date)) throw new Error(`Invalid date: ${date}. Use YYYY-MM-DD.`);
+  if (!firstSliceDue(projectDir)) return false;
+  saveState(projectDir, { ...loadState(projectDir), first_slice_done: date });
+  return true;
+}

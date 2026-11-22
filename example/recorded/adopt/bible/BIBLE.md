@@ -97,7 +97,7 @@ When a question has no answer in the binding documents, pick the prudent default
 
 | Work | Model | Effort |
 |---|---|---|
-| Writing and sensitive implementation | claude-fable-5-2 | high |
+| Writing and sensitive implementation | claude-opus-5-5 | high |
 | Mechanical steps | sonnet | medium |
 
 ## 15. Quality gates

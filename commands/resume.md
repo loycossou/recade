@@ -3,23 +3,23 @@ description: Pick up a Recade project where it stopped, at the first unfinished 
 allowed-tools: Bash(node:*), Bash(npm ci:*), Bash(git:*), Read, Write, Edit, AskUserQuestion
 ---
 
-In this file, `recade <sub>` means `node "${CLAUDE_PLUGIN_ROOT}/bin/recade.js" <sub>`. Run it exactly that way.
+<!-- shared:cli-plugin -->In this file, `recade <sub>` means `node "${CLAUDE_PLUGIN_ROOT}/bin/recade.js" <sub>`. Run it exactly that way.<!-- /shared:cli-plugin -->
 
 Write short, plain sentences. No exclamation marks, no emoji. Answer the user in English until Step 0 is done.
 
 ## Step 0. Dependencies
 
-Run `node "${CLAUDE_PLUGIN_ROOT}/bin/recade.js" version`. If it prints a version, go on. If it fails with `ERR_MODULE_NOT_FOUND` or another module error, run `npm ci --omit=dev --prefix "${CLAUDE_PLUGIN_ROOT}"`, then run `version` again. Report the result in one line. If it still fails, show the error and stop.
+<!-- shared:deps-plugin -->Run `node "${CLAUDE_PLUGIN_ROOT}/bin/recade.js" version`. If it prints a version, go on. If it fails with `ERR_MODULE_NOT_FOUND` or another module error, run `npm ci --omit=dev --prefix "${CLAUDE_PLUGIN_ROOT}"`, then run `version` again. Report the result in one line. If it still fails, show the error and stop.<!-- /shared:deps-plugin -->
 
 ## Step 1. Read the state
 
 On a fresh clone of the workspace on another machine, the guard has no plugin root yet: run `recade repo sync --project '<dir>'` first. It writes the plugin root of the workspace and of each repository, clones what is missing and turns the git hooks on. Then go on. `recade repo check` names a repository whose git hooks are off. Here `<dir>` is the folder of the workspace, the current folder. You know it is a fresh clone when a Recade command is refused with a message that names the missing plugin root and `recade repo sync`; on any other machine, skip this paragraph.
 
-From here on, answer in the language of `languages.chat` (`recade config get languages.chat`). If it is not set, use English. Keep Recade keywords in English: slice, gate, lane, harness, BIBLE, PLAN, DEC, retro. When you name an ID to the owner (a DEC, a PRV, a requirement, a slice, a gate), add its gist in parentheses, as in `DEC-03 (weekly payouts)` or `G2 (the documents)`, and name an ID only when the owner needs it to act.
+<!-- shared:chat-language-config -->From here on, answer in the language of `languages.chat` (`recade config get languages.chat`).<!-- /shared:chat-language-config --> If it is not set, use English. Keep Recade keywords in English: slice, gate, lane, harness, BIBLE, PLAN, DEC, retro. <!-- shared:id-gist -->When you name an ID to the owner (a DEC, a PRV, a requirement, a slice, a gate), add its gist in parentheses, as in `DEC-03 (weekly payouts)` or `G2 (the documents)`, and name an ID only when the owner needs it to act.<!-- /shared:id-gist -->
 
-Run `recade state show --json` in the current folder. It looks for `recade/state.yaml` in this folder and in the folders above it, and, in a code repository, through its link to its workspace. `recade workspace root` prints the workspace folder.
+Run `recade state show --json` in the current folder. <!-- shared:state-show-lookup -->It looks for `recade/state.yaml` in this folder and in the folders above it, and, in a code repository, through its link to its workspace.<!-- /shared:state-show-lookup --> `recade workspace root` prints the workspace folder.
 
-If it exits 1 with "No Recade project here", say so in one line and suggest `/recade:new <project>`. Stop. If it exits 1 and the message names `recade repo sync`, this folder is a code repository whose link to its workspace is missing or wrong: say so, tell the owner to run `/recade:resume` from the workspace folder, and stop.
+<!-- shared:no-project -->If it exits 1 with "No Recade project here", say so in one line, suggest `/recade:new <project>`, and stop.<!-- /shared:no-project --> If it exits 1 and the message names `recade repo sync`, this folder is a code repository whose link to its workspace is missing or wrong: say so, tell the owner to run `/recade:resume` from the workspace folder, and stop.
 
 Tell the owner in one sentence where the project stands: the phase (`phase`, `phase_name`) and `next_action`.
 

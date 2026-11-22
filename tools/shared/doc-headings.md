@@ -1,0 +1,1 @@
+Translate the headings of D1, D2 and D3 into that language, with the same numbers and in the same order (an `ID` column stays `ID`). Never leave a heading of D1, D2 or D3 in English in a document written in another language. Every other file keeps the English headings of its template, because code reads them: the PLAN, the STACK, the BIBLE, the slice sheets, and the review notes.

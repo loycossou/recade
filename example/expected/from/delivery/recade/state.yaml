@@ -40,6 +40,7 @@ lots:
   - MEM
   - REP
 slicing: mixed
+started: 2026-11-18
 second_opinion: sensitive
 hotspots:
   - api:src/store/**
@@ -66,3 +67,4 @@ workspace:
   auto_push_since: 2026-11-18
 harness:
   wip_limit: 3
+first_slice_done: 2026-11-18

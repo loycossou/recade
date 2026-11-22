@@ -1,0 +1,1 @@
+The dispatcher's prompt: the stage, the project folder, the languages, the model and effort, today's date, the exact command line to run the Recade CLI (called `recade` below), the full path of each template, and the owner's answers not yet in a file.

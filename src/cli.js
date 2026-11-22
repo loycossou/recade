@@ -10,9 +10,9 @@ import { stringify } from 'yaml';
 import { configPath, loadConfig, saveConfig, setConfigValue } from './config.js';
 import { WRITER_CHOICES, WRITER_MODELS, isWriterChoice } from './models.js';
 import { EXTRAS, isExtra } from './deliverables.js';
-import { loadState, saveState } from './state.js';
+import { firstSliceDue, loadState, noteFirstSliceDone, saveState } from './state.js';
 import {
-  PHASES, GATES, ADOPT_GATES, SETTINGS, phasesOf, gatesOf, normalizeState, canStart, passGate, resetFrom, nextAction, projectRoot, workspaceOf, currentPhase, setSetting,
+  PHASES, GATES, ADOPT_GATES, SETTINGS, decisionsOf, phasesOf, gatesOf, normalizeState, canStart, passGate, resetFrom, nextAction, projectRoot, workspaceOf, currentPhase, setSetting, trackOf, firstSliceLine,
   phaseCommand,
 } from './project/state.js';
 import { runChecks, defaultExec } from './doctor.js';
@@ -35,9 +35,10 @@ import { fromCode } from './project/fromcode.js';
 import { impactOf } from './project/amend.js';
 import { buildIdPattern } from './index/ids.js';
 import { openProvisional, closeProvisional, listProvisionals } from './project/provisionals.js';
-import { newDecision, closeDecision, listDecisions } from './project/decisions.js';
+import { newDecision, closeDecision, listDecisions, reopenTeamDecision } from './project/decisions.js';
 import { addTeamDecision, challengeTeamDecision, listTeamDecisions } from './project/teamdecisions.js';
 import { DEFAULT_BUDGETS, budgetsOf, checkSizes } from './budgets.js';
+import { estimatePhases, estimateSlice, formatRange, projectFacts, PHASE_IDS, SLICE_LANES } from './estimate.js';
 import { loadModels, modelWarnings, sensitiveLane, syncAgents } from './harness/models.js';
 import { runGate, checkGate, isGateName, defaultExec as runCommand } from './harness/stamps.js';
 import { handleHook, logGuard } from './harness/guard.js';
@@ -111,12 +112,12 @@ function renderHelp() {
   out += '\nFrom the terminal\n\n';
   // A label longer than the column still keeps two spaces before its text.
   const term = (label) => label.padEnd(Math.max(20, label.length + 2));
-  out += `${term('recade models')}Print the model the writing agents use, the owner's choice of Fable or Opus: recade models writer [--id]\n`;
+  out += `${term('recade models')}Print the model the writing agents use, the owner's choice of Fable or Opus: recade models writer [--id]. The model of the mechanical stages (translate, glossary, apply-decisions, format fixes): recade models mechanical [--effort]\n`;
   out += `${term('recade cases')}List and replay the agent test cases, the plugin's and the harness's: recade cases [--plugin] [--harness] [--run] [--agent <name>]\n`;
   out += `${term('recade workspace')}Find the project workspace, set its auto-push, commit its leftover documents: recade workspace root | auto-push on|off | commit --paths <path>[,<path>...] -m <message>\n`;
   out += `${term('recade repo')}Register the code repositories of the workspace, check and relink them: recade repo add <name> (--new | --clone <url>) | list | check | sync\n`;
   out += `${term('recade harness')}Install, verify and test the agent harness: recade harness install | verify | cases [--run] | protect [--apply] | set | specialise <agent|command> <name> --file <path> | models\n`;
-  out += `${term('recade cost')}Record the cost of a slice: recade cost record <S-nn> --minutes <n> --fix-loops <n> [--tokens <n> | --transcript <path|auto> [--since <ms>] [--session-dir <dir>]]\n`;
+  out += `${term('recade cost')}Record the cost of a slice: recade cost record <S-nn> --minutes <n> --fix-loops <n> [--tokens <n> | --transcript <path|auto> [--since <ms>] [--session-dir <dir>]]. Estimate a phase or a slice before it runs: recade cost estimate [--phase <phase> | --slice standard|sensitive] [--json]\n`;
   out += `${term('recade retro')}Write retros/INC-n.md with DORA metrics and cost per slice: recade retro <INC-n> [--force] [--json]\n`;
   out += `${term('recade intake')}Scan intake/attachments for invisible Unicode and bidi controls before an agent reads them: recade intake scan [--json]\n`;
   out += `${term('recade quarantine')}Keep flaky tests in tests/quarantine.json until they are fixed: recade quarantine add | remove | list | check\n`;
@@ -185,8 +186,9 @@ export const commands = {
       if (sub === 'budgets') {
         const budgets = budgetsOf(loadState(root));
         const set = loadState(root)?.budgets ?? {};
+        const base = trackOf(loadState(root)) === 'short' ? 'short track' : 'default';
         if (json) io.stdout.write(`${JSON.stringify(budgets)}\n`);
-        else for (const [doc, words] of Object.entries(budgets)) io.stdout.write(`${doc} ${words} words (${Object.hasOwn(set, doc) ? 'project' : 'default'})\n`);
+        else for (const [doc, words] of Object.entries(budgets)) io.stdout.write(`${doc} ${words} words (${Object.hasOwn(set, doc) ? 'project' : base})\n`);
         return 0;
       }
       const found = checkSizes(root, parsed.positional.length > 0 ? parsed.positional : undefined);
@@ -261,15 +263,18 @@ export const commands = {
         const entry = COMMAND_MAP.find((c) => c.phase === 'plugin' && c.command === command);
         const out = {
           ...state,
+          decisions: decisionsOf(state),
           phase: phase.id,
           phase_name: phase.name,
           command,
           command_available: entry?.available !== false,
           next_action: nextAction(state),
+          track: trackOf(state),
+          first_slice: firstSliceLine(state, localDate((io.now ?? (() => new Date()))())),
         };
         io.stdout.write(`${JSON.stringify(out, null, 2)}\n`);
       } else {
-        io.stdout.write(renderState(state, root));
+        io.stdout.write(renderState(state, root, localDate((io.now ?? (() => new Date()))())));
       }
       return 0;
     }
@@ -575,7 +580,7 @@ export const commands = {
     const parsed = parseOptions(rest, sub === 'new'
       ? { flags: [], values: ['--doc', '--question', '--why', '--known', '--unknown', '--options', '--recommendation', '--change-mind', '--due'] }
       : sub === 'close'
-        ? { flags: [], values: ['--choice'] }
+        ? { flags: [], values: ['--choice', '--by', '--why'] }
         : { flags: ['--open', '--json'], values: [] });
     if (parsed.error) return usage();
     if (parsed.positional.length !== (sub === 'close' ? 1 : 0)) return usage();
@@ -583,6 +588,9 @@ export const commands = {
       return usage();
     }
     if (sub === 'close' && parsed.values['--choice'] === undefined) return usage();
+    // `--by team` is the trust mode: the team took the recommendation, so it gives its reason, and the line goes to TEAM.md.
+    if (sub === 'close' && !['owner', 'team', undefined].includes(parsed.values['--by'])) return usage();
+    if (sub === 'close' && (parsed.values['--by'] === 'team') !== (parsed.values['--why'] !== undefined)) return usage();
     const root = projectRoot(io.cwd);
     if (root === null) {
       io.stderr.write('No Recade project here: recade/state.yaml not found. Run /recade:new first.\n');
@@ -608,16 +616,18 @@ export const commands = {
         io.stdout.write(`${step.value}\n`);
       } else if (sub === 'close') {
         const id = parsed.positional[0];
-        const step = await endStep(io, root, [/^DEC-\d{2,}$/.test(id) ? `decisions/${id}.md` : 'decisions'], `docs(decisions): ${id} closed`,
-          () => closeDecision(root, id, { choice: parsed.values['--choice'], date }));
+        const team = parsed.values['--by'] === 'team';
+        const paths = [/^DEC-\d{2,}$/.test(id) ? `decisions/${id}.md` : 'decisions', ...(team ? ['decisions/TEAM.md'] : [])];
+        const step = await endStep(io, root, paths, team ? `docs(decisions): ${id} closed by the team` : `docs(decisions): ${id} closed`,
+          () => closeDecision(root, id, { choice: parsed.values['--choice'], ...(team ? { by: 'team', why: parsed.values['--why'] } : {}), date }));
         if (step.exit !== undefined) return step.exit;
-        io.stdout.write(`${id} closed on ${date}.\n`);
+        io.stdout.write(team ? `${id} closed on ${date} by the team (${step.value}).\n` : `${id} closed on ${date}.\n`);
       } else {
         const list = listDecisions(root, { open: parsed.flags.has('--open') });
         if (parsed.flags.has('--json')) {
           io.stdout.write(`${JSON.stringify(list, null, 2)}\n`);
         } else {
-          for (const d of list) io.stdout.write(`${[d.id, d.status, d.document, d.question, d.due, d.choice].join('\t')}\n`);
+          for (const d of list) io.stdout.write(`${[d.id, d.status, d.document, d.question, d.due, d.choice, ...(d.by === 'team' ? [`team (${d.td})`] : []), ...(d.supersedes === '' ? [] : [`supersedes ${d.supersedes}`])].join('\t')}\n`);
         }
       }
     } catch (err) {
@@ -673,7 +683,11 @@ export const commands = {
     if (move !== null) {
       // Read, change, write and commit under the commit lock of the workspace: two sessions that move a status at once both
       // land. Every move is committed (so the next one finds the file clean); only done is pushed.
-      const step = await endStep(io, root, ['slices/STATUS.md'], (r) => (r.moved === undefined ? null : `chore(slices): ${move.id} ${r.moved.to}`), () => {
+      // The first slice that becomes done records its day in the state, once: the state is then committed with STATUS.md.
+      // An uncommitted change of the state that is not ours never blocks the move: the day is then left for a later move.
+      const noteFirst = move.status === 'done' && firstSliceDue(root) && await firstSliceFree(io, root);
+      const paths = noteFirst ? ['slices/STATUS.md', 'recade/state.yaml'] : ['slices/STATUS.md'];
+      const step = await endStep(io, root, paths, (r) => (r.moved === undefined ? null : `chore(slices): ${move.id} ${r.moved.to}`), () => {
         let moved;
         try {
           moved = setStatus(root, move.id, move.status, { note: move.note });
@@ -685,6 +699,13 @@ export const commands = {
           writeFileSync(join(root, 'slices', 'STATUS.md'), moved.text);
         } catch (err) {
           return { fail: 2, message: `Cannot write slices/STATUS.md: ${oneLine(err)}` };
+        }
+        if (noteFirst && moved.to === 'done') {
+          try {
+            noteFirstSliceDone(root, localDate((io.now ?? (() => new Date()))()));
+          } catch (err) {
+            io.stderr.write(`recade: warning: the day of the first slice was not recorded: ${oneLine(err)}\n`);
+          }
         }
         return { moved };
       }, { push: (r) => r.moved?.to === 'done' });
@@ -1095,6 +1116,7 @@ export const commands = {
     return 0;
   },
   async cost(args, io) {
+    if (args[0] === 'estimate') return costEstimate(args.slice(1), io);
     const options = args[0] === 'record' ? parseCostArgs(args.slice(1)) : null;
     if (options === null) {
       io.stderr.write(`${COST_USAGE}\n`);
@@ -1172,6 +1194,7 @@ export const commands = {
     }
     io.stdout.write(`Wrote retros/${options.inc}.md\n`);
     for (const [name, value] of Object.entries(result.values)) io.stdout.write(`${name}: ${value}\n`);
+    if (result.firstSlice !== null) io.stdout.write(`First slice: ${result.firstSlice}\n`);
     io.stdout.write(`Cost: ${result.recorded} slice${result.recorded === 1 ? '' : 's'} with a record, ${result.missing} without.\n`);
     return 0;
   },
@@ -1261,12 +1284,24 @@ export const commands = {
         const plan = reconcile(root, { exec });
         const before = await preflightStep(io, root, ['slices/STATUS.md', ...plan.writes]);
         if (before.exit !== undefined) return before.exit;
+        // Whether the day of the first slice can be recorded is settled here, before the first gh write: an uncommitted
+        // change of the state that is not ours skips it, and never refuses the moves after the board has moved.
+        const due = firstSliceDue(root);
+        const free = due && await firstSliceFree(io, root, { notice: false });
         result = reconcile(root, { exec, apply, deferStatus: true });
         if (result.deferred.length > 0) {
           const sheets = [...new Set(result.deferred.map((d) => d.sheet?.file).filter((f) => f !== undefined))];
-          const step = await endStep(io, root, ['slices/STATUS.md', ...sheets], sheets.length > 0 ? 'chore(board): reconcile slices' : 'chore(board): reconcile STATUS.md', () => applyStatusMoves(root, result.deferred), { own: false });
+          const reaches = due && result.deferred.some((d) => d.to === 'done');
+          if (reaches && !free) firstSliceSkipped(io);
+          const first = reaches && free ? ['recade/state.yaml'] : [];
+          const today = localDate((io.now ?? (() => new Date()))());
+          const step = await endStep(io, root, ['slices/STATUS.md', ...sheets, ...first], sheets.length > 0 ? 'chore(board): reconcile slices' : 'chore(board): reconcile STATUS.md', async () => {
+            // Checked again under the lock: the state may have been edited during the gh calls.
+            const noteFirst = first.length > 0 && await firstSliceFree(io, root);
+            return { errors: applyStatusMoves(root, result.deferred, { today, noteFirst }), noteFirst };
+          }, { own: false, stage: (v) => ['slices/STATUS.md', ...sheets, ...(v.noteFirst ? first : [])] });
           if (step.exit !== undefined) return step.exit;
-          result.errors.push(...step.value);
+          result.errors.push(...step.value.errors);
         }
       } else {
         result = reconcile(root, { exec, apply });
@@ -1633,8 +1668,18 @@ export const commands = {
     return 2;
   },
   async models(args, io) {
-    const usage = 'Usage: recade models writer [--id]';
+    const usage = 'Usage: recade models writer [--id] | mechanical [--effort]';
     const [which, ...flags] = args;
+    if (which === 'mechanical') {
+      if (flags.some((f) => f !== '--effort') || flags.length > 1) {
+        io.stderr.write(`${usage}\n`);
+        return 2;
+      }
+      // The mechanical tier of agents/models.json: the stages of MECHANICAL_STAGES run on it.
+      const { mechanical } = JSON.parse(readFileSync(tiersUrl, 'utf8'));
+      io.stdout.write(`${flags.length === 1 ? mechanical.effort : mechanical.model}\n`);
+      return 0;
+    }
     if (which !== 'writer' || flags.some((f) => f !== '--id') || flags.length > 1) {
       io.stderr.write(`${usage}\n`);
       return 2;
@@ -1792,10 +1837,11 @@ async function decisionTeam(args, io, usage) {
   const [sub, ...rest] = args;
   if (!['add', 'list', 'challenge'].includes(sub)) return usage();
   const parsed = parseOptions(rest, sub === 'add' ? { flags: [], values: ['--doc', '--question', '--decided', '--why'] }
-    : sub === 'challenge' ? { flags: [], values: ['--dec'] } : { flags: ['--json'], values: [] });
+    : sub === 'challenge' ? { flags: ['--reopen'], values: ['--dec'] } : { flags: ['--json'], values: [] });
   if (parsed.error || parsed.positional.length !== (sub === 'challenge' ? 1 : 0)) return usage();
   if (sub === 'add' && ['--doc', '--question', '--decided', '--why'].some((k) => parsed.values[k] === undefined)) return usage();
-  if (sub === 'challenge' && parsed.values['--dec'] === undefined) return usage();
+  // A challenge names the DEC that replaces the line, or, for a line that closed a DEC, reopens that DEC for the owner.
+  if (sub === 'challenge' && (parsed.values['--dec'] === undefined) === !parsed.flags.has('--reopen')) return usage();
   const root = projectRoot(io.cwd);
   if (root === null) {
     io.stderr.write('No Recade project here: recade/state.yaml not found. Run /recade:new first.\n');
@@ -1810,6 +1856,12 @@ async function decisionTeam(args, io, usage) {
         { push: false });
       if (step.exit !== undefined) return step.exit;
       io.stdout.write(`${step.value}\n`);
+    } else if (sub === 'challenge' && parsed.flags.has('--reopen')) {
+      const id = parsed.positional[0];
+      const step = await endStep(io, root, ['decisions'], (r) => `docs(decisions): ${id} challenged, ${r.dec} reopens ${r.supersedes}`,
+        () => reopenTeamDecision(root, id, { date }), { push: false, own: false, stage: (r) => ['decisions/TEAM.md', `decisions/${r.dec}.md`] });
+      if (step.exit !== undefined) return step.exit;
+      io.stdout.write(`${id} challenged: ${step.value.dec} reopens ${step.value.supersedes} for the owner.\n`);
     } else if (sub === 'challenge') {
       const id = parsed.positional[0];
       const dec = parsed.values['--dec'];
@@ -1832,8 +1884,8 @@ async function decisionTeam(args, io, usage) {
 const DECISION_USAGE =
   'Usage: recade decision new --doc <D1|D2|D3|STACK|PLAN|BIBLE> --question <text> --why <text> --known <text> --unknown <text>'
   + ' --options <json: [{label, cost, closes, risks, calendar, repo}]> --recommendation <text> --change-mind <text> [--due YYYY-MM-DD]'
-  + ' | close <DEC-nn> --choice <A|B|C|label> | list [--open] [--json]'
-  + ' | team add --doc <document> --question <text> --decided <text> --why <text> | team list [--json] | team challenge <TD-nn> --dec <DEC-nn>'
+  + ' | close <DEC-nn> --choice <A|B|C|label> [--by team --why <text>] | list [--open] [--json]'
+  + ' | team add --doc <document> --question <text> --decided <text> --why <text> | team list [--json] | team challenge <TD-nn> --dec <DEC-nn> | team challenge <TD-nn> --reopen'
   + ' (add --project <dir> to work on a project from another folder)';
 const DOCS_USAGE = 'Usage: recade docs size [D1|D2|D3|PLAN|STACK|BIBLE ...] [--json] | budgets [--json] [--project <dir>]';
 const TEAM_USAGE = 'Usage: recade team check [--project <dir>]';
@@ -2006,7 +2058,80 @@ function parseBoardArgs(sub, rest) {
   }
   return out;
 }
-const COST_USAGE = 'Usage: recade cost record <S-nn> --minutes <n> --fix-loops <n> [--tokens <n> | --transcript <path|auto> [--since <epoch ms>] [--session-dir <dir>]] [--project <dir>]';
+const COST_USAGE = 'Usage: recade cost record <S-nn> --minutes <n> --fix-loops <n> [--tokens <n> | --transcript <path|auto> [--since <epoch ms>] [--session-dir <dir>]] [--project <dir>]'
+  + ' | recade cost estimate [--phase intake|team|docs|bible|slices|harness | --slice standard|sensitive] [--json] [--project <dir>]';
+const COST_ESTIMATE_USAGE = 'Usage: recade cost estimate [--phase intake|team|docs|bible|slices|harness | --slice standard|sensitive] [--json] [--project <dir>]';
+
+/** The plugin's two model tables: the tiers of the framing agents and the harness lanes. */
+const tiersUrl = new URL('../agents/models.json', import.meta.url);
+const harnessModelsUrl = new URL('../harness/models.yaml', import.meta.url);
+
+/**
+ * `recade cost estimate`: the cost of the phases not passed yet (or of one phase), or of the delivery of one slice.
+ * It prints an estimate, never a measure: `recade cost record` measures a slice.
+ */
+function costEstimate(args, io) {
+  const usage = () => {
+    io.stderr.write(`${COST_ESTIMATE_USAGE}\n`);
+    return 2;
+  };
+  const parsed = parseOptions(args, { flags: ['--json'], values: ['--phase', '--slice'] });
+  if (parsed.error || parsed.positional.length > 0) return usage();
+  const phase = parsed.values['--phase'];
+  const lane = parsed.values['--slice'];
+  if (phase !== undefined && lane !== undefined) return usage();
+  if (phase !== undefined && !PHASE_IDS.includes(phase)) return usage();
+  if (lane !== undefined && !SLICE_LANES.includes(lane)) return usage();
+  const json = parsed.flags.has('--json');
+  const loaded = readConfig(io);
+  if (!loaded) return 1;
+  const writer = loaded.config.models?.writer;
+  if (!isWriterChoice(writer)) {
+    io.stderr.write(`models.writer is ${JSON.stringify(writer)} in ${configPath(io.env)}. Use ${WRITER_CHOICES.join(' or ')}: recade config set models.writer ${WRITER_CHOICES[0]}\n`);
+    return 1;
+  }
+  const root = projectRoot(io.cwd);
+  let result;
+  try {
+    const state = root === null ? null : normalizeState(loadState(root));
+    if (lane !== undefined) {
+      result = estimateSlice(lane, { harnessModels: loadModels(fileURLToPath(harnessModelsUrl)), secondOpinion: state?.second_opinion });
+    } else {
+      if (root === null) {
+        io.stderr.write('No Recade project here: recade/state.yaml not found. Run /recade:new first.\n');
+        return 1;
+      }
+      const tiers = JSON.parse(readFileSync(tiersUrl, 'utf8'));
+      const facts = projectFacts(root, state, loaded.config.languages);
+      result = estimatePhases(facts, state, { writer, tiers, ...(phase === undefined ? {} : { phases: [phase] }) });
+    }
+  } catch (err) {
+    io.stderr.write(`${oneLine(err)}\n`);
+    return 2;
+  }
+  if (json) {
+    io.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    return 0;
+  }
+  const tail = 'API prices; on a Claude subscription it counts against your usage limits instead.';
+  if (lane !== undefined) {
+    io.stdout.write(`Estimated cost of one ${lane} slice: ${formatRange(result)} (${tail})\n`);
+    io.stdout.write(`An estimate, not a measure: ${result.prices}. recade cost record measures a slice.\n`);
+    return 0;
+  }
+  if (result.phases.length === 0) {
+    io.stdout.write('Every phase is passed: nothing to estimate. For the delivery of a slice: recade cost estimate --slice standard\n');
+    return 0;
+  }
+  if (phase !== undefined) {
+    io.stdout.write(`Estimated cost of this phase: ${formatRange(result.phases[0])} (${tail})\n`);
+  } else {
+    for (const p of result.phases) io.stdout.write(`${p.name}: ${formatRange(p)}\n`);
+    io.stdout.write(`Total: ${formatRange(result.total)} (${tail})\n`);
+  }
+  io.stdout.write(`An estimate, not a measure: ${result.prices}, writing model ${writer}.\n`);
+  return 0;
+}
 const RETRO_USAGE = 'Usage: recade retro <INC-n> [--force] [--json] [--base <branch>] [--project <dir>]';
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 const QUARANTINE_USAGE = 'Usage: recade quarantine add <test> --reason <text> --slice <S-nn> [--since YYYY-MM-DD] | remove <test> | list [--json|--names] | check [--inc INC-n]'
@@ -2423,27 +2548,31 @@ function parseOptions(args, { flags, values }) {
 }
 
 const STATE_USAGE =
-  'Usage: recade state show [--json] | can-start <phase> | pass <gate> | reset-from <gate> | set <key> <value> (keys: slicing, second_opinion, hotspots, lots, docs_step, budgets, as D1=12000,PLAN=8000) [--project <dir>]';
+  'Usage: recade state show [--json] | can-start <phase> | pass <gate> | reset-from <gate> | set <key> <value> (keys: slicing, second_opinion, hotspots, lots, docs_step, decisions as ask or trust, track as full or short, budgets as D1=12000,PLAN=8000) [--project <dir>]';
 
 const localDate = (d) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
-function renderState(state, root) {
+function renderState(state, root, today) {
+  const firstSlice = firstSliceLine(state, today);
   const phase = currentPhase(state);
   const command = phaseCommand(state, phase);
   const entry = COMMAND_MAP.find((c) => c.phase === 'plugin' && c.command === command);
   const lines = [
     `Project: ${root}`,
     `Mode: ${state.mode ?? 'unknown'}`,
+    `Track: ${trackOf(state)}`,
     `Phase: ${phase.id} ${phase.name}`,
     'Gates:',
     ...gatesOf(state).map((g) => `${g.padEnd(Math.max(9, ...gatesOf(state).map((x) => x.length + 1)))} ${state.gates[g] ? `passed ${state.gates[g].passed}` : 'open'}`),
     `Command: /recade:${command}${entry?.available === false ? ' (not available in this version)' : ''}`,
     `Slicing: ${state.slicing}`,
     `Second opinion: ${state.second_opinion}`,
+    `Decisions: ${decisionsOf(state)}${decisionsOf(state) === 'trust' ? ' (the team decides what is reversible and free)' : ' (every open decision comes to you)'}`,
     `Hotspots: ${state.hotspots.length ? state.hotspots.join(', ') : 'none'}`,
     `Lots: ${state.lots.length ? state.lots.join(', ') : 'none'}`,
     ...(state.docs_step ? [`Docs step: ${state.docs_step}`] : []),
+    ...(firstSlice === null ? [] : [`First slice: ${firstSlice}`]),
     `Next action: ${nextAction(state)}`,
   ];
   return `${lines.join('\n')}\n`;
@@ -2620,6 +2749,28 @@ async function endStep(io, root, paths, message, mutate, { push = true, around =
     if (pushed.warning !== undefined) io.stderr.write(`recade: warning: ${pushed.warning}\n`);
   }
   return { value: done.value, committed: done.committed };
+}
+
+/**
+ * Can the day of the first done slice be recorded in `recade/state.yaml` now? Yes outside a git workspace, in a
+ * workspace with no commit yet, or when the state has no uncommitted change. A change that is not ours means no: the
+ * slice moves all the same, one notice line says so (unless `notice` is false), and a later move records the day.
+ */
+async function firstSliceFree(io, root, { notice = true } = {}) {
+  const ws = gitWorkspace(root);
+  if (ws === null) return true;
+  const exec = io.run ?? commitExec;
+  const born = (await exec(['git', 'rev-parse', '--verify', '-q', 'HEAD'], { cwd: ws }))?.code === 0;
+  if (!born) return true;
+  const r = await exec(['git', 'status', '--porcelain', '--', 'recade/state.yaml'], { cwd: ws });
+  const free = r?.code === 0 && String(r.stdout ?? '').trim() === '';
+  if (!free && notice) firstSliceSkipped(io);
+  return free;
+}
+
+/** The notice when the day of the first done slice is left for later. */
+function firstSliceSkipped(io) {
+  io.stderr.write('recade: notice: recade/state.yaml has uncommitted changes, so the day of the first done slice is not recorded now. A later move to done records it.\n');
 }
 
 /** The refusals of a step (wrong branch, staged changes elsewhere, a path edited by someone else), before any work. */

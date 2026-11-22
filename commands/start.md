@@ -5,13 +5,13 @@ allowed-tools: Bash(node:*), Bash(npm ci:*), Bash(gh api user:*), Read, AskUserQ
 
 Run the steps below in order. This command can be run again at any time. Skip every step that is already done.
 
-In this file, `recade <sub>` means `node "${CLAUDE_PLUGIN_ROOT}/bin/recade.js" <sub>`. Run it exactly that way.
+<!-- shared:cli-plugin -->In this file, `recade <sub>` means `node "${CLAUDE_PLUGIN_ROOT}/bin/recade.js" <sub>`. Run it exactly that way.<!-- /shared:cli-plugin -->
 
 Write short, plain sentences. No exclamation marks, no emoji. Answer the user in English until Step 0 is done. After that, answer in the language of `languages.chat` once you know it (see Step 1). Whatever the language, keep Recade keywords in English: slice, gate, lane, harness, BIBLE, PLAN, DEC, retro (in French: "fiche de slice", never "tranche").
 
 ## Step 0. Dependencies
 
-Run `node "${CLAUDE_PLUGIN_ROOT}/bin/recade.js" version`. If it prints a version, go on. If it fails with `ERR_MODULE_NOT_FOUND` or another module error, run `npm ci --omit=dev --prefix "${CLAUDE_PLUGIN_ROOT}"`, then run `version` again. Report the result in one line. If it still fails, show the error and stop.
+<!-- shared:deps-plugin -->Run `node "${CLAUDE_PLUGIN_ROOT}/bin/recade.js" version`. If it prints a version, go on. If it fails with `ERR_MODULE_NOT_FOUND` or another module error, run `npm ci --omit=dev --prefix "${CLAUDE_PLUGIN_ROOT}"`, then run `version` again. Report the result in one line. If it still fails, show the error and stop.<!-- /shared:deps-plugin -->
 
 ## Step 1. Presentation
 

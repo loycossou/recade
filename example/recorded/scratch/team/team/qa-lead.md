@@ -1,7 +1,7 @@
 ---
 role: "qa-lead"
 inspired_by: "Wen Ashgrove"
-model: "claude-fable-5-2"
+model: "claude-opus-5-5"
 effort: "high"
 sources:
   - { title: "Wen Ashgrove, working note 1", url: "https://example.org/notes/qa-lead-1", accessed: "2026-11-18" }

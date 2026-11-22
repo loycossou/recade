@@ -3,6 +3,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } fr
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { loadState } from '../state.js';
+import { firstSliceLine } from '../project/state.js';
 import { registryNames } from '../project/touches.js';
 import { checkSlices } from '../project/slices.js';
 import { listProvisionals } from '../project/provisionals.js';
@@ -587,9 +588,13 @@ export function retro(root, inc, { exec = defaultExec, base, force = false, now 
     doc_id: inc, title: `${project}, retrospective ${inc}`, project, version: '0.1', date, language,
   }).split('\n');
 
-  replaceSection(lines, 'Delivered', metrics.merges.length === 0
-    ? ['Nothing merged yet.']
-    : ['| Slice | What shipped | Merged on |', '|---|---|---|', ...metrics.merges.map((m) => row(m.slice, m.title, m.mergedAt.slice(0, 10)))]);
+  const firstSlice = firstSliceLine(loadState(root) ?? {}, date);
+  replaceSection(lines, 'Delivered', [
+    ...(metrics.merges.length === 0
+      ? ['Nothing merged yet.']
+      : ['| Slice | What shipped | Merged on |', '|---|---|---|', ...metrics.merges.map((m) => row(m.slice, m.title, m.mergedAt.slice(0, 10)))]),
+    ...(firstSlice === null ? [] : ['', firstSlice]),
+  ]);
   replaceSection(lines, 'Decisions', [TO_WRITE]);
   const open = slices.filter((s) => !merged.has(s.id));
   replaceSection(lines, 'Carry-over', open.length === 0
@@ -638,7 +643,7 @@ export function retro(root, inc, { exec = defaultExec, base, force = false, now 
   const text = `${lines.join('\n').replace(/\n{3,}/g, '\n\n').trimEnd()}\n`;
   mkdirSync(join(root, 'retros'), { recursive: true });
   writeFileSync(file, text, { flag: force ? 'w' : 'wx' });
-  return { file, metrics, values, recorded, missing: slices.length - recorded, text };
+  return { file, metrics, values, recorded, missing: slices.length - recorded, firstSlice, text };
 }
 
 const localDate = (d) => (Number.isNaN(d.getTime()) ? localToday() : `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`);

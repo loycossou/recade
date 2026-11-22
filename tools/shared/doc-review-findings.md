@@ -1,0 +1,1 @@
+The verdict is `approve` or `changes needed`. The findings are a table with the columns `#`, `Severity` (blocker, should fix, nit), `Where` (a section number or an ID with its gist), `Problem`, `Proposed fix`.

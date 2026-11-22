@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_BUDGETS } from '../src/budgets.js';
+import { stripMarkers } from '../tools/sync-shared.js';
 
 // The documents phase is short: budgets, one reviewer and one round, fewer questions for the owner, a progress line.
 
@@ -57,7 +58,11 @@ test('the review procedure: one review, blockers and should-fix in one round, ni
     const text = read(file);
     const review = between(text, '### Review procedure', '### Decision procedure');
     assert.ok(review.includes('one reviewer and one review'), file);
-    assert.ok(review.includes('Every `blocker` and every `should fix` is applied in this single round; a `nit` is listed in the author\'s report and never applied.'), file);
+    assert.ok(review.includes('In the full track, every `blocker` and every `should fix` is applied in this single round.'), file);
+    assert.ok(review.includes('the path of the note and the track (`full` or `short`)'), file);
+    assert.ok(review.includes('the author applies the blockers only and lists each `should fix` in its report, not applied'), file);
+    assert.equal(review.includes('Every `blocker` and every `should fix` is applied'), false, file);
+    assert.ok(review.includes('A `nit` is listed in the author\'s report and never applied.'), file);
     assert.ok(review.includes('The note is not reviewed again.'), file);
     assert.ok(review.includes('At most 1 more round of `Revise once more`'), file);
     assert.equal(review.includes('Revise again'), false, file);
@@ -105,7 +110,7 @@ test('the dispatcher gives the budget, the owner-DEC count and the words left, a
 
 test('every writing agent sorts questions, may record a team decision and checks its size', () => {
   for (const name of WRITERS) {
-    const text = read(`agents/${name}.md`);
+    const text = stripMarkers(read(`agents/${name}.md`));
     assert.ok(text.includes('- Sort every question before you act on it'), name);
     assert.ok(text.includes('recade decision team add --doc '), name);
     assert.ok(text.includes('- Every `owner` question is a DEC.'), name);
@@ -123,6 +128,7 @@ test('every reviewing agent knows the severities, caps its findings and revises 
     if (name !== 'chief-reviewer') assert.ok(text.includes('Apply every `blocker` and every `should fix` in one pass') || !/^- `revise`:/m.test(text), name);
   }
   for (const name of ['project-lead', 'architect', 'security-lead', 'bible-writer']) assert.ok(read(`agents/${name}.md`).includes('List each `nit` in the Report and do not apply it.'), name);
+  for (const name of ['project-lead', 'architect', 'security-lead', 'bible-writer']) assert.match(read(`agents/${name}.md`), /In the short track, which the dispatcher gives, apply the blockers only, and list each `should fix` in the [Rr]eport, not applied, for the owner\./, name);
 });
 
 test('the stack analyst sorts layers, records a team layer, and lists only the reviewers that were asked', () => {

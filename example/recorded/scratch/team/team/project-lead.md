@@ -1,7 +1,7 @@
 ---
 role: "project-lead"
 inspired_by: "Mara Quill"
-model: "claude-fable-5-2"
+model: "claude-opus-5-5"
 effort: "high"
 sources:
   - { title: "Mara Quill, working note 1", url: "https://example.org/notes/project-lead-1", accessed: "2026-11-18" }

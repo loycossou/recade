@@ -1,7 +1,7 @@
 ---
 role: "chief-reviewer"
 inspired_by: "Imre Dallow"
-model: "claude-fable-5-2"
+model: "claude-opus-5-5"
 effort: "high"
 sources:
   - { title: "Imre Dallow, working note 1", url: "https://example.org/notes/chief-reviewer-1", accessed: "2026-11-18" }

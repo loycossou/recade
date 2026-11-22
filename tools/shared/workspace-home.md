@@ -1,0 +1,1 @@
+The workspace: the dispatcher names its folder `<home>`. The documents named in this file (`slices/`, `team/`, `decisions/`, `design/`, `BIBLE.md`, `INDEX.md`, `recade/state.yaml`, `docs/D1.md` to `docs/D3.md`, `docs/PLAN.md`, and `STACK.md`, the path named in CLAUDE.md) are read under `<home>`, never in a code repository.

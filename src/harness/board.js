@@ -2,8 +2,9 @@ import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync, rmSync,
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { parse } from 'yaml';
 import { frontMatterLength } from '../frontmatter-lines.js';
-import { loadState } from '../state.js';
+import { loadState, noteFirstSliceDone } from '../state.js';
 import { findPlan } from '../project/plan.js';
+import { localToday } from '../project/template.js';
 import { STATUSES, allowedNext, checkSlices, parseBacklog, setStatus, sliceRepoOrder, statusFromPulls, writeMerged } from '../project/slices.js';
 import { REPO_NAME, registryNames } from '../project/touches.js';
 import { readStack, techSheet } from './claudemd.js';
@@ -206,7 +207,7 @@ function pullsOf(exec, root, branch, names, defaults = new Map()) {
  * `applyStatusMoves`, which makes no gh call and can run under the workspace lock.
  * @returns {{rows: ReconcileRow[], applied: string[], errors: string[], apply: boolean, writes: string[], deferred?: {id: string, to: string, sheet: {file: string, record: Record<string, string>}|null}[]}}
  */
-export function reconcile(root, { exec = defaultExec, apply = false, deferStatus = false } = {}) {
+export function reconcile(root, { exec = defaultExec, apply = false, deferStatus = false, today } = {}) {
   const result = { rows: [], applied: [], errors: [], apply, writes: [] };
   if (deferStatus) result.deferred = [];
   const state = loadState(root) ?? {};
@@ -444,6 +445,7 @@ export function reconcile(root, { exec = defaultExec, apply = false, deferStatus
           const move = setStatus(root, row.id, to);
           if (!move.ok) throw new BoardError(move.message);
           writeFileSync(join(root, 'slices', 'STATUS.md'), move.text);
+          if (move.to === 'done') noteFirstSliceDone(root, today ?? localToday());
           note.push(`STATUS.md: ${move.from} to ${move.to}`);
         }
         if (sheetWrite !== null) {
@@ -485,8 +487,10 @@ function writeSheetRecord(root, { file, record }) {
  * run under a lock. Returns the errors, one line each.
  * @param {string} root
  * @param {(string|{id: string, to?: string|null, sheet?: {file: string, record: Record<string, string>}|null})[]} moves
+ * @param {{today?: string, noteFirst?: boolean}} [options] `noteFirst`: the first slice that becomes done records
+ *   `today` as `first_slice_done:` in the state (the caller commits the state with STATUS.md)
  */
-export function applyStatusMoves(root, moves) {
+export function applyStatusMoves(root, moves, { today, noteFirst = false } = {}) {
   const errors = [];
   for (const m of moves) {
     const { id, to = 'done', sheet = null } = typeof m === 'string' ? { id: m } : m;
@@ -497,6 +501,7 @@ export function applyStatusMoves(root, moves) {
         continue;
       }
       writeFileSync(join(root, 'slices', 'STATUS.md'), move.text);
+      if (noteFirst && move.to === 'done') noteFirstSliceDone(root, today ?? localToday());
     }
     if (sheet !== null) writeSheetRecord(root, sheet);
   }

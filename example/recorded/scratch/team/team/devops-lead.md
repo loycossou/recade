@@ -1,7 +1,7 @@
 ---
 role: "devops-lead"
 inspired_by: "Casimir Dray"
-model: "claude-fable-5-2"
+model: "claude-opus-5-5"
 effort: "high"
 sources:
   - { title: "Casimir Dray, working note 1", url: "https://example.org/notes/devops-lead-1", accessed: "2026-11-18" }

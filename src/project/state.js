@@ -42,9 +42,25 @@ export const gatesOf = (state) => (state?.mode === 'adopt' ? ADOPT_GATES : GATES
 
 export const SLICING = Object.freeze(['mixed', 'small', 'large']);
 export const SECOND_OPINION = Object.freeze(['always', 'sensitive', 'off']);
+/**
+ * Who settles the open questions of the framing. `ask`: every owner DEC is asked. `trust`: the team takes the
+ * recommendation of a DEC that costs nothing, binds no one and can be undone, and the owner gets the rest
+ * (skills/decision-sorting). A state without the key is `ask`, so an older project does not change.
+ */
+export const DECISIONS = Object.freeze(['ask', 'trust']);
 /** The steps of `/recade:docs`, in order. `docs_step` holds the next one to do, so the command can resume. */
 export const DOCS_STEPS = Object.freeze(['d1', 'direction', 'stack', 'd2', 'd3', 'plan', 'gate', 'done']);
-export const SETTINGS = Object.freeze(['slicing', 'second_opinion', 'hotspots', 'lots', 'docs_step', 'budgets']);
+/** How long the framing is. `full` is the default; `short` halves the budgets and trims the framing (docs/design.md, section 6.7). */
+export const TRACKS = Object.freeze(['full', 'short']);
+export const SETTINGS = Object.freeze(['slicing', 'second_opinion', 'hotspots', 'lots', 'docs_step', 'budgets', 'decisions', 'track']);
+
+/**
+ * The decisions mode of `state`: its `decisions` key, or `ask` when the key is missing or unknown. The key is written
+ * only by `recade state set decisions`, so the state file of an older project stays as it was.
+ * @param {object} state
+ * @returns {'ask'|'trust'}
+ */
+export const decisionsOf = (state) => (DECISIONS.includes(state?.decisions) ? state.decisions : 'ask');
 
 const LOT_NAME = /^[A-Z][A-Z0-9]*$/;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -197,8 +213,8 @@ export function resetFrom(state, gate) {
 export function setSetting(state, key, value) {
   if (!SETTINGS.includes(key)) throw new Error(`Cannot set ${key}. Use ${SETTINGS.join(', ')}.`);
   const next = fill(state);
-  if (key === 'slicing' || key === 'second_opinion') {
-    const allowed = key === 'slicing' ? SLICING : SECOND_OPINION;
+  if (key === 'slicing' || key === 'second_opinion' || key === 'decisions' || key === 'track') {
+    const allowed = { slicing: SLICING, second_opinion: SECOND_OPINION, decisions: DECISIONS, track: TRACKS }[key];
     if (!allowed.includes(value)) throw new Error(`Invalid ${key}: ${value}. Use ${allowed.join(', ')}.`);
     next[key] = value;
     return next;
@@ -227,6 +243,47 @@ export function setSetting(state, key, value) {
   }
   next[key] = items;
   return next;
+}
+
+/** The track of a project: `short` when the state says so, `full` otherwise (a state written before the track existed). */
+export const trackOf = (state) => (state?.track === 'short' ? 'short' : 'full');
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+const dayNumber = (date) => {
+  const [y, m, d] = date.split('-').map(Number);
+  return Math.round(Date.UTC(y, m - 1, d) / DAY_MS);
+};
+const isDate = (v) => typeof v === 'string' && DATE.test(v);
+
+/**
+ * When the project started and when its first slice was delivered. `started` is the date `recade new` wrote, else the
+ * day the first gate was passed (a project created before the date was recorded). Null when neither is known.
+ * @param {object} state
+ * @param {string} today YYYY-MM-DD
+ * @returns {{started: string, first: string|null, days: number}|null} `days` runs to `first`, or to `today` when no slice is done
+ */
+export function firstSliceTime(state, today) {
+  const firstGate = gatesOf(state)[0];
+  const passed = state?.gates?.[firstGate]?.passed;
+  const started = isDate(state?.started) ? state.started : isDate(passed) ? passed : null;
+  if (started === null) return null;
+  const first = isDate(state?.first_slice_done) ? state.first_slice_done : null;
+  const end = first ?? (isDate(today) ? today : started);
+  return { started, first, days: Math.max(0, dayNumber(end) - dayNumber(started)) };
+}
+
+const days = (n) => `${n} day${n === 1 ? '' : 's'}`;
+
+/**
+ * The one line of the metric "time to first slice", or null when the start is not known.
+ * @param {object} state
+ * @param {string} today YYYY-MM-DD
+ */
+export function firstSliceLine(state, today) {
+  const t = firstSliceTime(state, today);
+  if (t === null) return null;
+  if (t.first === null) return `${days(t.days)} since the start, no slice delivered yet.`;
+  return `Started on ${t.started}. First slice delivered on ${t.first}, ${days(t.days)} later.`;
 }
 
 /** A code repository whose link to its workspace is missing, stale or points elsewhere. `code` is `RECADE_LINK`. */

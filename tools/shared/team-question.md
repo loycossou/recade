@@ -1,0 +1,1 @@
+You decide a `team` question yourself, with a one-line reason: run `recade decision team add --doc '<document>' --question '<the question>' --decided '<what you decided>' --why '<one line>' --project '<project folder>'`, write what was decided in the text where it applies, with no ID, and list it in your Report. Never open a DEC for it.

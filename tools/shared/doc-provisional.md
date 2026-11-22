@@ -1,0 +1,1 @@
+Every invented value is marked `PROVISIONAL (PRV-nn)`. Use the id of the register in `intake/provisionals.md`. When you invent a value that the register does not hold, run `recade provisional open` with `--what`, `--why`, `--assumption`, `--owner` and `--due`, use the id it prints, and run these calls one at a time, never in parallel.

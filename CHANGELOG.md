@@ -4,6 +4,36 @@ This file is curated by hand for each release. At tag time, `recade release-note
 
 ## Unreleased
 
+### A short track, and the time to the first slice
+
+- A project has a track: `track: full` (the default, and what an existing state means) or `track: short`. `/recade:new` asks it at intake as a closed choice: short for a first version, a small team or an internal tool, full when money, health data, regulation or several teams are involved. `recade state set track short` changes it, and `/recade:status` and `recade state show` print it.
+- The short track halves the word budgets (a `budgets:` key still wins), sends a document back to its author only for a blocker, offers two art directions, keeps a top 3 per stack layer with a spike only when the two best are within 10 percent in the weighted matrix, keeps the BIBLE to its core rules and the team to its core roles (plus a role for payments, health data or regulated data), and makes S-01 a walking skeleton. `recade slices check` warns (`slice-skeleton`) in the short track when S-01 has no `skeleton: true`. Every gate, guard and file scope stays.
+- Time to first slice: `recade new` records `started:` in the state, and the first slice that becomes `done` records `first_slice_done:`, once. An uncommitted change in `recade/state.yaml` never blocks that move: the day is then left, with one notice line, for a later move to `done`. `/recade:status`, `recade state show` and the retro print "Started on X. First slice delivered on Y, N days later." or "N days since the start, no slice delivered yet." A state without `started:` counts from the day its first gate passed.
+
+### What a phase will cost
+
+- `recade cost estimate` prints, for each phase not passed yet, a range in dollars and the number of agent runs, then the total. `--phase intake|team|docs|bible|slices|harness` gives one phase, `--slice standard|sensitive` the delivery of one slice with the models of `harness/models.yaml`, and `--json` the runs of each kind with their model. It is an estimate at API prices, never a measure; on a Claude subscription the work counts against the usage limits instead.
+- The prices live in `src/pricing.js` (prices of 2026-11-03, Anthropic API, per million tokens: input, output, cache write and cache read) for Opus 5.5, Sonnet 5.5, Haiku 5.5 and Fable 5.2, and the aliases `opus`, `sonnet`, `haiku` and `fable`. Every assumption of the estimate is a named constant of `src/estimate.js`. The short track is estimated with its own runs: spikes from none to the full number, one stack opinion, a revise only for a blocker, two art directions, the core team.
+- `/recade:new`, `/recade:team`, `/recade:docs`, `/recade:bible`, `/recade:slices` and `/recade:harness` show the estimate in one line when the phase starts, and say nothing when it fails.
+- The mechanical stages run on Sonnet at medium effort instead of the writing model: a translation, the glossary, the owner's decisions applied to D1, D2, D3, the PLAN or the BIBLE, and a fix for a style, index or render finding. `recade models mechanical [--effort]` prints the model and the effort. Drafting, contributing, reviewing and revising after a review stay on the writing model.
+
+### Trust the team
+
+- A project setting `decisions: ask|trust` in `recade/state.yaml`. `ask` is the default, and a project without the key stays `ask`. `/recade:new` asks it during the intake, `recade state set decisions trust` changes it, and `recade state show` and `/recade:status` show it.
+- In trust mode, `/recade:docs` and `/recade:bible` sort each open DEC before they ask it. It goes to the owner when it costs money, binds the client or cannot be undone cheaply. Otherwise the team takes the recommended option and records it as a team decision. The rule lives in one place, the new skill `decision-sorting`.
+- `recade decision close <DEC-nn> --choice <letter> --by team --why <reason>` closes a DEC by the team: it adds a `TD-nn` line to `decisions/TEAM.md` and writes `By: team (TD-nn)` and the reason in the Decision box. `recade decision list` shows it, and its `--json` gains `by` and `td`. Older boxes read as the owner's.
+- `recade decision team challenge <TD-nn> --reopen` reopens a DEC that the team closed: a new DEC, a copy with its box open, supersedes it and goes to the owner. `recade decision list` shows `supersedes DEC-nn` on the new DEC, and its `--json` gains `supersedes`, so the author drops the choice of the DEC it replaces.
+- In trust mode a stack layer is asked only when its finalists differ in money or in lock-in (a layer with no spike compares its top 3 ranked options). The team takes rank 1 of any other layer. The owner still passes G2-stack.
+- In trust mode the gate summary is short: what the team decided, one line each, what the owner must answer, and the details on request. Every gate stays.
+
+### One source for shared rules
+
+- The rules that many commands and agents repeat now have one source each, in `tools/shared/`, and `npm run sync-shared` copies them into place. The defaults the documents state are checked against the code.
+
+### One command to publish
+
+- `tools/release.sh <release-dir> -m "<message>" [--push]` publishes main to the release repository and stops at the first check that fails. It refuses a release repository with changes nobody committed, deletes there what main deleted, compares the two trees, and pushes only when the tests, the names check and publish-check on the history all pass. The private name list comes from `RECADE_PRIVATE_NAMES` or from a file in the user's config folder, never from the repository.
+
 ### Opus 5.5 instead of Fable
 
 - The writing agents run on the latest Opus by default (`models.writer: opus`). Fable stays a choice: `/recade:start` offers Opus first, and `recade config set models.writer fable` switches.

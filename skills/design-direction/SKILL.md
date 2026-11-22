@@ -5,7 +5,7 @@ description: How to build the art direction of a Recade project. Two or three co
 
 # Design direction
 
-A project does not get a default look. It gets a direction chosen on purpose, from two or three that truly differ. Use this with the `frontend-design:frontend-design` skill when it is available, and with `writing-voice` for every text on the boards.
+A project does not get a default look. It gets a direction chosen on purpose, from two or three that truly differ (two in the short track, when `recade/state.yaml` says `track: short`). Use this with the `frontend-design:frontend-design` skill when it is available, and with `writing-voice` for every text on the boards.
 
 ## Banned by default
 

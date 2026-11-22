@@ -462,6 +462,15 @@ export function checkSlices(root) {
       }
     }
   }
+  if (state.track === 'short' && sheets.length > 0) {
+    // The short track starts with a walking skeleton: the thinnest path through the real stack, deployed.
+    const first = byId.get('S-01');
+    if (first === undefined) {
+      findings.push({ file: 'slices', line: 1, column: 1, rule: 'slice-skeleton', severity: 'warn', message: 'The short track starts with S-01, a walking skeleton, and there is no S-01 sheet.' });
+    } else if (first.front.skeleton !== true) {
+      first.add('slice-skeleton', keyLine(first.raw, 'skeleton'), 'In the short track, S-01 is the walking skeleton: the thinnest end-to-end path through the real stack, deployed where the owner sees it, with one business rule at most. Mark it with `skeleton: true` in its header.', 'warn');
+    }
+  }
   checkCoverage(root, state, sheets, findings);
   const graph = {
     nodes: sheets.map((s) => ({ id: s.id, title: s.title, format: s.front.format ?? 'small' })),

@@ -5,7 +5,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, realpathSy
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  PHASES, GATES, normalizeState, canStart, passGate, nextAction, projectRoot, currentPhase, setSetting, phaseCommand, resetFrom,
+  PHASES, GATES, normalizeState, canStart, passGate, nextAction, projectRoot, currentPhase, setSetting, phaseCommand, resetFrom, decisionsOf,
 } from '../../src/project/state.js';
 import { initState, saveState } from '../../src/state.js';
 import { run } from '../../src/cli.js';
@@ -33,6 +33,10 @@ test('normalizeState fills a legacy plan 1 state without touching what is there'
   assert.deepEqual(s.gates, { G0: null, G1: null, 'G2-stack': null, G2: null, G3: null, G4: null, G5: null });
   assert.equal(s.slicing, 'mixed');
   assert.equal(s.second_opinion, 'sensitive');
+  assert.equal(Object.hasOwn(s, 'decisions'), false, 'an older state file is written back without the key');
+  assert.equal(decisionsOf(s), 'ask');
+  assert.equal(decisionsOf(normalizeState({ version: 1, decisions: 'trust' })), 'trust');
+  assert.equal(decisionsOf({ decisions: 'maybe' }), 'ask');
   assert.deepEqual(s.hotspots, []);
   assert.deepEqual(s.lots, ['BKL']);
   assert.equal(s.voice, 'v');
@@ -151,6 +155,9 @@ test('setSetting validates slicing, second_opinion, hotspots and lots', () => {
   assert.throws(() => setSetting(s, 'lots', 'bkl'), /Invalid lot/);
   assert.throws(() => setSetting(s, 'phase', '3'), /slicing, second_opinion, hotspots, lots, docs_step/);
   assert.equal(setSetting(s, 'docs_step', 'stack').docs_step, 'stack');
+  assert.equal(setSetting(s, 'decisions', 'trust').decisions, 'trust');
+  assert.equal(setSetting(s, 'decisions', 'ask').decisions, 'ask');
+  assert.throws(() => setSetting(s, 'decisions', 'auto'), /Invalid decisions: auto\. Use ask, trust/);
   assert.throws(() => setSetting(s, 'docs_step', 'later'), /Invalid docs_step/);
   assert.equal(s.slicing, 'mixed');
 });
@@ -224,6 +231,7 @@ test('recade state show --json prints the normalized state and the command avail
     assert.equal(data.command_available, true);
     assert.equal(data.gates.G0, null);
     assert.equal(data.second_opinion, 'sensitive');
+    assert.equal(data.decisions, 'ask');
     assert.match(data.next_action, /^Run \/recade:new/);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -331,6 +339,15 @@ test('recade state set writes validated settings and rejects the rest', async ()
     t = makeIO(root);
     assert.equal(await run(['state', 'set', 'second_opinion', 'always'], t.io), 0);
     assert.match(read(root), /second_opinion: always/);
+    t = makeIO(root);
+    assert.equal(await run(['state', 'set', 'decisions', 'trust'], t.io), 0);
+    assert.match(read(root), /^decisions: trust$/m);
+    t = makeIO(root);
+    assert.equal(await run(['state', 'show'], t.io), 0);
+    assert.match(t.stdout(), /^Decisions: trust \(the team decides what is reversible and free\)$/m);
+    t = makeIO(root);
+    assert.equal(await run(['state', 'set', 'decisions', 'always'], t.io), 2);
+    assert.match(t.stderr(), /Invalid decisions: always\. Use ask, trust\./);
     t = makeIO(root);
     assert.equal(await run(['state', 'set', 'slicing', 'huge'], t.io), 2);
     t = makeIO(root);

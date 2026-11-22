@@ -1,0 +1,1 @@
+If it exits 1 with a message that names `recade repo sync`, this repository is not linked to its workspace (the link is missing, or names another workspace): show the message, say that nothing was written, and stop. Do not run `recade repo sync` yourself: the owner runs it from the workspace.

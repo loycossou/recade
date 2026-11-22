@@ -1,7 +1,7 @@
 ---
 role: "architect"
 inspired_by: "Tomas Wrenfield"
-model: "claude-fable-5-2"
+model: "claude-opus-5-5"
 effort: "high"
 sources:
   - { title: "Tomas Wrenfield, working note 1", url: "https://example.org/notes/architect-1", accessed: "2026-11-18" }

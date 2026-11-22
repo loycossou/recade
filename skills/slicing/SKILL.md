@@ -22,7 +22,7 @@ Beyond a cap, split the slice. Aim for 3 to 5 slices that can run at the same ti
 ## Cutting rules
 
 1. **S-00 inventory** when code already exists (adopt mode, or code the owner brought). It reads the code and writes down what is there. It writes no feature, so its header says `lane: no-code`: `/inventory` closes it from `todo` to `done`, a move only that lane allows.
-2. **Walking skeleton first.** The first slices cross the whole chain: API, data, a minimal screen in the chosen art direction, CI, a deployment to a preview environment. Widen only after that.
+2. **Walking skeleton first.** The first slices cross the whole chain: API, data, a minimal screen in the chosen art direction, CI, a deployment to a preview environment. Widen only after that. In the short track (`track: short` in `recade/state.yaml`), S-01 is that skeleton alone: the thinnest end-to-end path through the real stack, deployed where the owner can see it, with at most one business rule. Its header says `skeleton: true`, and `recade slices check` warns when it does not.
 3. **Contract first.** No integration between two modules without a versioned contract. The slice that defines the contract comes before the slices that use it, and they depend on it.
 4. **One module, one agent that writes.** Slices that can run at the same time have disjoint `touches:`.
 5. **Every story in exactly one slice.** The Scope of the slice cites the story IDs of the PLAN Backlog, each with its gist.
@@ -66,6 +66,7 @@ Run it after every change. A line with `error` must be fixed.
 | `touch-prefix`, `touch-repo`, `touch-empty` | The repository prefix of each `touches:` glob and of each hotspot of `recade/state.yaml`. `touch-prefix`: a glob with no prefix while the registry holds two repositories or more. `touch-repo`: a prefix that is not a repository of the registry. `workspace:` is refused in `touches:`: it is valid only in the `## Writes` of an agent. `touch-empty`: a prefix with no glob after it (`api:`). `/parallel` does not start a slice that has one of these errors. |
 | `slice-overlap` | Two slices with no dependency path between them, in either direction, touch overlapping paths. Fix it by making one depend on the other, or by narrowing `touches:`. |
 | `slice-hotspot` (warning) | A slice touches a hotspot of `recade/state.yaml` (one warning for each slice and hotspot). Slices that touch the same hotspot run one after the other: chain them with `depends_on`. |
+| `slice-skeleton` (warning) | In the short track, S-01 is missing or its header has no `skeleton: true`. |
 | `story-uncovered`, `story-twice`, `plan-no-backlog`, `plan-missing` | Each story of the PLAN Backlog is cited in the Scope of exactly one slice. A PLAN with no Backlog section cannot be checked. |
 
 How the counts are read, so that a sheet counts true:

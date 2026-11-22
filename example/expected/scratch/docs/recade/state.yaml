@@ -34,6 +34,7 @@ lots:
   - MEM
   - REP
 slicing: mixed
+started: 2026-11-18
 second_opinion: sensitive
 hotspots: []
 docs_step: done

@@ -6,6 +6,9 @@ import { loadState } from './state.js';
 /** Word budgets of the project documents, code blocks excluded. A project overrides them with `budgets:` in `recade/state.yaml`. */
 export const DEFAULT_BUDGETS = Object.freeze({ D1: 10000, D2: 9000, D3: 7000, PLAN: 7000, STACK: 6000, BIBLE: 8000 });
 
+/** The budgets of the short track: half of the full ones. */
+export const SHORT_BUDGETS = Object.freeze(Object.fromEntries(Object.entries(DEFAULT_BUDGETS).map(([doc, words]) => [doc, Math.round(words / 2)])));
+
 /** Where each budgeted document lives, relative to the project folder. */
 export const BUDGET_FILES = Object.freeze({
   D1: 'docs/D1.md', D2: 'docs/D2.md', D3: 'docs/D3.md', PLAN: 'docs/PLAN.md', STACK: 'docs/STACK.md', BIBLE: 'BIBLE.md',
@@ -15,20 +18,22 @@ export const BUDGET_FILES = Object.freeze({
 export const ERROR_RATIO = 1.5;
 
 /**
- * The budgets of a project: the defaults, then the `budgets:` key of its state. Throws on an unknown document or on a value
+ * The budgets of a project: the defaults of its track (half of them with `track: short`), then the `budgets:` key of its
+ * state, which always wins. Throws on an unknown document or on a value
  * that is not a whole number of words, 1 or more.
  * @param {object|null} [state]
  * @returns {Record<string, number>}
  */
 export function budgetsOf(state) {
   const set = state?.budgets;
-  if (set === undefined || set === null) return { ...DEFAULT_BUDGETS };
+  const base = state?.track === 'short' ? SHORT_BUDGETS : DEFAULT_BUDGETS;
+  if (set === undefined || set === null) return { ...base };
   if (typeof set !== 'object' || Array.isArray(set)) throw new Error('budgets in recade/state.yaml must be a map of document to words.');
   for (const [doc, words] of Object.entries(set)) {
     if (!Object.hasOwn(DEFAULT_BUDGETS, doc)) throw new Error(`budgets.${doc} is not a document. Use ${Object.keys(DEFAULT_BUDGETS).join(', ')}.`);
     if (!Number.isInteger(words) || words < 1) throw new Error(`budgets.${doc} must be a whole number of words, 1 or more.`);
   }
-  return { ...DEFAULT_BUDGETS, ...set };
+  return { ...base, ...set };
 }
 
 /**

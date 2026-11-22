@@ -697,7 +697,70 @@ test('board reconcile --apply commits the STATUS.md move; a dry run commits noth
   assert.equal(must(git(ws, 'status', '--porcelain')).stdout, '');
   assert.match(readFileSync(join(ws, 'slices/STATUS.md'), 'utf8'), /\| S-01 \|[^\n]*\| done \|/);
   assert.equal(subjects(ws).at(-1), 'chore(board): reconcile STATUS.md');
+  assert.deepEqual(files(ws), ['recade/state.yaml', 'slices/STATUS.md'], 'the first done slice also records its day in the state');
+});
+
+test('slices status --set done with an unrelated change in the state: the move commits alone, the day waits for a later move', async () => {
+  const ws = await workspace();
+  gitSafe(ws);
+  write(ws, 'slices/S-01-one.md', STATUS_SHEET('S-01'));
+  write(ws, 'slices/S-02-two.md', STATUS_SHEET('S-02'));
+  must(git(ws, 'add', '-A'));
+  must(git(ws, 'commit', '-q', '-m', 'docs: sheets'));
+  assert.equal(await run(['slices', 'status'], makeIO(ws, { run: syncExec }).io), 0);
+  const mine = `${readFileSync(join(ws, 'recade/state.yaml'), 'utf8')}slicing: small\n`;
+  write(ws, 'recade/state.yaml', mine);
+  const t = makeIO(ws, { run: syncExec, now: () => new Date(2026, 10, 20, 12) });
+  assert.equal(await run(['slices', 'status', '--set', 'S-01', 'done'], t.io), 0, t.err.join(''));
+  assert.match(t.err.join(''), /recade: notice: recade\/state\.yaml has uncommitted changes, so the day of the first done slice is not recorded now\./);
+  assert.equal(subjects(ws).at(-1), 'chore(slices): S-01 done');
   assert.deepEqual(files(ws), ['slices/STATUS.md']);
+  assert.equal(readFileSync(join(ws, 'recade/state.yaml'), 'utf8'), mine, 'the change of the owner is left as it was');
+  assert.equal(must(git(ws, 'status', '--porcelain')).stdout, ' M recade/state.yaml\n');
+  // Once the state is committed, the next move to done records the day.
+  must(git(ws, 'commit', '-q', '-am', 'chore: slicing'));
+  const next = makeIO(ws, { run: syncExec, now: () => new Date(2026, 10, 22, 12) });
+  assert.equal(await run(['slices', 'status', '--set', 'S-02', 'done'], next.io), 0, next.err.join(''));
+  assert.equal(next.err.join(''), '');
+  assert.deepEqual(files(ws), ['recade/state.yaml', 'slices/STATUS.md']);
+  assert.equal(parse(readFileSync(join(ws, 'recade/state.yaml'), 'utf8')).first_slice_done, '2026-11-22');
+  assert.equal(must(git(ws, 'status', '--porcelain')).stdout, '');
+});
+
+test('board reconcile --apply with an unrelated change in the state: it is settled before any gh write, STATUS.md moves and commits alone', async () => {
+  const ws = await workspace({ github: { owner: 'fernhill', repo: 'fernhill-workspace', project_number: 7 } });
+  gitSafe(ws);
+  write(ws, 'slices/S-01-x.md', INC_SHEET('S-01'));
+  write(ws, 'slices/STATUS.md', '# Slice status\n\n| Slice | Title | Format | Lane | Increment | State | Depends on | Size | Note |\n|---|---|---|---|---|---|---|---|---|\n| S-01 | Slice S-01 | small | standard | INC-1 | ready-to-merge | | S | |\n');
+  write(ws, 'docs/PLAN.md', '# Plan\n\n## Backlog\n\n| ID | Lot | Item | Size | Points | Depends on | Sprint | Phase | Status | Comment |\n|---|---|---|---|---|---|---|---|---|---|\n| LOAN-01 | Core | Apply | M | 2 | | 1 | Build | todo | |\n');
+  must(git(ws, 'add', '-A'));
+  must(git(ws, 'commit', '-q', '-m', 'docs: slices'));
+  const options = ['Backlog', 'Ready', 'In progress', 'In review', 'Done'].map((name, i) => ({ id: `opt_${i}`, name }));
+  const issues = [{ number: 1, title: '[S-01] Slice S-01', url: 'https://github.com/fernhill/fernhill-workspace/issues/1' }];
+  const items = issues.map((i) => ({ id: `PVTI_${i.number}`, title: i.title, status: 'In review', content: { url: i.url, number: i.number, type: 'Issue' } }));
+  const writes = [];
+  const gh = (cmd, opts) => {
+    if (cmd[0] !== 'gh') return syncExec(cmd, opts);
+    const [a, b] = cmd.slice(1);
+    if (a === 'pr' && b === 'view') return ok(JSON.stringify({ number: 12, state: 'MERGED', mergedAt: '2026-11-13T10:00:00Z', url: 'https://github.com/fernhill/app/pull/12', headRefOid: 'a'.repeat(40), baseRefName: 'main' }));
+    if (a === 'project' && b === 'view') return ok(JSON.stringify({ number: 7, id: 'PVT_board', title: 'Board' }));
+    if (a === 'project' && b === 'field-list') return ok(JSON.stringify({ fields: [{ id: 'F1', name: 'Status', options }], totalCount: 1 }));
+    if (a === 'project' && b === 'item-list') return ok(JSON.stringify({ items, totalCount: items.length }));
+    if (a === 'issue' && b === 'list') return ok(JSON.stringify(issues));
+    writes.push(`${a} ${b}`);
+    return ok('{}');
+  };
+  const mine = `${readFileSync(join(ws, 'recade/state.yaml'), 'utf8')}slicing: small\n`;
+  write(ws, 'recade/state.yaml', mine);
+  const t = makeIO(ws, { run: gh });
+  assert.equal(await run(['board', 'reconcile', '--apply'], t.io), 0, t.err.join(''));
+  assert.ok(writes.length > 0, 'the board was written');
+  assert.match(t.err.join(''), /recade: notice: recade\/state\.yaml has uncommitted changes, so the day of the first done slice is not recorded now\./);
+  assert.match(readFileSync(join(ws, 'slices/STATUS.md'), 'utf8'), /\| S-01 \|[^\n]*\| done \|/);
+  assert.equal(subjects(ws).at(-1), 'chore(board): reconcile STATUS.md');
+  assert.deepEqual(files(ws), ['slices/STATUS.md']);
+  assert.equal(readFileSync(join(ws, 'recade/state.yaml'), 'utf8'), mine);
+  assert.equal(must(git(ws, 'status', '--porcelain')).stdout, ' M recade/state.yaml\n');
 });
 
 // ---- state under the lock, with real processes

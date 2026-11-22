@@ -621,3 +621,12 @@ test('retro (legacy, no registry) is unchanged: no repos in the metrics and no r
   assert.equal(result.metrics.repos, undefined);
   assert.equal(readFileSync(result.file, 'utf8').includes('| Repository |'), false);
 });
+
+test('retro says how long the first slice took, from the dates of the state', () => {
+  const { root, prs } = history();
+  writeFileSync(join(root, 'recade', 'state.yaml'), stringify({ version: 1, mode: 'scratch', languages: { work: 'en' }, started: '2026-02-20', first_slice_done: '2026-03-03' }));
+  const text = retro(root, 'INC-1', { exec: fakeExec(prs), now: NOW }).text;
+  assert.match(text, /^Started on 2026-02-20\. First slice delivered on 2026-03-03, 11 days later\.$/m);
+  const old = history();
+  assert.doesNotMatch(retro(old.root, 'INC-1', { exec: fakeExec(old.prs), now: NOW }).text, /First slice delivered|since the start/);
+});

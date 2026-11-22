@@ -742,7 +742,7 @@ test('docs.md Step 5 announces the layers first, asks them in dependency order, 
   assert.ok(step.includes('decision procedure, document `STACK`, author `stack-analyst`'));
   assert.equal(step.includes('and opens one DEC for each layer with a real choice'), false, 'the DEC of a layer is opened after the owner answers, one layer at a time');
   // A DEC has at most three options: the owner's choice, the recommendation and at most one other finalist.
-  for (const part of ['2 or 3 different options', 'never the same option twice', 'the recommendation plus the next one or two of the top 5 that still fit', 'any rank marked research only (no spike)', "the owner's choice and the recommendation, plus at most one other option, the next best of the top 5"]) assert.ok(step.includes(part), part);
+  for (const part of ['2 or 3 different options', 'never the same option twice', 'the recommendation plus the next one or two of the top 5 that still fit', 'any other rank marked research only (no spike)', 'or picks the recommendation of a layer with no spike (a short track layer whose leader is clear)', "the owner's choice and the recommendation, plus at most one other option, the next best of the top 5"]) assert.ok(step.includes(part), part);
   // Resuming in the middle of the loop: a layer with a DEC is never asked again.
   for (const part of ["recade decision list --json --project '<dir>'", 'is never asked again', 'never gets a second DEC', "a closed one is the owner's answer", 'an open one is asked now', 'section 1 of `docs/STACK.md`', '.applied-decisions.txt', 'On a resume']) {
     assert.ok(step.includes(part), part);
@@ -755,7 +755,7 @@ test('docs.md Step 5 shows a ranked top 5 for each layer, asks ranks 1 to 4, and
   const at = (s) => step.indexOf(s);
   for (const part of ['ranked top 5', 'a sub-section of section 2', 'Ranks 4 and 5 are researched, never spiked', 're-ranks the top 5 of this layer', 'drops out with the reason', 'the next one comes in',
     'Show the top 5 in the chat first', 'as a numbered list', 'its why and its drawback', 'explained in plain words', 'at most 4 options', 'the options are ranks 1 to 4', 'the 5th can be picked by typing its name in `Other`',
-    'any rank marked research only', 'is not researched again from scratch', 'the full top 5 stays in `docs/STACK.md`']) {
+    'any other rank marked research only', 'is not researched again from scratch', 'the full top 5 stays in `docs/STACK.md`']) {
     assert.ok(step.includes(part), part);
   }
   assert.ok(at('Show the top 5 in the chat first') < at('Then ask with `AskUserQuestion`'));

@@ -6,7 +6,8 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 import { createProject } from '../../src/project/scaffold.js';
-import { newDecision, closeDecision, listDecisions } from '../../src/project/decisions.js';
+import { newDecision, closeDecision, listDecisions, reopenTeamDecision } from '../../src/project/decisions.js';
+import { addTeamDecision, listTeamDecisions } from '../../src/project/teamdecisions.js';
 import { lintFiles } from '../../src/style/lint.js';
 import { run } from '../../src/cli.js';
 
@@ -90,10 +91,81 @@ test('listing: all, open only, with the choice of closed ones', async () => {
   newDecision(root, { ...FIELDS, question: 'Which map vendor?', due: undefined });
   closeDecision(root, 'DEC-01', { choice: 'A', date: '2026-11-20' });
   assert.deepEqual(listDecisions(root), [
-    { id: 'DEC-01', status: 'closed', document: 'D1', question: 'How often do lenders get paid?', due: '2026-12-01', choice: 'A (Daily payouts)' },
-    { id: 'DEC-02', status: 'open', document: 'D1', question: 'Which map vendor?', due: '', choice: '' },
+    { id: 'DEC-01', status: 'closed', document: 'D1', question: 'How often do lenders get paid?', due: '2026-12-01', choice: 'A (Daily payouts)', by: 'owner', td: '', supersedes: '' },
+    { id: 'DEC-02', status: 'open', document: 'D1', question: 'Which map vendor?', due: '', choice: '', by: '', td: '', supersedes: '' },
   ]);
   assert.deepEqual(listDecisions(root, { open: true }).map((d) => d.id), ['DEC-02']);
+});
+
+test('closing by the team records a TD line with the reason, names it in the box, and lists the DEC as decided by the team', async () => {
+  const root = await project();
+  newDecision(root, FIELDS);
+  assert.equal(closeDecision(root, 'DEC-01', { choice: 'B', by: 'team', why: 'Reversible, and it costs nothing.', date: '2026-11-20' }), 'TD-01');
+  const text = file(root, 'DEC-01');
+  assert.match(text, /^status: closed$/m);
+  assert.match(text, /^> Decided: yes\. Option: B \(Weekly payouts\)\. By: team \(TD-01\)\. Date: 2026-11-20\.\n> Team reason: Reversible, and it costs nothing\.$/m);
+  assert.deepEqual(listTeamDecisions(root), [{
+    id: 'TD-01', document: 'D1', question: 'How often do lenders get paid?', decided: 'Option B (Weekly payouts) of DEC-01', why: 'Reversible, and it costs nothing.', status: 'decided', dec: '',
+  }]);
+  const [d] = listDecisions(root);
+  assert.equal(d.by, 'team');
+  assert.equal(d.td, 'TD-01');
+  assert.equal(d.choice, 'B (Weekly payouts)');
+  assert.deepEqual(lintFiles(root, ['decisions']), []);
+});
+
+test('closing by the team needs a reason, the owner gives none, and by takes owner or team only', async () => {
+  const root = await project();
+  newDecision(root, FIELDS);
+  assert.throws(() => closeDecision(root, 'DEC-01', { choice: 'B', by: 'team' }), /needs its reason/);
+  assert.throws(() => closeDecision(root, 'DEC-01', { choice: 'B', by: 'team', why: '  ' }), /needs its reason/);
+  assert.throws(() => closeDecision(root, 'DEC-01', { choice: 'B', why: 'cheap' }), /Only a decision closed by the team/);
+  assert.throws(() => closeDecision(root, 'DEC-01', { choice: 'B', by: 'agent', why: 'x' }), /by must be owner or team/);
+  assert.throws(() => closeDecision(root, 'DEC-01', { choice: 'C', by: 'team', why: 'x' }), /no option "C"/);
+  assert.deepEqual(listTeamDecisions(root), []);
+  assert.equal(closeDecision(root, 'DEC-01', { choice: 'B' }), null);
+  assert.match(file(root, 'DEC-01'), /By: owner\. Date:/);
+});
+
+test('a box written before trust mode still reads as the owner', async () => {
+  const root = await project();
+  newDecision(root, FIELDS);
+  closeDecision(root, 'DEC-01', { choice: 'A', date: '2026-11-20' });
+  assert.equal(listDecisions(root)[0].by, 'owner');
+});
+
+test('reopening a team decision copies its DEC with the box open, supersedes it and marks the TD challenged', async () => {
+  const root = await project();
+  newDecision(root, FIELDS);
+  closeDecision(root, 'DEC-01', { choice: 'B', by: 'team', why: 'Reversible.', date: '2026-11-20' });
+  const before = file(root, 'DEC-01');
+  assert.deepEqual(reopenTeamDecision(root, 'TD-01', { date: '2026-11-21' }), { dec: 'DEC-02', supersedes: 'DEC-01' });
+  assert.equal(file(root, 'DEC-01'), before);
+  const text = file(root, 'DEC-02');
+  assert.match(text, /^doc_id: "DEC-02"$/m);
+  assert.match(text, /^status: open$/m);
+  assert.match(text, /^date: "2026-11-21"$/m);
+  assert.match(text, /^supersedes: "DEC-01"\n---$/m);
+  assert.match(text, /^# DEC-02: How often do lenders get paid\?$/m);
+  assert.match(text, /^## Why now\n\nThe owner challenged the choice the team made in DEC-01 \(option B \(Weekly payouts\), TD-01\)\. This DEC supersedes DEC-01\.\n\nThe ledger design depends on it\.$/m);
+  assert.match(text, /^> Decided: not yet\. Option: none\. By: nobody\. Date: none\.$/m);
+  assert.equal(text.includes('Team reason'), false);
+  assert.deepEqual(listDecisions(root, { open: true }).map((d) => [d.id, d.document]), [['DEC-02', 'D1']]);
+  assert.deepEqual(listDecisions(root).map((d) => [d.id, d.supersedes]), [['DEC-01', ''], ['DEC-02', 'DEC-01']]);
+  assert.equal(listTeamDecisions(root)[0].status, 'challenged');
+  assert.equal(listTeamDecisions(root)[0].dec, 'DEC-02');
+  closeDecision(root, 'DEC-02', { choice: 'A', date: '2026-11-22' });
+  assert.equal(listDecisions(root)[1].by, 'owner');
+  assert.deepEqual(lintFiles(root, ['decisions']), []);
+  assert.throws(() => reopenTeamDecision(root, 'TD-01'), /already challenged/);
+});
+
+test('reopen refuses a TD that closed no DEC, or that does not exist', async () => {
+  const root = await project();
+  addTeamDecision(root, { document: 'D1', question: 'Which date format?', decided: 'ISO', why: 'Reversible.' });
+  assert.throws(() => reopenTeamDecision(root, 'TD-01'), /TD-01 did not close a DEC\. Open one with recade decision new/);
+  assert.throws(() => reopenTeamDecision(root, 'TD-09'), /No team decision TD-09/);
+  assert.throws(() => reopenTeamDecision(root, 'nope'), /Invalid team decision id/);
 });
 
 test('close refuses an unknown id, an unknown option, a closed decision and an empty choice', async () => {
@@ -172,6 +244,42 @@ test('recade decision new, list and close', async () => {
   const again = makeIO(root);
   assert.equal(await run(['decision', 'close', 'DEC-01', '--choice', 'A'], again.io), 1);
   assert.match(again.stderr(), /already closed/);
+});
+
+test('recade decision close --by team, list, and team challenge --reopen', async () => {
+  const root = await project();
+  await run(cliNew('How often do lenders get paid?'), makeIO(root).io);
+  const c = makeIO(root);
+  assert.equal(await run(['decision', 'close', 'DEC-01', '--choice', 'B', '--by', 'team', '--why', 'Reversible, and free.'], c.io), 0);
+  assert.equal(c.stdout(), 'DEC-01 closed on 2026-11-20 by the team (TD-01).\n');
+  const p = makeIO(root);
+  assert.equal(await run(['decision', 'list'], p.io), 0);
+  assert.match(p.stdout(), /^DEC-01\tclosed\tD1\tHow often do lenders get paid\?\t\tB \(Weekly payouts\)\tteam \(TD-01\)$/m);
+  const j = makeIO(root);
+  await run(['decision', 'list', '--json'], j.io);
+  assert.equal(JSON.parse(j.stdout())[0].by, 'team');
+  const r = makeIO(root);
+  assert.equal(await run(['decision', 'team', 'challenge', 'TD-01', '--reopen'], r.io), 0);
+  assert.equal(r.stdout(), 'TD-01 challenged: DEC-02 reopens DEC-01 for the owner.\n');
+  const o = makeIO(root);
+  await run(['decision', 'list', '--open', '--json'], o.io);
+  assert.deepEqual(JSON.parse(o.stdout()).map((d) => d.id), ['DEC-02']);
+  assert.equal(JSON.parse(o.stdout())[0].supersedes, 'DEC-01');
+  const text = makeIO(root);
+  await run(['decision', 'list'], text.io);
+  assert.match(text.stdout(), /^DEC-02\topen\tD1\tHow often do lenders get paid\?\t\t\tsupersedes DEC-01$/m);
+  for (const args of [
+    ['decision', 'close', 'DEC-02', '--choice', 'A', '--by', 'team'], ['decision', 'close', 'DEC-02', '--choice', 'A', '--why', 'x'],
+    ['decision', 'close', 'DEC-02', '--choice', 'A', '--by', 'agent', '--why', 'x'],
+    ['decision', 'team', 'challenge', 'TD-01', '--reopen', '--dec', 'DEC-02'],
+  ]) {
+    const t = makeIO(root);
+    assert.equal(await run(args, t.io), 2, args.join(' '));
+    assert.match(t.stderr(), /^Usage: recade decision/);
+  }
+  const owner = makeIO(root);
+  assert.equal(await run(['decision', 'close', 'DEC-02', '--choice', 'A', '--by', 'owner'], owner.io), 0);
+  assert.equal(owner.stdout(), 'DEC-02 closed on 2026-11-20.\n');
 });
 
 test('recade decision: usage errors exit 2, bad JSON exits 2, no project exits 1', async () => {

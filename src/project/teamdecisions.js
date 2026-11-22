@@ -83,12 +83,21 @@ export function addTeamDecision(root, fields, { date = localToday(), ...lock } =
   const why = required(fields?.why, 'why');
   const document = typeof fields?.document === 'string' ? fields.document.trim() : '';
   if (!DOCUMENTS.includes(document)) throw new Error(`document must be one of ${DOCUMENTS.join(', ')}.`);
-  return withLock(root, lock, () => {
-    const entries = read(root);
-    const id = `TD-${String(Math.max(0, ...entries.map((e) => Number(e.id.slice(3)))) + 1).padStart(2, '0')}`;
-    write(root, [...entries, { id, document, question, decided, why, status: 'decided', dec: '' }], date);
-    return id;
-  });
+  return withLock(root, lock, () => recordTeamDecision(root, { document, question, decided, why }, date));
+}
+
+/**
+ * Append one checked entry to the register and return its id. The caller holds the lock of the decisions folder:
+ * closing a DEC by the team records its line in the same locked step.
+ * @param {string} root
+ * @param {{document: string, question: string, decided: string, why: string}} fields
+ * @param {string} date
+ */
+export function recordTeamDecision(root, { document, question, decided, why }, date) {
+  const entries = read(root);
+  const id = `TD-${String(Math.max(0, ...entries.map((e) => Number(e.id.slice(3)))) + 1).padStart(2, '0')}`;
+  write(root, [...entries, { id, document: line(document), question: line(question), decided: line(decided), why: line(why), status: 'decided', dec: '' }], date);
+  return id;
 }
 
 /**
@@ -101,15 +110,34 @@ export function challengeTeamDecision(root, id, { dec, date = localToday(), ...l
   if (!ID.test(id)) throw new Error(`Invalid team decision id: ${id}. Use TD-01 style.`);
   if (!DEC_ID.test(dec ?? '')) throw new Error(`Invalid decision id: ${dec}. Use DEC-01 style.`);
   withLock(root, lock, () => {
-    const entries = read(root);
-    const entry = entries.find((e) => e.id === id);
-    if (entry === undefined) throw new Error(`No team decision ${id}.`);
-    if (entry.status === 'challenged') throw new Error(`${id} is already challenged.`);
+    teamDecisionOf(root, id);
     if (!existsSync(join(root, DIR, `${dec}.md`))) throw new Error(`No decision ${dec}.`);
-    entry.status = 'challenged';
-    entry.dec = dec;
-    write(root, entries, date);
+    markChallenged(root, id, dec, date);
   });
+}
+
+/**
+ * The entry `id` of the register, still `decided`. Throws when it is missing or already challenged.
+ * @param {string} root
+ * @param {string} id TD-nn
+ */
+export function teamDecisionOf(root, id) {
+  if (!ID.test(id)) throw new Error(`Invalid team decision id: ${id}. Use TD-01 style.`);
+  const entry = read(root).find((e) => e.id === id);
+  if (entry === undefined) throw new Error(`No team decision ${id}.`);
+  if (entry.status === 'challenged') throw new Error(`${id} is already challenged.`);
+  return entry;
+}
+
+/** Mark `id` as challenged, replaced by the DEC `dec`. The caller holds the lock and has checked `dec`. */
+export function markChallenged(root, id, dec, date) {
+  teamDecisionOf(root, id);
+  const entries = read(root);
+  const entry = entries.find((e) => e.id === id);
+  // The id was checked just above, under the same lock.
+  entry.status = 'challenged';
+  entry.dec = dec;
+  write(root, entries, date);
 }
 
 /**

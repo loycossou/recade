@@ -34,6 +34,7 @@ With several code repositories, each `touches` entry starts with the repository 
 pull request per repository. Optional `merge_order: [api, web]` lists those repositories in the order their pull
 requests merge; without it the order of the prefixes in `touches` is used. `merged:` (a map from repository to the
 commit that merged it) is written by /board once every pull request is merged: never write it by hand.
+In the short track, S-01 is the walking skeleton and its header adds `skeleton: true`.
 -->
 
 # {{doc_id}}: {{title}}

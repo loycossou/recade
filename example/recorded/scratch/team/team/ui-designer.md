@@ -1,7 +1,7 @@
 ---
 role: "ui-designer"
 inspired_by: "Lena Voss"
-model: "claude-fable-5-2"
+model: "claude-opus-5-5"
 effort: "high"
 sources:
   - { title: "Lena Voss, working note 1", url: "https://example.org/notes/ui-designer-1", accessed: "2026-11-18" }

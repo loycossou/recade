@@ -11,7 +11,7 @@ must_not_contain: ["inspired_by:", "- [ ]"]
 This is a test case. Everything below is fictional. No file exists and no tool is available in this exercise: the material is given inline. Do not run any command and do not call any tool. Answer with what you would write in your files (the key parts only), then your usual Report block.
 
 recade/state.yaml (extract): mode scratch, lots [LEN, SEC], languages.work en, voice: short plain sentences, no em dash.
-Your role: security-lead. Inspired by: Tomas Reyes, a fictional security engineer. Model: claude-fable-5-2. Effort: high. Date: 2026-11-14. Language: en.
+Your role: security-lead. Inspired by: Tomas Reyes, a fictional security engineer. Model: claude-opus-5-5. Effort: high. Date: 2026-11-14. Language: en.
 Brief: Larkfield Lending is a small fictional lender. It wants a web app where a borrower asks for a loan, sees the repayment schedule, and a loan officer approves the file. The users are borrowers (adults, on a phone) and loan officers (6 people, on a laptop). Out of scope: collections and credit scoring. Constraint: amounts are integer cents, a schedule is readable only by the borrower and the officer of the file.
 
 Web tools are not available, and the deep-research skill is not either. The only page you have is this one, which you opened and read.

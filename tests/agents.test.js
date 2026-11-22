@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { syncAgents } from '../tools/sync-agent-models.js';
 import { WRITER_MODELS } from '../src/models.js';
 import { AXES, CONTRACT_SECTIONS, INVARIANT_SECTIONS, RULES_SECTIONS, REGISTER_FILES, SOURCE_DIR } from '../src/project/fromcode.js';
+import { stripMarkers } from '../tools/sync-shared.js';
 
 const repo = join(dirname(fileURLToPath(import.meta.url)), '..');
 const agentsDir = join(repo, 'agents');
@@ -405,7 +406,7 @@ test('the slicing skill holds the caps, the three formulae, the large slice shap
 
 test('the owner agents used by amend report the IDs they changed, and the stack-analyst has a revise stage', () => {
   for (const name of ['project-lead', 'ux-designer', 'architect', 'devops-lead', 'security-lead', 'stack-analyst', 'bible-writer', 'slicer']) {
-    const text = readFileSync(join(agentsDir, `${name}.md`), 'utf8');
+    const text = stripMarkers(readFileSync(join(agentsDir, `${name}.md`), 'utf8'));
     const report = text.slice(text.indexOf('## Report'));
     assert.match(report, /^\d+\. IDs changed: /m, name);
   }

@@ -1,0 +1,1 @@
+The label of each option starts with the letter written in the file: `A: Daily payouts`, `B: Weekly payouts (recommended)`. The description holds its cost, what it closes, its risks and its calendar impact.

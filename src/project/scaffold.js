@@ -118,7 +118,8 @@ export async function createProject(name, { root, mode, from, config, exec, toda
     }
   }
   const initial = initState(dir, { mode }, config);
-  const state = normalizeState({ version: initial.version, kind: 'workspace', ...initial });
+  // `started` is the first day of the project: the metric "time to first slice" counts from it.
+  const state = normalizeState({ version: initial.version, kind: 'workspace', ...initial, started: today });
   const probe = await exec('git', ['--version']);
   if (probe.code !== 0) throw new Error('Git is not installed or not on the PATH. Install Git, then run this again.');
 

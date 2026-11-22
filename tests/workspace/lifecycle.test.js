@@ -76,7 +76,7 @@ test('board reconcile --apply across repositories: one commit holds STATUS.md an
   assert.equal(await run(['board', 'reconcile', '--apply'], t.io), 0, t.err.join(''));
   assert.equal(subjects(ws).length, before + 1);
   assert.equal(subjects(ws).at(-1), 'chore(board): reconcile slices');
-  assert.deepEqual(files(ws), ['slices/S-01-x.md', 'slices/STATUS.md']);
+  assert.deepEqual(files(ws), ['recade/state.yaml', 'slices/S-01-x.md', 'slices/STATUS.md'], 'the first done slice also records its day in the state');
   assert.match(readFileSync(join(ws, 'slices/STATUS.md'), 'utf8'), /\| S-01 \|[^\n]*\| done \|/);
   assert.match(readFileSync(join(ws, 'slices/S-01-x.md'), 'utf8'), new RegExp(`merged:\\n  api: ${SHA.api}\\n  web: ${SHA.web}\\n---`));
   assert.equal(must(git(ws, 'status', '--porcelain')).stdout.includes('slices/'), false, 'nothing left dirty');

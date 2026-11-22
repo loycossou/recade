@@ -4,6 +4,7 @@ import { projectName } from '../workspace/layout.js';
 import { frontMatterLength } from '../frontmatter-lines.js';
 import { loadState } from '../state.js';
 import { withLock as lockFile, writeAtomic } from './lockfile.js';
+import { markChallenged, recordTeamDecision, teamDecisionOf } from './teamdecisions.js';
 import { fillTemplate, localToday, readTemplate } from './template.js';
 
 const DIR = 'decisions';
@@ -14,6 +15,9 @@ const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const LETTERS = 'ABC';
 const DOCUMENTS = ['D1', 'D2', 'D3', 'STACK', 'PLAN', 'BIBLE'];
 const OPEN_BOX = '> Decided: not yet. Option: none. By: nobody. Date: none.';
+/** Who closed a decision: the owner, or the team in trust mode, by the rule of skills/decision-sorting. */
+const BY = ['owner', 'team'];
+const REASON = '> Team reason: ';
 
 const withLock = (root, lock, fn) => lockFile(root, LOCK, lock, fn, 'The decisions folder');
 
@@ -124,6 +128,7 @@ function parse(root, id) {
   const status = /^status:\s*(\S+)/m.exec(front)?.[1] ?? 'open';
   const document = /^document:\s*"?([^"\n]*)"?\s*$/m.exec(front)?.[1] ?? '';
   const due = /^due:\s*"?([^"\n]*)"?\s*$/m.exec(front)?.[1] ?? '';
+  const supersedes = /^supersedes:\s*"?(DEC-\d{2,})"?\s*$/m.exec(front)?.[1] ?? '';
   const q = lines.findIndex((l) => l === '## Question');
   const question = q >= 0 ? lines.slice(q + 1).find((l) => l.trim() !== '') ?? '' : '';
   const options = lines.flatMap((l) => {
@@ -132,22 +137,30 @@ function parse(root, id) {
   });
   const box = lines.findIndex((l) => l.trim() === '> [!DECISION]');
   const decided = box >= 0 ? /^> Decided: (.*?)\. Option: (.*?)\. By: (.*?)\. Date: (.*?)\.$/.exec(lines[box + 1] ?? '') : null;
-  return { path, text, lines, status, due, document, question: question.trim(), options, box, decided };
+  return { path, text, lines, status, due, document, question: question.trim(), options, box, decided, supersedes };
 }
 
 /**
- * Close an open decision with the owner's choice. `choice` is an option letter (A, B, C) or an option label.
- * The Decision box records the option, the owner and the date, and the status becomes `closed`.
+ * Close an open decision. `choice` is an option letter (A, B, C) or an option label. The Decision box records the
+ * option, who decided and the date, and the status becomes `closed`.
+ * `by` is `owner` (the default) or `team`. A decision closed by the team needs `why`: in the same locked step its line
+ * is added to `decisions/TEAM.md`, so the owner sees it at the gate and can challenge it, and the box names that line
+ * (`By: team (TD-03)`) and keeps the reason under it. Returns the TD id, or null when the owner decided.
  * @param {string} root project folder
  * @param {string} id DEC-nn
- * @param {{choice: string, date?: string, lockTries?: number, lockWaitMs?: number}} close
+ * @param {{choice: string, by?: 'owner'|'team', why?: string, date?: string, lockTries?: number, lockWaitMs?: number}} close
+ * @returns {string|null}
  */
-export function closeDecision(root, id, { choice, date = localToday(), ...lock } = {}) {
+export function closeDecision(root, id, { choice, by = 'owner', why, date = localToday(), ...lock } = {}) {
   if (!ID.test(id)) throw new Error(`Invalid decision id: ${id}. Use DEC-01 style.`);
   const picked = typeof choice === 'string' ? line(choice) : '';
   if (picked === '') throw new Error('A closed decision needs the choice.');
   if (!DATE.test(date)) throw new Error('date must be YYYY-MM-DD.');
-  withLock(root, lock, () => {
+  if (!BY.includes(by)) throw new Error(`by must be ${BY.join(' or ')}.`);
+  const reason = typeof why === 'string' ? line(why) : '';
+  if (by === 'team' && reason === '') throw new Error('A decision closed by the team needs its reason (why).');
+  if (by === 'owner' && reason !== '') throw new Error('Only a decision closed by the team takes a reason.');
+  return withLock(root, lock, () => {
     const dec = parse(root, id);
     if (dec.status === 'closed') throw new Error(`${id} is already closed.`);
     const option = dec.options.find((o) => o.letter === picked.toUpperCase() || o.label.toLowerCase() === picked.toLowerCase());
@@ -155,27 +168,78 @@ export function closeDecision(root, id, { choice, date = localToday(), ...lock }
       throw new Error(`${id} has no option "${picked}". Use ${dec.options.map((o) => o.letter).join(', ')} or an option label.`);
     }
     if (dec.box < 0) throw new Error(`${id} has no Decision box.`);
+    const td = by === 'team'
+      ? recordTeamDecision(root, { document: dec.document, question: dec.question, decided: `Option ${option.letter} (${option.label}) of ${id}`, why: reason }, date)
+      : null;
     const lines = [...dec.lines];
-    lines[dec.box + 1] = `> Decided: yes. Option: ${option.letter} (${option.label}). By: owner. Date: ${date}.`;
+    lines[dec.box + 1] = `> Decided: yes. Option: ${option.letter} (${option.label}). By: ${td === null ? 'owner' : `team (${td})`}. Date: ${date}.`;
+    if (td !== null) lines.splice(dec.box + 2, 0, `${REASON}${reason}`);
     const front = frontMatterLength(lines);
     const at = lines.findIndex((l, i) => i < front && /^status:/.test(l));
     if (at >= 0) lines[at] = 'status: closed';
     writeAtomic(dec.path, lines.join('\n'));
+    return td;
   });
 }
 
 /**
- * Every decision in id order, or only the open ones.
+ * The owner challenges a team decision that closed a DEC: a new DEC, a copy of that one with its box open again,
+ * supersedes it, and the register line points to it. The closed DEC is never edited. Returns both ids.
+ * @param {string} root project folder
+ * @param {string} td TD-nn
+ * @param {{date?: string, lockTries?: number, lockWaitMs?: number}} [extra]
+ * @returns {{dec: string, supersedes: string}}
+ */
+export function reopenTeamDecision(root, td, { date = localToday(), ...lock } = {}) {
+  if (!DATE.test(date)) throw new Error('date must be YYYY-MM-DD.');
+  return withLock(root, lock, () => {
+    teamDecisionOf(root, td);
+    const from = usedNumbers(root).sort((a, b) => a - b).map((n) => `DEC-${String(n).padStart(2, '0')}`)
+      .find((d) => parse(root, d).decided?.[3] === `team (${td})`);
+    if (from === undefined) {
+      throw new Error(`${td} did not close a DEC. Open one with recade decision new, then run recade decision team challenge ${td} --dec <DEC-nn>.`);
+    }
+    const old = parse(root, from);
+    const id = `DEC-${String(Math.max(0, ...usedNumbers(root)) + 1).padStart(2, '0')}`;
+    const lines = old.lines.filter((l, i) => !(i === old.box + 2 && l.startsWith(REASON)));
+    const front = frontMatterLength(lines);
+    for (let i = 0; i < front; i++) {
+      if (/^doc_id:/.test(lines[i])) lines[i] = `doc_id: "${id}"`;
+      else if (/^date:/.test(lines[i])) lines[i] = `date: "${date}"`;
+      else if (/^status:/.test(lines[i])) lines[i] = 'status: open';
+    }
+    lines.splice(front - 1, 0, `supersedes: "${from}"`);
+    const h1 = lines.findIndex((l) => l.startsWith(`# ${from}: `));
+    if (h1 >= 0) lines[h1] = `# ${id}: ${lines[h1].slice(`# ${from}: `.length)}`;
+    const why = lines.findIndex((l) => l === '## Why now');
+    if (why >= 0) {
+      lines.splice(why + 2, 0, `The owner challenged the choice the team made in ${from} (option ${old.decided[2]}, ${td}). This DEC supersedes ${from}.`, '');
+    }
+    const box = lines.findIndex((l) => l.trim() === '> [!DECISION]');
+    lines[box + 1] = OPEN_BOX;
+    writeAtomic(pathOf(root, id), lines.join('\n'));
+    markChallenged(root, td, id, date);
+    return { dec: id, supersedes: from };
+  });
+}
+
+/**
+ * Every decision in id order, or only the open ones. `supersedes` is the DEC that this one replaces (a reopened team
+ * decision), or empty: the DEC it names no longer applies.
  * @param {string} root project folder
  * @param {{open?: boolean}} [options]
- * @returns {{id: string, status: string, document: string, question: string, due: string, choice: string}[]}
+ * @returns {{id: string, status: string, document: string, question: string, due: string, choice: string, by: string, td: string, supersedes: string}[]}
  */
 export function listDecisions(root, { open = false } = {}) {
   const all = usedNumbers(root).sort((a, b) => a - b).map((n) => {
     const id = `DEC-${String(n).padStart(2, '0')}`;
     const dec = parse(root, id);
-    const choice = dec.status === 'closed' && dec.decided ? dec.decided[2] : '';
-    return { id, status: dec.status, document: dec.document, question: dec.question, due: dec.due, choice };
+    const closed = dec.status === 'closed' && dec.decided !== null;
+    const choice = closed ? dec.decided[2] : '';
+    // A box written before trust mode says `By: owner`; any box that does not name the team is the owner's.
+    const team = closed ? /^team \((TD-\d{2,})\)$/.exec(dec.decided[3]) : null;
+    const by = closed ? (team === null ? 'owner' : 'team') : '';
+    return { id, status: dec.status, document: dec.document, question: dec.question, due: dec.due, choice, by, td: team?.[1] ?? '', supersedes: dec.supersedes };
   });
   return open ? all.filter((d) => d.status !== 'closed') : all;
 }

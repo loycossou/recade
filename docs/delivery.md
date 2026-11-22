@@ -27,7 +27,9 @@ flowchart TD
 | Slices | The PLAN is cut into slices, each with a file scope, a lane and a definition of done. | `slicer` |
 | Harness | The project gets its agents, commands, guards and CI, specialised by the team. | the project agents |
 
-During framing the team settles the small, reversible questions itself and lists them at each gate, where the owner can challenge any of them. The owner answers the questions that cost money, bind the client or cannot be undone, up to four at a time. `/recade:amend` changes an approved document: it shows what cites it and takes the project back to the gate that must be passed again.
+A project picks its track at intake. The short track halves the word budgets, trims the reviews, the art direction, the stack study, the BIBLE and the team, and makes S-01 a walking skeleton; every gate stays (design, section 6.7). `/recade:status` and the retro show how many days the first slice took.
+
+During framing the team settles the small, reversible questions itself and lists them at each gate, where the owner can challenge any of them. The owner answers the questions that cost money, bind the client or cannot be undone, up to four at a time. A project in trust mode (`decisions: trust`) goes further: before a decision is asked, the team takes its recommended option when it costs nothing, binds no one and can be undone, and records it as a team decision. The gate then shows what the team decided, one line each, what the owner must answer, and the details on request. The owner still passes every gate. `/recade:amend` changes an approved document: it shows what cites it and takes the project back to the gate that must be passed again.
 
 ## 2. Delivery: one slice at a time
 

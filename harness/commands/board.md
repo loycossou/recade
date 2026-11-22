@@ -3,7 +3,7 @@ description: After the merges, reconcile the board with the pull requests (a sli
 allowed-tools: Bash(node:*), Bash(npm ci:*), Bash(git rev-parse:*), Bash(git branch:*), Bash(git fetch:*), Bash(git rev-list:*), Bash(git -C * worktree list*), Bash(git status:*), Read, AskUserQuestion
 ---
 
-In this file, `recade <sub>` means `node "$RECADE_PLUGIN_ROOT/bin/recade.js" <sub>`. Run it exactly that way, from the workspace folder. When Step 0 reads the plugin folder from `.recade/plugin-root`, write that folder in place of `$RECADE_PLUGIN_ROOT` in every command line.
+<!-- shared:cli-harness -->In this file, `recade <sub>` means `node "$RECADE_PLUGIN_ROOT/bin/recade.js" <sub>`.<!-- /shared:cli-harness --> Run it exactly that way, from the workspace folder. <!-- shared:plugin-root-file -->When Step 0 reads the plugin folder from `.recade/plugin-root`, write that folder in place of `$RECADE_PLUGIN_ROOT` in every command line.<!-- /shared:plugin-root-file -->
 
 Write short, plain sentences. No exclamation marks, no emoji, no long dash. Answer the user in English until Step 0 is done.
 
@@ -15,17 +15,19 @@ This command never merges, never pushes to `main`, never forces anything, and ne
 
 ## Step 0. Plugin root and dependencies
 
+<!-- shared:harness-plugin-root -->
 1. Run `node -p "process.env.RECADE_PLUGIN_ROOT || ''"`. If it prints a folder, that folder is the plugin root.
 2. If it prints nothing, read `.recade/plugin-root` with Read, in the current folder or in the folders above it. A worktree of a slice has no copy of its own: the code repository around it and the workspace around that each hold one, so the search finds it on the way up. If the file exists, its first line is the plugin root.
 3. If both are missing, say "The Recade plugin folder is not known here. Set RECADE_PLUGIN_ROOT, or run /recade:harness again in this project." and stop.
 4. Check with Read that `<plugin root>/harness/hooks/guard.mjs` exists. If it does not, the folder is stale (the plugin moved or was updated) and the guard of the project refuses every write and every shell command: say "The Recade plugin folder <plugin root> has no guard. Run /recade:harness again in this project." and stop.
 5. Run `node "$RECADE_PLUGIN_ROOT/bin/recade.js" version`. If it prints a version, go on. If it fails with `ERR_MODULE_NOT_FOUND` or another module error, run `npm ci --omit=dev --prefix "$RECADE_PLUGIN_ROOT"`, then run `version` again. Report the result in one line. If it still fails, show the error and stop.
+<!-- /shared:harness-plugin-root -->
 
 ## Step 1. The project and the workspace
 
-1. Run `recade state show --json`. If it exits 1 with "No Recade project here", say so in one line, suggest `/recade:new <project>`, and stop. If it exits 2, show the error and stop. Read `languages` and `github`. If `github` has no `project_number`, say that no board is recorded, suggest `recade github init`, and stop.
-2. From here on, answer in the language of `languages.chat`. Keep Recade keywords in English: slice, gate, lane, harness, worktree, board, BIBLE, PLAN, DEC. When you name an ID to the owner (a DEC, a PRV, a requirement, a slice, a gate), add its gist in parentheses, as in `DEC-03 (weekly payouts)` or `G2 (the documents)`, and name an ID only when the owner needs it to act.
-3. Find the workspace. Run `recade workspace root`. It prints the folder of the workspace, the home of the project: call it `<home>`. If it exits 1, show its message, which names `recade repo sync`, and stop. Run `git rev-parse --show-toplevel`. If it does not print `<home>`, say that /board runs from the workspace (`<home>`), because it reads the sheets there, runs `gh` in each code repository under `<home>/repos/`, and removes the worktrees there, and stop.
+1. Run `recade state show --json`. <!-- shared:no-project -->If it exits 1 with "No Recade project here", say so in one line, suggest `/recade:new <project>`, and stop.<!-- /shared:no-project --> If it exits 2, show the error and stop. Read `languages` and `github`. If `github` has no `project_number`, say that no board is recorded, suggest `recade github init`, and stop.
+2. From here on, answer in the language of `languages.chat`. Keep Recade keywords in English: slice, gate, lane, harness, worktree, board, BIBLE, PLAN, DEC. <!-- shared:id-gist -->When you name an ID to the owner (a DEC, a PRV, a requirement, a slice, a gate), add its gist in parentheses, as in `DEC-03 (weekly payouts)` or `G2 (the documents)`, and name an ID only when the owner needs it to act.<!-- /shared:id-gist -->
+3. Find the workspace. <!-- shared:workspace-root -->Run `recade workspace root`. It prints the folder of the workspace, the home of the project: call it `<home>`. If it exits 1, show its message, which names `recade repo sync`, and stop.<!-- /shared:workspace-root --> Run `git rev-parse --show-toplevel`. If it does not print `<home>`, say that /board runs from the workspace (`<home>`), because it reads the sheets there, runs `gh` in each code repository under `<home>/repos/`, and removes the worktrees there, and stop.
 4. Run `git branch --show-current`. If it does not print `main`, say that the workspace is on another branch, and stop.
 5. Run `git fetch origin main`, then `git rev-list --count main..origin/main`. If the count is not 0, say that the workspace is behind its remote, so the sheets here, with their ticked Definition of Done, may be older than the ones pushed from another machine, ask the owner to run `git pull --ff-only`, and stop.
 

@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { lintText } from '../../src/style/lint.js';
 import { STATUSES } from '../../src/project/slices.js';
+import { stripMarkers } from '../../tools/sync-shared.js';
 
 const repo = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const commandsDir = join(repo, 'harness', 'commands');
@@ -630,7 +631,7 @@ test('every command that dispatches an agent gives it <home>, and /explain, /dec
     assert.match(text(name), /`<home>` \(the full path of the workspace, where the documents named in the agent files are read\)/, name);
   }
   for (const name of ['explain', 'decision', 'amend']) {
-    assert.match(text(name), /Find the workspace\. Run `recade workspace root`\. It prints the folder of the workspace, the home of the project: call it `<home>`/, name);
+    assert.match(stripMarkers(text(name)), /Find the workspace\. Run `recade workspace root`\. It prints the folder of the workspace, the home of the project: call it `<home>`/, name);
   }
   assert.match(text('amend'), /Hand `<home>` to every agent the amend flow dispatches/);
 });
