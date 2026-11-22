@@ -1,11 +1,13 @@
 # Single source for the model and effort of every harness agent (spec 10.2).
 # `recade harness models` copies these values into the front matter of harness/agents/*.md.
 # Rules: floor Sonnet medium (test-runner is low), no xhigh or max, and the
-# second-opinion model is always from another family than the reviewer.
+# second-opinion model from another family than the reviewer, unless `second_opinion.same_family` says `warn`.
 # ui-designer: raise it to opus for the art direction phase in the project copy of this file.
 # The owner's choice between Fable and Opus (`models.writer`, `recade models writer`) covers the plugin's writing
-# agents, not this table. The second-opinion stays on Fable whatever the owner chose, because it must be a
-# different family from the reviewer, which is opus: do not move it to opus, and do not follow models.writer here.
+# agents, not this table. The owner decided on 2026-11-21 that no agent runs on Fable: the second-opinion runs on
+# Opus 5.5, the same family as the reviewer. `second_opinion.same_family: warn` allows it, and `recade harness models`
+# and `recade harness verify` print a warning instead of refusing. The second opinion keeps its other independence:
+# it reads the PR, the sheet and the requirements, never the reports of the other agents.
 agents:
   spec-writer:
     standard: { model: opus, effort: high }
@@ -62,13 +64,16 @@ agents:
     standard: { model: sonnet, effort: high }
     sensitive: { model: sonnet, effort: high }
   second-opinion:
-    standard: { model: claude-fable-5-2, effort: high }
-    sensitive: { model: claude-fable-5-2, effort: high }
+    standard: { model: claude-opus-5-5, effort: high }
+    sensitive: { model: claude-opus-5-5, effort: high }
   merge-keeper:
     standard: { model: sonnet, effort: medium }
     sensitive: { model: sonnet, effort: medium }
+# What a second-opinion in the reviewer's family gives: `error` (the default when the key is missing) or `warn`.
+second_opinion:
+  same_family: warn
 # Which family each model id or alias belongs to. Used to check the second-opinion rule.
 families:
-  opus: [opus]
+  opus: [opus, claude-opus-5-5]
   sonnet: [sonnet]
   fable: [claude-fable-5-2]

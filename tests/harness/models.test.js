@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { stringify } from 'yaml';
 import { run } from '../../src/cli.js';
 import { lintText } from '../../src/style/lint.js';
-import { loadModels, syncAgents, validateModels, familyOf } from '../../src/harness/models.js';
+import { loadModels, modelWarnings, syncAgents, validateModels, familyOf } from '../../src/harness/models.js';
 
 const repo = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const modelsPath = join(repo, 'harness', 'models.yaml');
@@ -40,7 +40,7 @@ const TABLE = {
   explorer: ['sonnet', 'medium', 'sonnet', 'medium'],
   'test-runner': ['sonnet', 'low', 'sonnet', 'low'],
   'code-teacher': ['sonnet', 'high', 'sonnet', 'high'],
-  'second-opinion': ['claude-fable-5-2', 'high', 'claude-fable-5-2', 'high'],
+  'second-opinion': ['claude-opus-5-5', 'high', 'claude-opus-5-5', 'high'],
   'merge-keeper': ['sonnet', 'medium', 'sonnet', 'medium'],
 };
 
@@ -85,15 +85,20 @@ test('no Haiku anywhere, and the floor is Sonnet medium except test-runner', () 
   }
 });
 
-test('the second opinion is always another model family than the reviewer, in both lanes', () => {
+test('the second opinion runs on Opus 5.5, the reviewer family, allowed by second_opinion.same_family: warn', () => {
+  assert.deepEqual(models.second_opinion, { same_family: 'warn' });
   for (const lane of ['standard', 'sensitive']) {
-    const second = familyOf(models, models.agents['second-opinion'][lane].model);
-    const reviewer = familyOf(models, models.agents.reviewer[lane].model);
-    assert.equal(reviewer, 'opus');
-    assert.equal(second, 'fable');
-    assert.notEqual(second, reviewer);
+    assert.equal(familyOf(models, models.agents['second-opinion'][lane].model), 'opus');
+    assert.equal(familyOf(models, models.agents.reviewer[lane].model), 'opus');
   }
-  assert.deepEqual(Object.keys(models.families).sort(), ['fable', 'opus', 'sonnet']);
+  assert.deepEqual(models.families.opus, ['opus', 'claude-opus-5-5']);
+  assert.deepEqual(modelWarnings(models), [
+    'second-opinion standard: same model family (opus) as the reviewer, allowed by second_opinion.same_family: warn',
+    'second-opinion sensitive: same model family (opus) as the reviewer, allowed by second_opinion.same_family: warn',
+  ]);
+  for (const [name, lanes] of Object.entries(models.agents)) {
+    for (const lane of Object.values(lanes)) assert.notEqual(familyOf(models, lane.model), 'fable', name);
+  }
 });
 
 test('validateModels reports Haiku, a low effort outside test-runner, xhigh, unknown models and a same-family second opinion', () => {
@@ -112,8 +117,19 @@ test('validateModels reports Haiku, a low effort outside test-runner, xhigh, unk
   unknown.agents.devops.standard.model = 'gpt-9';
   assert.ok(validateModels(unknown).some((p) => /devops.*gpt-9/.test(p)));
   const same = clone();
-  same.agents['second-opinion'].standard.model = 'opus';
-  assert.ok(validateModels(same).some((p) => /second-opinion.*reviewer/.test(p)));
+  delete same.second_opinion;
+  assert.ok(validateModels(same).some((p) => /second-opinion standard.*reviewer/.test(p)));
+  assert.deepEqual(modelWarnings(same), []);
+  const strict = clone();
+  strict.second_opinion.same_family = 'error';
+  assert.ok(validateModels(strict).some((p) => /second-opinion sensitive.*reviewer/.test(p)));
+  const other = clone();
+  other.second_opinion.same_family = 'error';
+  for (const lane of ['standard', 'sensitive']) other.agents['second-opinion'][lane].model = 'claude-fable-5-2';
+  assert.deepEqual(validateModels(other), []);
+  const badSetting = clone();
+  badSetting.second_opinion.same_family = 'ignore';
+  assert.ok(validateModels(badSetting).some((p) => /second_opinion\.same_family: ignore/.test(p)));
   const missing = clone();
   delete missing.agents['merge-keeper'].sensitive;
   assert.ok(validateModels(missing).some((p) => /merge-keeper.*sensitive/.test(p)));
@@ -123,7 +139,7 @@ test('loadModels throws one line per problem on an invalid file', () => {
   const dir = mkdtempSync(join(tmpdir(), 'recade-harness-models-'));
   const bad = join(dir, 'models.yaml');
   const broken = structuredClone(models);
-  broken.agents['second-opinion'].standard.model = 'opus';
+  delete broken.second_opinion;
   writeFileSync(bad, stringify(broken));
   assert.throws(() => loadModels(bad), /second-opinion.*reviewer/);
   writeFileSync(bad, 'agents: [');
@@ -261,10 +277,10 @@ test('protocol: the second opinion follows second_opinion, sensitive by default,
   assert.match(lanes, /sensitive_model/);
 });
 
-test('models.yaml keeps the second opinion on Fable, whatever the owner chose for the writers, and says why', () => {
+test('models.yaml puts the second opinion on Opus 5.5 by the owner decision, and says why the same family is allowed', () => {
   const text = readFileSync(modelsPath, 'utf8');
-  assert.ok(text.includes('second-opinion stays on Fable'));
+  assert.ok(text.includes('no agent runs on Fable'));
   assert.ok(text.includes('models.writer'));
-  assert.ok(text.includes('different family from the reviewer'));
-  assert.equal(models.agents['second-opinion'].standard.model, 'claude-fable-5-2');
+  assert.ok(text.includes('second_opinion.same_family: warn'));
+  assert.equal(models.agents['second-opinion'].standard.model, 'claude-opus-5-5');
 });

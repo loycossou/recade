@@ -38,17 +38,17 @@ function section(body, title) {
 
 test('models.json holds the two tiers', () => {
   assert.deepEqual(models, {
-    writer: { model: 'claude-fable-5-2', effort: 'high' },
+    writer: { model: 'claude-opus-5-5', effort: 'high' },
     mechanical: { model: 'sonnet', effort: 'medium' },
   });
 });
 
-test('the writer models are the two ids the owner chooses from, and the default one is the fallback of every writer agent', () => {
+test('the writer models are the two ids the owner chooses from, and Opus 5.5 is the fallback of every writer agent', () => {
   assert.deepEqual(WRITER_MODELS, { fable: 'claude-fable-5-2', opus: 'claude-opus-5-5' });
-  assert.equal(models.writer.model, WRITER_MODELS.fable);
+  assert.equal(models.writer.model, WRITER_MODELS.opus);
   const writers = files.filter((f) => parseAgent(readFileSync(join(agentsDir, f), 'utf8')).front.tier === 'writer');
   assert.equal(writers.length, 15);
-  for (const f of writers) assert.equal(parseAgent(readFileSync(join(agentsDir, f), 'utf8')).front.model, WRITER_MODELS.fable, f);
+  for (const f of writers) assert.equal(parseAgent(readFileSync(join(agentsDir, f), 'utf8')).front.model, WRITER_MODELS.opus, f);
 });
 
 test('the recruiter writes the model the dispatcher gives in the model column of the roster, and says Fable is only the fallback', () => {
@@ -119,7 +119,7 @@ test('syncAgents rewrites model and effort from the tier, and --check lists agen
   assert.deepEqual(syncAgents(dir, { check: true }), ['intake-analyst.md']);
   assert.match(readFileSync(path, 'utf8'), /^model: old$/m);
   assert.deepEqual(syncAgents(dir, { check: false }), ['intake-analyst.md']);
-  assert.match(readFileSync(path, 'utf8'), /^model: claude-fable-5-2$/m);
+  assert.match(readFileSync(path, 'utf8'), /^model: claude-opus-5-5$/m);
   assert.match(readFileSync(path, 'utf8'), /^effort: high$/m);
   assert.deepEqual(syncAgents(dir, { check: true }), []);
   const r = spawnSync(process.execPath, [join(repo, 'tools', 'sync-agent-models.js'), '--check', '--dir', dir], { encoding: 'utf8' });

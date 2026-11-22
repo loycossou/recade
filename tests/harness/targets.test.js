@@ -182,10 +182,12 @@ test('verify passes on both targets, and each target checks its own files', asyn
   const ws = await makeWorkspace({ repos: ['api'] });
   installWs(ws);
   installCode(ws, 'api');
+  // The second opinion in the reviewer's family is a warning, allowed by second_opinion.same_family: warn.
+  const real = (r) => r.findings.filter((f) => !(f.severity === 'warn' && /same model family/.test(f.message)));
   const w = await verify(ws.dir, { pluginRoot: plugin, target: 'workspace' });
-  assert.deepEqual(w.findings, []);
+  assert.deepEqual(real(w), []);
   const c = await verify(ws.repo('api'), { pluginRoot: plugin, target: 'code' });
-  assert.deepEqual(c.findings, []);
+  assert.deepEqual(real(c), []);
   rmSync(join(ws.dir, '.github', 'workflows', 'workspace.yml'));
   assert.match(errors(await verify(ws.dir, { pluginRoot: plugin, target: 'workspace' }), 'layout')[0].message, /workspace\.yml is missing/);
   rmSync(join(ws.repo('api'), '.claude', 'commands', 'slice.md'));

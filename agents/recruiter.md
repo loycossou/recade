@@ -2,7 +2,7 @@
 name: recruiter
 description: Proposes the project-lead candidates of a new Recade project, then, after the owner has chosen the lead, proposes the whole team (the 8 core roles plus the roles this project needs) and writes the roster. Use it at the start of the Team phase, once for the candidates and once for the roster.
 tools: Read, Write, Edit, Glob, Grep, WebSearch, WebFetch
-model: claude-fable-5-2
+model: claude-opus-5-5
 effort: high
 tier: writer
 ---

@@ -2,7 +2,7 @@
 name: doctrine-writer
 description: Writes the doctrine of one team role, from a deep research on the real expert who inspires that role, in the doctrine template. Use it once per role of the roster, in parallel for all the roles, after the owner has approved the roster.
 tools: Read, Write, Edit, Glob, Grep, WebSearch, WebFetch, Skill
-model: claude-fable-5-2
+model: claude-opus-5-5
 effort: high
 tier: writer
 ---

@@ -4,6 +4,11 @@ This file is curated by hand for each release. At tag time, `recade release-note
 
 ## Unreleased
 
+### Opus 5.5 instead of Fable
+
+- No agent runs on Fable by default any more: the second opinion of the harness runs on `claude-opus-5-5` in both lanes, and the fallback of the writer agents (`agents/models.json`) is `claude-opus-5-5`.
+- `harness/models.yaml` takes `second_opinion.same_family` (`error`, the default, or `warn`). With `warn`, a second opinion in the reviewer's family is reported as a warning by `recade harness models` and `recade harness verify` instead of being refused.
+
 ### Coloured documents, captioned figures, quieter IDs
 
 - The default look is coloured, as in a hand-made report: a navy header row with white text, light grey zebra rows, light blue cells for what names a row, pastel callouts and covers in navy. The colours are theme keys (`color.headerFill`, `headerText`, `zebra`, `keyCell`, `calloutNote`, `calloutWarning`, `calloutDecision`, `provisional`, `provisionalText`), checked as 6 hex digits. The default accent is now navy. A `design/theme.json` that sets these keys still wins; the art direction now writes only the brand (fonts, accent, ink, chart colour), so a new project no longer gets grey documents from a sober product theme.
@@ -52,7 +57,7 @@ This file is curated by hand for each release. At tag time, `recade release-note
 
 - You choose the model of the agents that write and review your documents: Fable (the default) or the latest Opus, at the same high effort. `/recade:start` asks it once, `recade config set models.writer opus` changes it, `/recade:setup` and `/recade:help` show it.
 - `recade models writer` prints the alias to dispatch with (`fable` or `opus`), and `recade models writer --id` the full id (`claude-fable-5-2` or `claude-opus-5-5`). Every `/recade:*` command that dispatches a writing agent reads it once and passes it to each dispatch, and the recruiter writes it in the model column of the roster. The mechanical agents keep their own model.
-- The second opinion of the harness stays on Fable whatever you choose, because it must come from another model family than the reviewer, which runs on Opus.
+- The second opinion of the harness does not follow this choice: it runs on Opus 5.5 (see "Opus 5.5 instead of Fable" above).
 
 ## 1.0.0 (2026-11-18)
 

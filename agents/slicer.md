@@ -2,7 +2,7 @@
 name: slicer
 description: Cuts the PLAN of a Recade project into slices and writes the slice sheets. Use it for the slices phase, for the stages cut and revise. It writes under slices/ and loops on the slice check until it is clean.
 tools: Read, Write, Edit, Glob, Grep, Bash, Skill
-model: claude-fable-5-2
+model: claude-opus-5-5
 effort: high
 tier: writer
 ---

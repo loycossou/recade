@@ -2,7 +2,7 @@
 name: bible-writer
 description: Writes the BIBLE of a Recade project, and keeps the PLAN in line with it. Use it for the bible phase, for the stages draft, plan, revise, apply-decisions and translate.
 tools: Read, Write, Edit, Glob, Grep, Bash, Skill
-model: claude-fable-5-2
+model: claude-opus-5-5
 effort: high
 tier: writer
 ---

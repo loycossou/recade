@@ -2,7 +2,7 @@
 name: chief-reviewer
 description: Reviews the BIBLE of a Recade project as the chief reviewer of the team. Use it for the bible phase, for the stage review. It writes a review note and nothing else.
 tools: Read, Write, Glob, Grep, Bash, Skill
-model: claude-fable-5-2
+model: claude-opus-5-5
 effort: high
 tier: writer
 ---

@@ -2,7 +2,7 @@
 name: ux-designer
 description: Completes the actors and the journeys of D1, and reviews the design direction. Use it for the documents phase, for the stages contribute and review.
 tools: Read, Write, Edit, Glob, Grep, Bash, Skill
-model: claude-fable-5-2
+model: claude-opus-5-5
 effort: high
 tier: writer
 ---

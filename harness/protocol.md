@@ -56,7 +56,7 @@ The sheet names the lane. When in doubt between two lanes, take the stricter one
 | `no-code` | a decision, a piece of research | DEC file with two options and a recommendation, then the human decides |
 
 - The sheet picks the implementer: `implementer-critical` when the slice touches an invariant, money, cryptography, offline state or a transaction boundary, `implementer` for the rest.
-- The `second-opinion` follows `second_opinion` in `recade/state.yaml`. With `off` it never runs, in any lane. With `always` it runs on every PR. With `sensitive` (the default) it runs on a PR of the `sensitive` lane or of more than 400 changed lines. It runs on another model family than the `reviewer`, and it reads the PR, the sheet and the requirements the sheet cites, never the reports of the other agents.
+- The `second-opinion` follows `second_opinion` in `recade/state.yaml`. With `off` it never runs, in any lane. With `always` it runs on every PR. With `sensitive` (the default) it runs on a PR of the `sensitive` lane or of more than 400 changed lines. It runs on the model of `harness/models.yaml` (Opus 5.5, the reviewer's family, allowed by `second_opinion.same_family: warn`), and it reads the PR, the sheet and the requirements the sheet cites, never the reports of the other agents.
 - Models and efforts come only from `models.yaml`. A sheet or an agent never names a model. `recade harness models` writes them in the front matter of each agent: `model` and `effort` for the `standard` lane, and `sensitive_model` and `sensitive_effort` when the `sensitive` lane differs. In the `sensitive` lane, the dispatcher runs such an agent with its `sensitive_model` and `sensitive_effort`.
 
 ## Report block

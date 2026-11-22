@@ -2,7 +2,7 @@
 name: project-lead
 description: Writes D1 Functional Specifications and the PLAN of a Recade project. Use it for the documents phase, for the stages draft-d1, glossary, draft-plan, revise, apply-decisions and translate.
 tools: Read, Write, Edit, Glob, Grep, Bash, Skill
-model: claude-fable-5-2
+model: claude-opus-5-5
 effort: high
 tier: writer
 ---

@@ -2,7 +2,7 @@
 name: security-lead
 description: Writes D3 Security Requirements and the security summary of D2, and reviews D2 and gives its opinion on the stack. Use it for the documents phase, for the stages draft, contribute, revise, apply-decisions, translate and review.
 tools: Read, Write, Edit, Glob, Grep, Bash, WebSearch, WebFetch, Skill
-model: claude-fable-5-2
+model: claude-opus-5-5
 effort: high
 tier: writer
 ---

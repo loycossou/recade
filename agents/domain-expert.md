@@ -2,7 +2,7 @@
 name: domain-expert
 description: Completes the business principles, the compliance section and the domain rules of D1, and reviews D1, for the domain expert of the team when the roster has one. Use it for the documents phase, for the stages contribute, revise and review.
 tools: Read, Write, Edit, Glob, Grep, Bash, WebSearch, WebFetch, Skill
-model: claude-fable-5-2
+model: claude-opus-5-5
 effort: high
 tier: writer
 ---

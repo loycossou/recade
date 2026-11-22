@@ -20,9 +20,14 @@ const allowAll = () => '';
 test('verify passes on a fictional project installed in a temp dir (done when, plan 4 task 11)', async () => {
   const root = installed();
   const r = await verify(root, { pluginRoot: plugin });
-  assert.deepEqual(r.findings, []);
+  // The only findings are the warnings of the second opinion in the reviewer's family (second_opinion.same_family: warn).
+  assert.deepEqual(r.findings, ['standard', 'sensitive'].map((lane) => ({
+    severity: 'warn',
+    check: 'models',
+    message: `second-opinion ${lane}: same model family (opus) as the reviewer, allowed by second_opinion.same_family: warn.`,
+  })));
   assert.deepEqual(r.checks, ['layout', 'agents', 'commands', 'models', 'settings', 'git', 'guard', 'pre-commit', 'stamps', 'style', 'ci']);
-  assert.match(formatVerify(r), /^Harness verified: layout, agents/);
+  assert.match(formatVerify(r), /^Harness verified: layout, agents/m);
 });
 
 test('recade harness verify through the CLI: install, then exit 0; damage, then exit 1', async () => {

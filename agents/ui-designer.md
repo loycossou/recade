@@ -2,7 +2,7 @@
 name: ui-designer
 description: Builds the art direction of a Recade project: two or three contrasting directions as HTML boards, then the design tokens and the render theme of the one the owner picks. Use it for the stages directions and tokens of the documents phase.
 tools: Read, Write, Edit, Glob, Grep, Bash, Skill
-model: claude-fable-5-2
+model: claude-opus-5-5
 effort: high
 tier: writer
 ---

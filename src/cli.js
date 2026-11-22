@@ -38,7 +38,7 @@ import { openProvisional, closeProvisional, listProvisionals } from './project/p
 import { newDecision, closeDecision, listDecisions } from './project/decisions.js';
 import { addTeamDecision, challengeTeamDecision, listTeamDecisions } from './project/teamdecisions.js';
 import { DEFAULT_BUDGETS, budgetsOf, checkSizes } from './budgets.js';
-import { loadModels, sensitiveLane, syncAgents } from './harness/models.js';
+import { loadModels, modelWarnings, sensitiveLane, syncAgents } from './harness/models.js';
 import { runGate, checkGate, isGateName, defaultExec as runCommand } from './harness/stamps.js';
 import { handleHook, logGuard } from './harness/guard.js';
 import { refresh as refreshClaudeMd, findStack } from './harness/claudemd.js';
@@ -1976,6 +1976,7 @@ function harnessModels(args, io, usage) {
     io.stderr.write(`${err.message}\n`);
     return 2;
   }
+  for (const w of modelWarnings(models)) io.stderr.write(`Warning: ${w}.\n`);
   // The agents /slice dispatches with other values in the sensitive lane: the same values the front matter holds.
   for (const s of sensitiveLane(models)) io.stdout.write(`Sensitive lane: ${s.agent} model ${s.model} effort ${s.effort}.\n`);
   if (changed.length === 0) {

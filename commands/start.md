@@ -64,7 +64,7 @@ Skip this step if `recade config get started` prints `true`.
    - **Fable** (recommended): the most capable writer, at high effort. Saved as `fable`.
    - **Opus**: the latest Opus, at the same high effort. Saved as `opus`.
 
-   AskUserQuestion adds "Other" by itself; if the answer is neither, ask again once, then save `fable`. Save with `recade config set models.writer <fable or opus>`. Say in one line that `recade config set models.writer opus` changes it later, and that the second opinion of the harness stays on Fable, because it must come from another model family than the reviewer.
+   AskUserQuestion adds "Other" by itself; if the answer is neither, ask again once, then save `fable`. Save with `recade config set models.writer <fable or opus>`. Say in one line that `recade config set models.writer opus` changes it later, and that the second opinion of the harness runs on Opus 5.5 whatever the answer, by the owner's decision of 2026-11-21.
 4. Extra files, the optional deliverables for your stakeholders. Ask with `AskUserQuestion` with `multiSelect` on: "Which extra files should Recade render for your stakeholders? D1, D2, D3 and the PLAN are always rendered."
    - **Stack**: the stack decision as `STACK.docx` and `STACK.pdf`, and its weighted matrix as `STACK-matrix.xlsx`. Saved as `stack`.
    - **Decisions**: one register of every decision (`DEC-*`) as `DECISIONS.docx`, `DECISIONS.pdf` and `DECISIONS.xlsx`. Saved as `decisions`.

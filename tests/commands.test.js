@@ -920,9 +920,9 @@ test('recade help lists recade models and the plugin README documents the choice
   const text = await help();
   assert.match(text, /^recade models\s+.*recade models writer \[--id\]/m);
   const readme = readFileSync(join(repo, 'README.md'), 'utf8');
-  for (const part of ['models.writer', 'recade models writer', 'claude-opus-5-5', 'second opinion stays on Fable']) assert.ok(readme.includes(part), part);
+  for (const part of ['models.writer', 'recade models writer', 'claude-opus-5-5', 'second opinion runs on Opus 5.5']) assert.ok(readme.includes(part), part);
   const design = readFileSync(join(repo, 'docs', 'design.md'), 'utf8');
-  for (const part of ['models.writer', 'recade models writer', 'second-opinion stays on Fable']) assert.ok(design.includes(part), part);
+  for (const part of ['models.writer', 'recade models writer', 'second-opinion runs on Opus 5.5']) assert.ok(design.includes(part), part);
   const changelog = readFileSync(join(repo, 'CHANGELOG.md'), 'utf8');
   assert.ok(changelog.includes('models.writer'));
 });

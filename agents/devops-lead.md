@@ -2,7 +2,7 @@
 name: devops-lead
 description: Completes the infrastructure, the CI/CD and the operations sections of D2, and gives its opinion on the stack. Use it for the documents phase, for the stages contribute and review.
 tools: Read, Write, Edit, Glob, Grep, Bash, Skill
-model: claude-fable-5-2
+model: claude-opus-5-5
 effort: high
 tier: writer
 ---

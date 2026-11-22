@@ -10,7 +10,7 @@ import { findStack, techSheet } from './claudemd.js';
 import { handleHook, parseWrites } from './guard.js';
 import { SYNC_ADVICE, checkLink, findWorkspace } from '../workspace/layout.js';
 import { LAUNCHER, SPEC_LINE, isAdopt, workflowFiles } from './install.js';
-import { loadModels, sensitiveLane, syncAgents } from './models.js';
+import { loadModels, modelWarnings, sensitiveLane, syncAgents } from './models.js';
 import { checkGate, fingerprint, runGate } from './stamps.js';
 import { WORKSPACE_WORKFLOW, preCommitTemplate, selectFor } from './targets.js';
 
@@ -177,10 +177,12 @@ export async function verify(root, { pluginRoot, target, runHook, only } = {}) {
     checks.push('models');
     if (existsSync(agentsDir)) {
       try {
-        const { changed } = syncAgents(agentsDir, loadModels(join(harness, 'models.yaml')), { check: true });
+        const models = loadModels(join(harness, 'models.yaml'));
+        for (const w of modelWarnings(models)) add('warn', 'models', `${w}.`);
+        const { changed } = syncAgents(agentsDir, models, { check: true });
         if (changed.length > 0) add('error', 'models', `Agents out of sync with models.yaml: ${changed.join(', ')}. Run: recade harness models --dir .claude/agents`);
         const slice = join(commandsDir, 'slice.md');
-        if (sensitiveLane(loadModels(join(harness, 'models.yaml'))).length > 0 && existsSync(slice) && !read(slice).includes('sensitive_model')) {
+        if (sensitiveLane(models).length > 0 && existsSync(slice) && !read(slice).includes('sensitive_model')) {
           add('error', 'models', '.claude/commands/slice.md does not dispatch with sensitive_model and sensitive_effort in the sensitive lane. Run: recade harness install');
         }
       } catch (err) {

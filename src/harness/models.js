@@ -4,11 +4,12 @@ import { parse } from 'yaml';
 import { frontMatterLength } from '../frontmatter-lines.js';
 
 /** @typedef {{model: string, effort: string}} Lane */
-/** @typedef {{agents: Record<string, {standard: Lane, sensitive: Lane}>, families: Record<string, string[]>}} Models */
+/** @typedef {{agents: Record<string, {standard: Lane, sensitive: Lane}>, families: Record<string, string[]>, second_opinion?: {same_family?: 'error'|'warn'}}} Models */
 
 const LANES = ['standard', 'sensitive'];
 const EFFORTS = ['low', 'medium', 'high'];
 const KEYS = ['model', 'effort', 'sensitive_model', 'sensitive_effort'];
+const SAME_FAMILY = ['error', 'warn'];
 
 /**
  * The family a model id or alias belongs to, or undefined when `families` does not list it.
@@ -23,7 +24,8 @@ export function familyOf(models, model) {
 /**
  * Check a parsed `models.yaml`. Returns one line per problem, so an empty list means the table is valid.
  * Rules: both lanes for every agent, no Haiku, no unknown model, efforts low (test-runner only), medium or high,
- * and the second opinion from another family than the reviewer in each lane.
+ * and the second opinion from another family than the reviewer in each lane, unless `second_opinion.same_family` is
+ * `warn` (then `modelWarnings` reports it instead).
  * @param {Models} models
  * @returns {string[]}
  */
@@ -45,16 +47,40 @@ export function validateModels(models) {
       else if (entry.effort === 'low' && name !== 'test-runner') problems.push(`${name} ${lane}: effort low is only for test-runner`);
     }
   }
+  const sameFamily = models.second_opinion?.same_family ?? 'error';
+  if (!SAME_FAMILY.includes(sameFamily)) problems.push(`second_opinion.same_family: ${sameFamily} is not allowed, use error or warn`);
+  else if (sameFamily === 'error') problems.push(...sameFamilyLanes(models));
+  return problems;
+}
+
+/**
+ * One line per lane where the second opinion shares the reviewer's family.
+ * @param {Models} models
+ * @returns {string[]}
+ */
+function sameFamilyLanes(models) {
+  const lines = [];
   for (const lane of LANES) {
-    const second = models.agents['second-opinion']?.[lane]?.model;
-    const reviewer = models.agents.reviewer?.[lane]?.model;
+    const second = models.agents?.['second-opinion']?.[lane]?.model;
+    const reviewer = models.agents?.reviewer?.[lane]?.model;
     if (second === undefined || reviewer === undefined) continue;
     const family = familyOf(models, second);
     if (family !== undefined && family === familyOf(models, reviewer)) {
-      problems.push(`second-opinion ${lane}: same model family (${family}) as the reviewer`);
+      lines.push(`second-opinion ${lane}: same model family (${family}) as the reviewer`);
     }
   }
-  return problems;
+  return lines;
+}
+
+/**
+ * What a valid table allows but should be said: the second opinion in the reviewer's family when
+ * `second_opinion.same_family` is `warn`. Returns one line per lane, empty when there is nothing to say.
+ * @param {Models} models
+ * @returns {string[]}
+ */
+export function modelWarnings(models) {
+  if (models?.second_opinion?.same_family !== 'warn') return [];
+  return sameFamilyLanes(models).map((l) => `${l}, allowed by second_opinion.same_family: warn`);
 }
 
 /**

@@ -339,10 +339,10 @@ One table, `harness/models.yaml`, is the only source. `recade harness models` wr
 - The two highest effort levels are not used. Effort changes the time spent, not the intelligence.
 - **Per slice:** the sheet picks the implementer. After a second `FIX` on the same slice, the next attempt goes to `implementer-critical`, and the report says so.
 - The `security-reviewer` moves up a model in the `sensitive` lane.
-- The `second-opinion` agent always runs on a different model family from the `reviewer`.
+- The `second-opinion` agent runs on a different model family from the `reviewer`, unless `second_opinion.same_family: warn` in `harness/models.yaml` allows the same family; then `recade harness models` and `recade harness verify` warn instead of refusing.
 - Phases 0 to 4 use the most capable model for the team, the documents and the BIBLE, and a mid-size model for mechanical cutting and board creation.
 - **The owner chooses the writing model.** The plugin agents of the `writer` tier (15 of the 17 in `agents/`) run on Fable by default, at high effort. The user preference `models.writer` (`fable`, the default, or `opus`, the latest Opus) replaces the model, never the effort. `/recade:start` asks it once, `recade config set models.writer opus` changes it, and `recade models writer` prints the alias to dispatch with (`--id` prints the full id, `claude-fable-5-2` or `claude-opus-5-5`). Each `/recade:*` command that dispatches a writer agent reads it once and passes it as the `model` of every such dispatch; the recruiter writes the chosen id in the model column of the roster. The front matter of the agents keeps Fable as the fallback, so `tools/sync-agent-models.js --check` stays green, and the mechanical agents (`inventory-analyst`, `spike-runner`) are not touched.
-- **The second-opinion stays on Fable** whatever `models.writer` says, because it must come from a family different from the reviewer's, which is `opus`. If the second opinion followed the owner to Opus, it would share the reviewer's family and the rule above would fail. `harness/models.yaml` says so, and `recade harness models` still checks the rule.
+- **The second-opinion runs on Opus 5.5** (`claude-opus-5-5`) whatever `models.writer` says: the owner decided on 2026-11-21 that no agent runs on Fable. It shares the reviewer's family, so `harness/models.yaml` sets `second_opinion.same_family: warn`, and `recade harness models` reports a warning instead of an error. Its independence comes from what it reads: the PR, the sheet and the requirements, never the reports of the other agents. The fallback of the writer agents in `agents/models.json` is `claude-opus-5-5` too.
 - The real cost of each slice is measured (section 8.9) so the table can be tuned.
 
 ### 8.3 Chain and lanes
@@ -431,7 +431,7 @@ Conflicts come from files every slice touches and from branches that live too lo
 The reviewer in the chain has seen the sheet, the tests and the reports. The second opinion comes from a fresh agent that shares none of that.
 
 - It reads the pull request (diff and description), the slice sheet and the requirements it cites. It never reads the reports of the implementer or the reviewer. The sheet is private and stays in the workspace: locally it is read there, and it is never copied into a pull request or into a code repository.
-- It runs on a model family different from the reviewer's.
+- It runs on the model of `harness/models.yaml`, Opus 5.5 today, the reviewer's family, allowed by `second_opinion.same_family: warn`.
 - It posts a comment on the pull request with a verdict, `CONCURS`, `CONCERNS` or `BLOCKING`, each point with a file and a line. `BLOCKING` stops gate-2. The owner decides `CONCERNS` at gate-2.
 - It runs always in the `sensitive` lane and on pull requests of more than 400 changed lines. Elsewhere it is optional. `second_opinion: always | sensitive | off` in `recade/state.yaml` sets it.
 - `/second-opinion <PR>` runs it locally. An optional GitHub workflow can run it when a pull request opens (see section 10.7 for what the owner sets).

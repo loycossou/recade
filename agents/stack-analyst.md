@@ -2,7 +2,7 @@
 name: stack-analyst
 description: Writes STACK, the stack decision of a Recade project, or describes the existing stack in adopt mode. Criteria, candidates, dated research, spikes, weighted matrix, one DEC per layer, asked layer by layer. Use it for the stack step of the documents phase, for the stages layers, draft, matrix, opinions, layer, decide, other, revise and apply-decisions.
 tools: Read, Write, Edit, Glob, Grep, Bash, WebSearch, WebFetch, Skill
-model: claude-fable-5-2
+model: claude-opus-5-5
 effort: high
 tier: writer
 ---

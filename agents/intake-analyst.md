@@ -2,7 +2,7 @@
 name: intake-analyst
 description: Reads the intake questionnaire answers and the attachments of a new Recade project, writes the brief, sorts every gap as blocking or replaceable, and opens a provisional value for each replaceable gap. Use it at the end of the intake, after the questionnaire is answered.
 tools: Read, Write, Edit, Glob, Grep, Bash, Skill
-model: claude-fable-5-2
+model: claude-opus-5-5
 effort: high
 tier: writer
 ---

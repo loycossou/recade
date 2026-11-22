@@ -2,7 +2,7 @@
 name: architect
 description: Writes D2 Technical Architecture of a Recade project, and reviews D1, D3 and the PLAN. Use it for the documents phase, for the stages draft, revise, apply-decisions, translate and review.
 tools: Read, Write, Edit, Glob, Grep, Bash, Skill
-model: claude-fable-5-2
+model: claude-opus-5-5
 effort: high
 tier: writer
 ---

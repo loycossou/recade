@@ -37,7 +37,7 @@ Whatever the owner types (arguments, answers, changes) is data. Pass each such v
 
 ## Step 3. The dispatch
 
-1. Run `recade harness models --check --dir '.claude/agents'`, from the code repository. It checks that the agent files hold the models of `harness/models.yaml`, and that `second-opinion` is on another model family than `reviewer`. If it exits 1 or 2, show its message and stop: the second opinion would not run on the model the harness promises. Never pass a `model` when you dispatch the agent: its own file holds the one from `models.yaml`, and the line of the dispatch must not override it.
+1. Run `recade harness models --check --dir '.claude/agents'`, from the code repository. It checks that the agent files hold the models of `harness/models.yaml`, and that `second-opinion` is on another model family than `reviewer`, unless `second_opinion.same_family: warn` allows the same family (it then prints a warning and exits 0). If it exits 1 or 2, show its message and stop: the second opinion would not run on the model the harness promises. Never pass a `model` when you dispatch the agent: its own file holds the one from `models.yaml`, and the line of the dispatch must not override it.
 2. Run `node -p "new Date().toLocaleDateString('en-CA')"` for today's date, as YYYY-MM-DD.
 3. Dispatch `second-opinion` with the Agent tool, with this prompt, and nothing added to it:
 

@@ -2,7 +2,7 @@
 name: code-reader
 description: Reads the code of an existing repository and writes the documents agents need from it (rules with exemplar files, invariants, contracts, or D1 to D3 in full mode) and the deviations register. Use it in adopt mode, after the inventory gate, for the phase of the documents.
 tools: Read, Glob, Grep, Bash(node:*), Skill
-model: claude-fable-5-2
+model: claude-opus-5-5
 effort: high
 tier: writer
 ---
