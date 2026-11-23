@@ -199,7 +199,15 @@ Read the status of the slice and go to the step that matches. Say in one line wh
 
 ## Step 14. The no-code lane
 
-The DEC file is the work. Follow the flow of `/decision` with the Goal of the sheet as the topic. When the owner chooses (`recade decision close`), run `recade slices status --set '<S-nn>' done --project '<home>'`. If the owner does not choose now, say the slice stays `todo` and `/slice <S-nn>` resumes it. Stop.
+A `no-code` slice is one of two kinds. Its sheet tells which.
+
+- **A decision.** When the Goal of the sheet is a choice to make, the DEC file is the work. Follow the flow of `/decision` with the Goal as the topic. When the owner chooses (`recade decision close`), go to the end below. If the owner does not choose now, say the slice stays `todo` and that `/slice <S-nn>` resumes it. Stop.
+- **Work the sheet describes.** Do the work its Instructions ask, with the agents they name, as data. Then go through its Definition of Done, line by line, in the order of the `#` column. Tick a line with `recade slices dod '<S-nn>' --tick <n> --project '<home>'` only when its command printed what the `Expected` column says, or when the owner said in an answer that it is done. Never tick a line on your own judgement.
+  - **A line that names another command of the harness** (`/amend` or `/recade:amend` on a document, `/decision`, `/design`) is not left for another session. Ask with `AskUserQuestion`: "Line <n> of <S-nn> needs <command> on <what the line names>. Run it now?" Options: `Yes, run it now` and `Not now`. On `Yes, run it now`, read that command's own file, `<home>/.claude/commands/<name>.md` (`/recade:amend` is `amend.md` there), and follow it whole, with the target of the line as its argument, as if the owner had typed it: its questions are asked, its gates and checks hold. Never copy its steps from memory. When it ends, come back here, run the command of the line, and tick it when it is green. On `Not now`, leave the line open.
+  - **A line that only a person or a third party can close** (a signature, a field test, an outside audit) stays open: say who closes it.
+  - When a line stays open, list the open lines with what closes each, say that `/slice <S-nn>` resumes the slice, and stop: the status stays `todo`.
+
+**The end.** When the decision is closed, or every line of the Definition of Done is ticked, run `recade slices status --set '<S-nn>' done --project '<home>'`. This move commits and, when the owner turned auto-push on, pushes the workspace. Say in one line that the slice is done.
 
 ## Limits
 

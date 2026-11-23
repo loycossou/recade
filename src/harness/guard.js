@@ -744,7 +744,7 @@ function syncCommand(command, pluginRoot, ws) {
 /**
  * The Recade commands that only the main session runs, as the pair of words that names them, with the reason given to
  * an agent: `repo sync|add` rewrite the links, `workspace commit` commits under the commit lock, `workspace auto-push`
- * records the owner's consent, `harness specialise` writes the agent and command files, `guard snapshot` writes the
+ * records the owner's consent, `workspace push` pushes, `harness specialise` writes the agent and command files, `guard snapshot` writes the
  * evidence the audit reads, `slices merge` is the owner's merge on the local forge.
  */
 const MAIN_SESSION_ONLY = [
@@ -752,6 +752,7 @@ const MAIN_SESSION_ONLY = [
   [['repo', 'add'], '`recade repo sync` and `recade repo add` rewrite the links of the code repositories: only the main session runs them.'],
   [['workspace', 'commit'], '`recade workspace commit` commits files of the workspace: only the main session runs it.'],
   [['workspace', 'auto-push'], '`recade workspace auto-push` records the owner\'s consent to push the workspace: only the main session runs it.'],
+  [['workspace', 'push'], '`recade workspace push` pushes the workspace: only the main session and the Stop hook run it, never an agent.'],
   [['harness', 'specialise'], '`recade harness specialise` writes the agent and command files of the harness: only the main session runs it.'],
   [['guard', 'snapshot'], '`recade guard snapshot` writes the evidence the audit reads: only the main session runs it.'],
   [['slices', 'merge'], '`recade slices merge` is the owner\'s merge of a slice on the local forge: no agent merges, only the main session runs it after the owner\'s yes.'],

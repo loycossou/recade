@@ -351,6 +351,31 @@ export async function commitWorkspace(ws, paths, message, { exec = defaultExec, 
 }
 
 /**
+ * Push what the workspace holds and `origin` does not, when the owner agreed to auto-push. It is the push of the end
+ * of a turn (the Stop hook of the plugin): the steps that commit with no push, a tick or a status move in the middle of
+ * a slice, leave commits behind, and they leave the machine here instead of waiting for the next end of phase.
+ * @param {string} ws workspace folder
+ * @returns {Promise<{state: 'off'|'no-remote'|'none'|'pushed'|'failed', count?: number, warning?: string}>}
+ */
+export async function pushPending(ws, { exec = defaultExec } = {}) {
+  let on = false;
+  try {
+    on = loadState(ws)?.workspace?.auto_push === true;
+  } catch {
+    on = false;
+  }
+  if (!on) return { state: 'off' };
+  if ((await run(exec, ['git', 'remote', 'get-url', 'origin'], ws)).code !== 0) return { state: 'no-remote' };
+  const branch = await defaultBranch(ws, exec);
+  const ahead = await run(exec, ['git', 'rev-list', '--count', `refs/remotes/origin/${branch}..refs/heads/${branch}`], ws);
+  const count = ahead.code === 0 ? Number(ahead.stdout.trim()) : NaN;
+  if (count === 0) return { state: 'none' };
+  const pushed = await pushWorkspace(ws, { exec });
+  if (pushed.pushed) return { state: 'pushed', ...(Number.isFinite(count) ? { count } : {}) };
+  return { state: 'failed', warning: pushed.warning };
+}
+
+/**
  * Push the workspace default branch to `origin`, when the owner agreed to it (`workspace.auto_push: true` in
  * `recade/state.yaml`). With auto-push off no git call is made at all. A failed push never throws: it comes back as
  * one `warning` line, and the next push carries the commits that were missed. A push refused because the remote moved

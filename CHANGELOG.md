@@ -2,6 +2,16 @@
 
 This file is curated by hand for each release. At tag time, `recade release-notes <from>..<to> --version <v> --write` produces the raw list from the conventional commits, and this section is then edited from it.
 
+## 1.4.0 (2026-11-23)
+
+### A slice with no code goes to the end
+
+- `/slice` on a `no-code` slice that is not a decision does the work of its sheet, then goes through its Definition of Done line by line, and marks the slice `done` when every line is ticked. A line that needs another command of the harness (`/amend` on STACK, `/decision`, `/design`) is run from `/slice` after one question, by following that command's own file, instead of being left for another session. A line that only a person or a third party can close stays open, and `/slice` says who closes it. Install the harness again to get it.
+
+### The workspace is pushed at the end of each turn
+
+- With auto-push on, the Stop hook of the plugin runs the new `recade workspace push` at the end of each turn of a session. It pushes the commits a step left behind (a tick, a status move in the middle of a slice): before, they waited for the next end of phase, so a paused slice kept them on one machine. A failed push is shown once and tried again at the next turn. Outside a workspace with auto-push on, the hook does nothing. Only the main session and the hook run `recade workspace push`, never an agent.
+
 ## 1.3.0 (2026-11-23)
 
 ### A code repository with no code yet

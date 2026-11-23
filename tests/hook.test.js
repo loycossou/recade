@@ -120,11 +120,11 @@ test('bin/recade-hook.js imports only node: builtins and relative files without 
   const specs = [...src.matchAll(/from\s+['"]([^'"]+)['"]/g)].map((m) => m[1]);
   for (const spec of specs) {
     assert.ok(
-      spec.startsWith('node:') || ['../src/hook-message.js', '../src/hook.js', '../src/paths.js', '../src/started.js'].includes(spec),
+      spec.startsWith('node:') || ['../src/hook-message.js', '../src/hook.js', '../src/paths.js', '../src/started.js', '../src/stophook.js'].includes(spec),
       `unexpected import ${spec}`,
     );
   }
-  for (const file of ['hook-message.js', 'hook.js', 'paths.js', 'started.js']) {
+  for (const file of ['hook-message.js', 'hook.js', 'paths.js', 'started.js', 'stophook.js']) {
     const text = readFileSync(join(repo, 'src', file), 'utf8');
     const imports = [...text.matchAll(/(?:^|\n)\s*import\b[^\n]*?from\s+['"]([^'"]+)['"]/g)].map((m) => m[1]);
     for (const spec of imports) {
@@ -159,4 +159,57 @@ test('hooks.json runs bin/recade-hook.js on SessionStart with matcher startup', 
   assert.deepEqual(entries[0].hooks, [
     { type: 'command', command: 'node "${CLAUDE_PLUGIN_ROOT}/bin/recade-hook.js"' },
   ]);
+});
+
+test('hooks.json pushes the workspace at the end of each turn, through bin/recade-hook.js --stop', () => {
+  const hooks = JSON.parse(readFileSync(join(repo, 'hooks', 'hooks.json'), 'utf8'));
+  assert.deepEqual(hooks.hooks.Stop, [{ hooks: [{ type: 'command', command: 'node "${CLAUDE_PLUGIN_ROOT}/bin/recade-hook.js" --stop', timeout: 60 }] }]);
+});
+
+test('the Stop hook pushes the commits a step left in a workspace with auto-push on, and does nothing anywhere else', async () => {
+  const { autoPushWorkspace } = await import('../src/stophook.js');
+  const mail = ['t', 'example.invalid'].join('@');
+  const git = (cwd, ...a) => {
+    const r = spawnSync('git', a, { cwd, encoding: 'utf8', env: { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: mail, GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: mail } });
+    assert.equal(r.status, 0, r.stderr);
+    return r.stdout.trim();
+  };
+  const base = mkdtempSync(join(tmpdir(), 'recade-stop-'));
+  const origin = join(base, 'origin.git');
+  git(base, 'init', '-q', '--bare', '-b', 'main', origin);
+  const ws = join(base, 'ws');
+  git(base, 'clone', '-q', origin, ws);
+  git(ws, 'checkout', '-q', '-b', 'main');
+  mkdirSync(join(ws, 'recade'));
+  const state = (on) => `version: 1\nkind: workspace\nworkspace:\n  auto_push: ${on}\n  auto_push_since: 2026-11-23\n`;
+  writeFileSync(join(ws, 'recade', 'state.yaml'), state(true));
+  git(ws, 'add', '-A');
+  git(ws, 'commit', '-q', '-m', 'first');
+  git(ws, 'push', '-q', 'origin', 'main');
+  writeFileSync(join(ws, 'note.md'), 'x\n');
+  git(ws, 'add', 'note.md');
+  git(ws, 'commit', '-q', '-m', 'left behind');
+  const fs = { exists: (f) => { try { readFileSync(f); return true; } catch { return false; } }, read: (f) => readFileSync(f, 'utf8') };
+  mkdirSync(join(ws, 'worktrees', 'api'), { recursive: true });
+  assert.equal(autoPushWorkspace(join(ws, 'worktrees', 'api'), fs), ws, 'found from a folder inside the workspace');
+  assert.equal(autoPushWorkspace(base, fs), null, 'nothing outside a workspace');
+  const stop = (cwd) => spawnSync('node', [join(repo, 'bin', 'recade-hook.js'), '--stop'], { cwd, input: JSON.stringify({ cwd }), encoding: 'utf8' });
+  const r = stop(ws);
+  assert.equal(r.status, 0);
+  assert.equal(r.stdout, '');
+  assert.equal(git(ws, 'rev-parse', 'HEAD'), git(origin, 'rev-parse', 'main'), 'the commit left behind reached origin');
+  // Auto-push off: the hook finds no workspace to push, and nothing leaves.
+  writeFileSync(join(ws, 'recade', 'state.yaml'), state(false));
+  git(ws, 'commit', '-q', '-am', 'off');
+  assert.equal(autoPushWorkspace(ws, fs), null);
+  stop(ws);
+  assert.notEqual(git(ws, 'rev-parse', 'HEAD'), git(origin, 'rev-parse', 'main'));
+  // A push that fails is told to the owner, and the turn ends normally.
+  writeFileSync(join(ws, 'recade', 'state.yaml'), state(true));
+  git(ws, 'commit', '-q', '-am', 'on again');
+  git(ws, 'remote', 'set-url', 'origin', join(base, 'gone.git'));
+  const failed = stop(ws);
+  assert.equal(failed.status, 0);
+  assert.match(JSON.parse(failed.stdout).systemMessage, /^Recade: workspace push failed/);
+  rmSync(base, { recursive: true, force: true });
 });

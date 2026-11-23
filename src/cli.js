@@ -25,7 +25,7 @@ import { createProject } from './project/scaffold.js';
 import { SYNC_ADVICE } from './workspace/layout.js';
 import { REPO_NAME } from './project/touches.js';
 import { addRepo, listRepos, checkRepos, syncRepos, stripCredentials, VISIBILITIES } from './workspace/repos.js';
-import { commitWorkspace, checkWorkspace, pushWorkspace, CommitError, defaultExec as commitExec } from './workspace/commit.js';
+import { commitWorkspace, checkWorkspace, pushPending, pushWorkspace, CommitError, defaultExec as commitExec } from './workspace/commit.js';
 import { initAdopt, preflight, writeOwnFile, AdoptError } from './project/adopt.js';
 import { scan as scanInventory, renderInventory, scanWorkspace, renderWorkspaceInventory } from './project/inventory.js';
 import { checkTeam } from './project/doctrine.js';
@@ -117,7 +117,7 @@ function renderHelp() {
   const term = (label) => label.padEnd(Math.max(20, label.length + 2));
   out += `${term('recade models')}Print the model the writing agents use, the owner's choice of Fable or Opus: recade models writer [--id]. The model of the mechanical stages (translate, glossary, apply-decisions, format fixes): recade models mechanical [--effort]\n`;
   out += `${term('recade cases')}List and replay the agent test cases, the plugin's and the harness's: recade cases [--plugin] [--harness] [--run] [--agent <name>]\n`;
-  out += `${term('recade workspace')}Find the project workspace, set its auto-push, commit its leftover documents: recade workspace root | auto-push on|off | commit --paths <path>[,<path>...] -m <message>\n`;
+  out += `${term('recade workspace')}Find the project workspace, set its auto-push, push what a step left, commit its leftover documents: recade workspace root | auto-push on|off | push | commit --paths <path>[,<path>...] -m <message>\n`;
   out += `${term('recade repo')}Register the code repositories of the workspace, check and relink them: recade repo add <name> (--new | --clone <url>) | list | check | sync\n`;
   out += `${term('recade harness')}Install, verify and test the agent harness: recade harness install | verify | cases [--run] | protect [--apply] | set | specialise <agent|command> <name> --file <path> | models | migrate [--dry-run]\n`;
   out += `${term('recade cost')}Record the cost of a slice: recade cost record <S-nn> --minutes <n> --fix-loops <n> [--tokens <n> | --transcript <path|auto> [--since <ms>] [--session-dir <dir>]]. Estimate a phase or a slice before it runs: recade cost estimate [--phase <phase> | --slice standard|sensitive] [--json]\n`;
@@ -420,6 +420,23 @@ export const commands = {
       const step = await endStep(io, root, wanted.paths, wanted.message, () => ({}), { push: false, own: false });
       if (step.exit !== undefined) return step.exit;
       io.stdout.write(step.committed === false ? 'Nothing to commit.\n' : `Committed ${wanted.paths.length} path${wanted.paths.length === 1 ? '' : 's'}: ${wanted.message}\n`);
+      return 0;
+    }
+    if (sub === 'push' && rest.length === 0) {
+      // The commits a step left unpushed, when the owner turned auto-push on. Never an error: a failed push is a warning.
+      const found = workspaceOf(io.cwd);
+      if (found === null || gitWorkspace(found.dir) === null) {
+        io.stdout.write('Not in a workspace under git: nothing to push.\n');
+        return 0;
+      }
+      const r = await pushPending(found.dir, { exec: io.run ?? commitExec });
+      if (r.state === 'failed') io.stderr.write(`recade: warning: ${r.warning}\n`);
+      else io.stdout.write({
+        off: 'Workspace auto-push is off: nothing was pushed (recade workspace auto-push on turns it on).\n',
+        'no-remote': 'The workspace has no origin remote: nothing to push.\n',
+        none: 'Nothing to push.\n',
+        pushed: `Pushed the workspace${r.count === undefined ? '' : ` (${r.count} commit${r.count === 1 ? '' : 's'})`}.\n`,
+      }[r.state]);
       return 0;
     }
     const ok = (sub === 'root' && rest.length === 0) || (sub === 'auto-push' && rest.length === 1 && ['on', 'off'].includes(rest[0]));
@@ -2763,7 +2780,7 @@ async function adoptPhase(args, io) {
 }
 const INVENTORY_USAGE = 'Usage: recade inventory scan [--json]';
 const INTAKE_USAGE = 'Usage: recade intake scan [--json] [--project <dir>]';
-const WORKSPACE_USAGE = 'Usage: recade workspace root | auto-push on|off | commit --paths <path>[,<path>...] -m <message>';
+const WORKSPACE_USAGE = 'Usage: recade workspace root | auto-push on|off | push | commit --paths <path>[,<path>...] -m <message>';
 
 /** The folders and files of the workspace that `recade workspace commit` may commit: the documents, never state, harness, code or ignored folders. */
 const COMMITTABLE = /^(slices|design|decisions|retros|team|intake|docs)(\/|$)|^(BIBLE|INDEX)\.md$/;
