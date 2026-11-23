@@ -12,7 +12,7 @@
       "name": "recade",
       "source": "./",
       "description": "Takes a software project from an idea to agents shipping it slice by slice, with an expert-inspired team, real documents and a human at every gate.",
-      "version": "1.2.2"
+      "version": "1.3.0"
     }
   ]
 }

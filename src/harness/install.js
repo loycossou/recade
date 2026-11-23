@@ -266,7 +266,7 @@ export function lineDiff(before, after) {
 export const LAUNCHER = '.claude/hooks/recade-guard.mjs';
 const isGuardHook = (h) => typeof h?.command === 'string' && (h.command.includes('harness/hooks/guard.mjs') || h.command.includes(LAUNCHER));
 
-/** The PreToolUse entries of the project without the guard hook: an entry keeps its other hooks, and goes when none is left. */
+/** The hook entries of the project without the launcher hook: an entry keeps its other hooks, and goes when none is left. */
 const withoutGuard = (entries) => entries.flatMap((e) => {
   if (!Array.isArray(e?.hooks) || !e.hooks.some(isGuardHook)) return [e];
   const hooks = e.hooks.filter((h) => !isGuardHook(h));
@@ -303,7 +303,9 @@ export function mergeSettings(existingText, template) {
   perms.deny = deny;
   out.permissions = perms;
   const hooks = { ...(current.hooks ?? {}) };
-  hooks.PreToolUse = [...(template.hooks?.PreToolUse ?? []), ...withoutGuard(hooks.PreToolUse ?? [])];
+  // Each event the template hooks (PreToolUse for the guard, SessionStart for the plugin of a cloud session) gets the
+  // hook of the template first, and keeps the project's own hooks after it.
+  for (const event of Object.keys(template.hooks ?? {})) hooks[event] = [...template.hooks[event], ...withoutGuard(hooks[event] ?? [])];
   out.hooks = hooks;
   return `${JSON.stringify(out, null, 2)}\n`;
 }

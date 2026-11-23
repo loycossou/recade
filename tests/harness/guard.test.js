@@ -665,6 +665,7 @@ test('handleHook: the shell guard for a known agent runs through the hook', asyn
 test('hooks find the plugin root from .recade/plugin-root, also from another worktree', () => {
   const repo = makeRepo();
   mkdirSync(join(repo, '.recade'));
+  mkdirSync(join(repo, '.recade'), { recursive: true });
   writeFileSync(join(repo, '.recade', 'plugin-root'), `${plugin}\n`);
   const event = (cwd) => JSON.stringify({ cwd, tool_name: 'Bash', tool_input: { command: 'gh pr merge 1' } });
   const a = runLauncher(repo, event(repo));
@@ -965,6 +966,7 @@ test('the hook command of the settings blocks with exit 2 when the launcher is m
   mkdirSync(join(repo, '.claude', 'hooks'), { recursive: true });
   writeFileSync(join(repo, '.claude', 'hooks', 'recade-guard.mjs'), readFileSync(launcherMjs, 'utf8'));
   mkdirSync(join(repo, '.recade'));
+  mkdirSync(join(repo, '.recade'), { recursive: true });
   writeFileSync(join(repo, '.recade', 'plugin-root'), `${plugin}\n`);
   const present = sh();
   assert.equal(present.status, 0, present.stderr);
@@ -2475,4 +2477,34 @@ test('checkBash: reading .recade/plugin-root in a command that writes is refused
     assert.match(checkBash(c), /The stamps, the hooks, the settings and the project state/, c);
   }
   assert.equal(checkBash('date > /w/spikes/a/.start'), null);
+});
+
+test('launcher --session-start: a cloud session with no Recade plugin installs the public one, and nothing happens elsewhere', () => {
+  const repo = makeRepo();
+  rmSync(join(repo, '.recade', 'plugin-root'), { force: true });
+  const bin = mkdtempSync(join(tmpdir(), 'recade-bin-'));
+  const calls = join(bin, 'calls');
+  // A fake claude command: it records its arguments, and its install writes the record of the installed plugins.
+  const fake = (installs) => {
+    writeFileSync(join(bin, 'claude'), `#!/bin/sh\necho "$*" >> '${calls}'\nif [ "$2" = install ]; then ${installs ? `mkdir -p "$CLAUDE_CONFIG_DIR/plugins" && printf '%s' '{"plugins":{"recade@recade":[{"installPath":"${plugin}"}]}}' > "$CLAUDE_CONFIG_DIR/plugins/installed_plugins.json"` : 'echo "network is unreachable" >&2; exit 1'}; fi\n`, { mode: 0o755 });
+  };
+  const start = (env) => {
+    rmSync(calls, { force: true });
+    const r = spawnSync('node', [launcherMjs, '--session-start'], { cwd: repo, input: '{}', encoding: 'utf8', env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, CLAUDE_PROJECT_DIR: repo, CLAUDE_CONFIG_DIR: mkdtempSync(join(tmpdir(), 'recade-config-')), ...env } });
+    assert.equal(r.status, 0, 'the session never fails');
+    return { out: r.stdout, calls: existsSync(calls) ? readFileSync(calls, 'utf8') : '' };
+  };
+  fake(true);
+  // A machine of the team: the owner installs the plugin, the hook never does.
+  assert.deepEqual(start({ CLAUDE_CODE_REMOTE: '' }), { out: '', calls: '' });
+  const cloud = start({ CLAUDE_CODE_REMOTE: 'true' });
+  assert.equal(cloud.calls, 'plugin marketplace add loycossou/recade\nplugin install recade@recade\n');
+  assert.match(cloud.out, /installed for this cloud session/);
+  fake(false);
+  const failed = start({ CLAUDE_CODE_REMOTE: 'true' });
+  assert.match(failed.out, /could not be installed in this cloud session \(network is unreachable\)/);
+  // A plugin already there: nothing to install.
+  mkdirSync(join(repo, '.recade'), { recursive: true });
+  writeFileSync(join(repo, '.recade', 'plugin-root'), `${plugin}\n`);
+  assert.deepEqual(start({ CLAUDE_CODE_REMOTE: 'true' }), { out: '', calls: '' });
 });

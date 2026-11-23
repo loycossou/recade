@@ -348,8 +348,8 @@ test('a missing source drops its slide with a Warning line, never a failure', as
 test('the deck is named and written in the documents language, and the same sources give the same bytes', async (t) => {
   const root = project(t, { language: 'fr' });
   assert.equal((await cli(t, root, 'yes')).code, 0);
-  assert.deepEqual(deliverables(root), ['DECK_Synthese-Du-Projet.pptx']);
-  const file = join(root, 'docs', 'deliverables', 'DECK_Synthese-Du-Projet.pptx');
+  assert.deepEqual(deliverables(root), ['DECK_Synthese-du-Projet.pptx']);
+  const file = join(root, 'docs', 'deliverables', 'DECK_Synthese-du-Projet.pptx');
   const first = readFileSync(file);
   const { slides } = await slidesOf(file);
   assert.match(textOf(slides[1]), /Le projet/);

@@ -440,7 +440,7 @@ test('a copy whose title gives the name of its source keeps its language at the 
   writeFileSync(join(root, 'docs', 'D2.fr.md'), titled('Fernhill Lending, Architecture', 'fr'));
   const { code, err } = await cli([join(root, 'docs', 'D2.fr.md')]);
   assert.equal(code, 0, err);
-  assert.deepEqual(listDeliverables(root), ['D2_Architecture.fr.docx', 'D2_Architecture.fr.html', 'INDEX_Les-Documents-Du-Projet.html']);
+  assert.deepEqual(listDeliverables(root), ['D2_Architecture.fr.docx', 'D2_Architecture.fr.html', 'INDEX_Les-Documents-du-Projet.html']);
 });
 
 test('the files of an older render are left as they were, and each is named once', async (t) => {
@@ -493,4 +493,21 @@ test('a renamed document leaves its old files, named as left, and the index list
   const legacy = await cli([file]);
   assert.ok(legacy.out.includes(`Left as it was: ${join(deliverables(root), 'note_Small-Note.html')}.`));
   assert.ok(legacy.out.includes(`Left as it was: ${join(deliverables(root), 'note_Small-Note.docx')}.`));
+});
+
+test('writeAll replaces an output written under the same name in another case, and puts it back when a write fails', async () => {
+  const { writeAll } = await import('../../src/render/pipeline.js');
+  const dir = mkdtempSync(join(tmpdir(), 'recade-case-'));
+  writeFileSync(join(dir, 'D3_Exigences-De-Securite.docx'), 'old');
+  writeFileSync(join(dir, 'D3_Other.docx'), 'other');
+  writeAll([{ file: join(dir, 'D3_Exigences-de-Securite.docx'), bytes: 'new' }]);
+  assert.deepEqual(readdirSync(dir).sort(), ['D3_Exigences-de-Securite.docx', 'D3_Other.docx']);
+  assert.equal(readFileSync(join(dir, 'D3_Exigences-de-Securite.docx'), 'utf8'), 'new');
+  // A failed write restores the old spelling and its contents.
+  writeFileSync(join(dir, 'D1_Plan-De-Test.html'), 'kept');
+  let calls = 0;
+  const rename = (a, b) => { if (++calls === 2) throw new Error('disk full'); renameSync(a, b); };
+  assert.throws(() => writeAll([{ file: join(dir, 'D1_Plan-de-Test.html'), bytes: 'x' }], rename), /disk full/);
+  assert.equal(readFileSync(join(dir, 'D1_Plan-De-Test.html'), 'utf8'), 'kept');
+  assert.equal(existsSync(join(dir, 'D1_Plan-de-Test.html')), false);
 });

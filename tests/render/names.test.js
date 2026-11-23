@@ -8,14 +8,23 @@ import { deliverableName, documentTitle, oldNames, slugTitle, sourceDeliverableN
 test('slugTitle drops accents, joins words with hyphens and capitalises each word', () => {
   assert.equal(slugTitle('Functional Specifications'), 'Functional-Specifications');
   assert.equal(slugTitle('Spécifications fonctionnelles'), 'Specifications-Fonctionnelles');
-  assert.equal(slugTitle('Exigences de sécurité'), 'Exigences-De-Securite');
-  assert.equal(slugTitle('plan de livraison'), 'Plan-De-Livraison');
+  assert.equal(slugTitle('Exigences de sécurité'), 'Exigences-de-Securite');
+  assert.equal(slugTitle('plan de livraison'), 'Plan-de-Livraison');
   assert.equal(slugTitle('Größe & Maße: Übersicht'), 'Grosse-Masse-Ubersicht');
-  assert.equal(slugTitle("Signal d'alerte / l'API"), 'Signal-D-Alerte-L-API');
+  assert.equal(slugTitle("Signal d'alerte / l'API"), 'Signal-d-Alerte-l-API');
   assert.equal(slugTitle('Œuvre, æther, Łódź, Ørsted'), 'Oeuvre-Aether-Lodz-Orsted');
-  assert.equal(slugTitle('  spaces   and\ttabs  '), 'Spaces-And-Tabs');
+  assert.equal(slugTitle('  spaces   and\ttabs  '), 'Spaces-and-Tabs');
   assert.equal(slugTitle('機能仕様書'), '');
   assert.equal(slugTitle(undefined), '');
+});
+
+test('slugTitle keeps a short word in lower case after the first word, in each language, and never the first one', () => {
+  assert.equal(slugTitle('The art of war'), 'The-Art-of-War');
+  assert.equal(slugTitle('Plano do projeto'), 'Plano-do-Projeto');
+  assert.equal(slugTitle('Größe und Maße'), 'Grosse-und-Masse');
+  assert.equal(slugTitle('de la ville'), 'De-la-Ville');
+  // A short word written in capitals keeps them.
+  assert.equal(slugTitle('Sign IN flow'), 'Sign-IN-Flow');
 });
 
 test('slugTitle keeps at most 60 characters, cut between words', () => {
@@ -50,6 +59,6 @@ test('sourceDeliverableName: a language copy takes its own title, or keeps its l
   assert.equal(sourceDeliverableName(join(dir, 'D1.md'), { title: 'Acme, Functional Specifications', project: 'Acme' }), 'D1_Functional-Specifications');
   assert.equal(sourceDeliverableName(join(dir, 'D1.fr.md'), { title: 'Acme, Spécifications fonctionnelles', project: 'Acme' }), 'D1_Specifications-Fonctionnelles');
   assert.equal(sourceDeliverableName(join(dir, 'PLAN.fr.md'), { title: 'Acme, plan', project: 'Acme' }), 'PLAN_Plan.fr');
-  assert.equal(sourceDeliverableName(join(dir, 'D3.pt-BR.md'), { title: 'Acme, Requisitos de segurança', project: 'Acme' }), 'D3_Requisitos-De-Seguranca');
+  assert.equal(sourceDeliverableName(join(dir, 'D3.pt-BR.md'), { title: 'Acme, Requisitos de segurança', project: 'Acme' }), 'D3_Requisitos-de-Seguranca');
   assert.deepEqual(oldNames(join(dir, 'D1.fr.md')), ['D1.fr.docx', 'D1.fr.pdf']);
 });

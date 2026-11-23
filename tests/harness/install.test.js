@@ -91,6 +91,17 @@ test('a re-install over an older settings file drops the committed plugin folder
   assert.equal(mergeSettings(JSON.stringify({ env: { RECADE_PLUGIN_ROOT: '/x' } }), {}).includes('"env"'), false);
 });
 
+test('the SessionStart hook of the launcher is merged like the guard: once, first, and the project keeps its own', () => {
+  const template = JSON.parse(readFileSync(join(plugin, 'harness', 'settings.json'), 'utf8'));
+  const own = { matcher: 'startup', hooks: [{ type: 'command', command: 'echo hello' }] };
+  const once = JSON.parse(mergeSettings(JSON.stringify({ hooks: { SessionStart: [own] } }), template));
+  const twice = JSON.parse(mergeSettings(JSON.stringify(once), template));
+  assert.deepEqual(twice, once, 'a second install changes nothing');
+  assert.equal(once.hooks.SessionStart.length, 2);
+  assert.match(once.hooks.SessionStart[0].hooks[0].command, /recade-guard\.mjs" --session-start \|\| true$/);
+  assert.deepEqual(once.hooks.SessionStart[1], own);
+});
+
 test('a pinned commit that no remote branch and no tag holds gives a warning that suggests --ref <tag>', () => {
   const sha = 'b'.repeat(40);
   assert.equal(publishedSha('/p', sha, gitAnswers({})), null);
@@ -212,7 +223,7 @@ test('re-install keeps everything below the specialisation line byte for byte, u
   assert.notEqual(read(root, '.claude/agents/reviewer.md'), before['.claude/agents/reviewer.md']);
   const reviewerDiff = r.diffs.find((d) => d.file === '.claude/agents/reviewer.md').diff;
   assert.match(reviewerDiff, /^\+A new sentence of the next version\.$/m);
-  assert.match(reviewerDiff, /^-<!-- recade-harness v1\.2\.2/m);
+  assert.match(reviewerDiff, /^-<!-- recade-harness v1\.3\.0/m);
   assert.match(reviewerDiff, /^\+<!-- recade-harness v9\.9\.9/m);
   assert.equal(r.written.find((w) => w.file === '.claude/agents/reviewer.md').status, 'updated');
   // The plugin root recorded is the new one.

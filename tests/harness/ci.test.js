@@ -170,7 +170,7 @@ test('quarantined tests run in their own non-blocking job that still reports, an
   assert.ok(job, 'a quarantine job');
   assert.equal(job['continue-on-error'], true, 'its failure never blocks the workflow');
   assert.ok(job['timeout-minutes'] > 0);
-  assert.equal(job.needs, undefined, 'nothing waits for it and it waits for nothing');
+  assert.equal(job.needs, 'code', 'it waits only for the code check');
   for (const name of ['quality', 'e2e', 'security', 'recade']) {
     assert.notEqual(doc.jobs[name]['continue-on-error'], true, `${name} blocks`);
     assert.equal(doc.jobs[name].needs === undefined || !doc.jobs[name].needs.includes('quarantine'), true);
@@ -193,6 +193,38 @@ test('quarantined tests run in their own non-blocking job that still reports, an
   // The blocking recade job fails an entry that outlives its increment.
   assert.match(runsOf(doc.jobs.recade.steps), /quarantine check/);
   for (const s of stepsOf(doc).filter((x) => x.run)) assert.doesNotMatch(s.run, /\$\{\{/, `${s.name}: no expression inside a run line`);
+});
+
+test('a repository with only the harness files skips the jobs that need code, and the recade job still runs', () => {
+  const doc = parse(fillCi(CI, STACK).text);
+  for (const name of ['quality', 'e2e', 'security', 'quarantine']) {
+    assert.equal(doc.jobs[name].needs, 'code', `${name} waits for the code check`);
+    assert.equal(doc.jobs[name].if, "needs.code.outputs.present == 'true'", `${name} is skipped without code`);
+  }
+  assert.equal(doc.jobs.recade.needs, undefined, 'the style check runs on every repository');
+  assert.equal(doc.jobs.code.outputs.present, '${{ steps.look.outputs.present }}');
+  const look = doc.jobs.code.steps.find((s) => s.id === 'look');
+  const run = (files) => {
+    const dir = mkdtempSync(join(tmpdir(), 'recade-code-'));
+    spawnSync('git', ['init', '--quiet', dir]);
+    for (const f of files) {
+      mkdirSync(join(dir, f, '..'), { recursive: true });
+      writeFileSync(join(dir, f), 'x\n');
+    }
+    spawnSync('git', ['-C', dir, 'add', '-A']);
+    const out = join(dir, '..', `${dir.split('/').pop()}.out`);
+    const summary = `${out}.summary`;
+    const r = spawnSync('bash', ['-c', look.run], { cwd: dir, encoding: 'utf8', env: { ...process.env, GITHUB_OUTPUT: out, GITHUB_STEP_SUMMARY: summary } });
+    assert.equal(r.status, 0, r.stderr);
+    return { output: readFileSync(out, 'utf8'), summary: existsSync(summary) ? readFileSync(summary, 'utf8') : '' };
+  };
+  const harnessOnly = ['.claude/settings.json', '.claude/hooks/recade-guard.mjs', '.githooks/pre-commit', '.github/workflows/ci.yml', 'CLAUDE.md', '.gitignore', 'README.md', 'tests/quarantine.json'];
+  const bare = run(harnessOnly);
+  assert.equal(bare.output, 'present=false\n');
+  assert.match(bare.summary, /No code yet/);
+  assert.equal(run([...harnessOnly, 'package.json']).output, 'present=true\n');
+  assert.equal(run(['src/main.kt']).output, 'present=true\n');
+  assert.equal(run(['docs/CLAUDE.md']).output, 'present=true\n', 'only the root CLAUDE.md is a harness file');
 });
 
 test('the Quarantine tests row is optional: absent, it is a visible no-op and not a missing row', () => {

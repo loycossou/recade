@@ -5,6 +5,8 @@
 // machine, never committed), in the project, in the folders above, or in the main checkout of the repository, and runs
 // the guard of that plugin. When the guard is missing or cannot run, write tools and Bash are refused (fail closed),
 // except the few commands that reinstall the harness from a real Recade plugin folder. Read, Glob and Grep never reach this hook.
+// Run with --session-start by the SessionStart hook: in a cloud session only (CLAUDE_CODE_REMOTE=true), when no Recade
+// plugin is found, it installs the public plugin, since a cloud session does not add the marketplace a repository lists.
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -160,13 +162,42 @@ function failClosed(event, why, cwd = process.cwd(), { rootMissing = false } = {
   const agent = event?.agent_type ?? event?.subagent_type;
   const main = typeof agent !== 'string' || agent === '';
   if (tool === 'Bash' && recovery(command, cwd, rootMissing && main)) return '';
-  const reason = `The Recade guard cannot run (${why}), so write tools and Bash are refused. Run /recade:harness again in this project, or \`recade harness install\` from a terminal. On a fresh clone of a workspace, the main session may run \`recade repo sync\`, which writes the plugin root again.`;
+  const reason = `The Recade guard cannot run (${why}), so write tools and Bash are refused. Run /recade:harness again in this project, or \`recade harness install\` from a terminal. On a fresh clone of a workspace, the main session may run \`recade repo sync\`, which writes the plugin root again. In a cloud session, the Recade plugin must be installed (claude plugin marketplace add ${MARKETPLACE}, then claude plugin install recade@recade, in the setup script of the cloud environment).`;
   return JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason } });
+}
+
+/** Where the public plugin is published, for the install of a cloud session. */
+const MARKETPLACE = 'loycossou/recade';
+
+/**
+ * The SessionStart hook. On a machine of the team, nothing: the owner installs the plugin. In a cloud session with no
+ * Recade plugin, install it, so that the guard finds it at the next tool call (installedPlugin). It never fails the
+ * session: what it did, or why it could not, is one line of context for the session.
+ */
+function sessionStart() {
+  if (process.env.CLAUDE_CODE_REMOTE !== 'true') return '';
+  if (pluginRoot(process.env.CLAUDE_PROJECT_DIR || process.cwd()) !== null) return '';
+  const run = (args) => spawnSync('claude', args, { encoding: 'utf8', timeout: 80_000 });
+  const added = run(['plugin', 'marketplace', 'add', MARKETPLACE]);
+  // A marketplace already known fails the add: the install runs anyway, unless the claude command itself is missing.
+  const installed = added.error ? added : run(['plugin', 'install', 'recade@recade']);
+  if (!installed.error && installed.status === 0 && installedPlugin() !== null) return 'Recade: the plugin was installed for this cloud session, so the guard of the harness runs.';
+  const why = String(installed.error?.message ?? installed.stderr ?? '').split('\n').find((l) => l.trim() !== '') ?? `exit ${installed.status}`;
+  return `Recade: the plugin could not be installed in this cloud session (${why.trim()}), so the guard refuses write tools and Bash. Tell the owner: the session needs the Recade plugin (claude plugin marketplace add ${MARKETPLACE}, then claude plugin install recade@recade, in the setup script of the cloud environment).`;
 }
 
 let stdin = '';
 let event = null;
 let out;
+if (process.argv.includes('--session-start')) {
+  try {
+    out = sessionStart();
+  } catch {
+    out = '';
+  }
+  if (out !== '') process.stdout.write(`${out}\n`);
+  process.exit(0);
+}
 try {
   stdin = await readStdin();
   try {

@@ -264,10 +264,10 @@ test('each language gets its own index page, named through the deliverable helpe
   writeFileSync(join(root, 'docs', 'D1.fr.md'), DOC.replace('language: en', 'language: fr').replace('Functional Specifications', 'Spécifications fonctionnelles'));
   await renderFiles([join(root, 'docs', 'D1.md'), join(root, 'docs', 'D1.fr.md')], { formats: ['html'], check: false, withBrowser: noBrowser });
   const out = join(root, 'docs', 'deliverables');
-  assert.deepEqual(readdirSync(out).filter((f) => f !== '.recade-rendered.json').sort(), [D1 + '.html', 'D1_Specifications-Fonctionnelles.html', 'INDEX_Les-Documents-Du-Projet.html', INDEX].sort());
-  assert.match(readFileSync(join(out, 'D1_Specifications-Fonctionnelles.html'), 'utf8'), /class="brand" href="INDEX_Les-Documents-Du-Projet.html"/);
+  assert.deepEqual(readdirSync(out).filter((f) => f !== '.recade-rendered.json').sort(), [D1 + '.html', 'D1_Specifications-Fonctionnelles.html', 'INDEX_Les-Documents-du-Projet.html', INDEX].sort());
+  assert.match(readFileSync(join(out, 'D1_Specifications-Fonctionnelles.html'), 'utf8'), /class="brand" href="INDEX_Les-Documents-du-Projet.html"/);
   assert.match(readFileSync(join(out, D1 + '.html'), 'utf8'), new RegExp(`class="brand" href="${INDEX}"`));
-  const fr = readFileSync(join(out, 'INDEX_Les-Documents-Du-Projet.html'), 'utf8');
+  const fr = readFileSync(join(out, 'INDEX_Les-Documents-du-Projet.html'), 'utf8');
   assert.ok(fr.indexOf('D1_Specifications-Fonctionnelles.html') < fr.indexOf(`${D1}.html`), 'the French dossiers come first');
 });
 

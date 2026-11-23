@@ -31,6 +31,18 @@
           }
         ]
       }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "startup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/recade-guard.mjs\" --session-start || true",
+            "timeout": 180
+          }
+        ]
+      }
     ]
   }
 }

@@ -24,8 +24,35 @@ env:
 # Actions are pinned to a major tag. The Dependabot file next to this one keeps them current,
 # and a team that wants stricter pinning replaces each tag by the full commit SHA, keeping the tag in a comment.
 jobs:
+  # A new code repository holds only the harness files until its first slice adds code. Until then there is nothing to
+  # install, lint, build or test, so the four jobs below are skipped (GitHub reports a skipped job as passing) and the
+  # run summary says why. They run from the first file that is not a harness file.
+  code:
+    name: Code present
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      present: ${{ steps.look.outputs.present }}
+    steps:
+      - uses: actions/checkout@v4 # v4 major tag
+        with:
+          persist-credentials: false
+      - name: Look for code
+        id: look
+        run: |
+          set -euo pipefail
+          first="$(git ls-files | grep -Ev '^(\.claude/|\.githooks/|\.github/|CLAUDE\.md$|AGENTS\.md$|README[^/]*$|LICENSE[^/]*$|\.gitignore$|\.gitattributes$|\.editorconfig$|tests/quarantine\.json$)' | head -n 1 || true)"
+          if [ -n "$first" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "No code yet: this repository holds only the harness files, so the lint, build, test and security jobs are skipped. They run from the first file of code." | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+
   quality:
     name: Lint, types, unit and contract tests
+    needs: code
+    if: needs.code.outputs.present == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -54,6 +81,8 @@ jobs:
 
   e2e:
     name: End to end, confirmations, accessibility, performance
+    needs: code
+    if: needs.code.outputs.present == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -95,6 +124,8 @@ jobs:
 
   security:
     name: SAST, dependency audit, SBOM, secrets
+    needs: code
+    if: needs.code.outputs.present == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -135,6 +166,8 @@ jobs:
   # quarantined test outlives its increment.
   quarantine:
     name: Quarantined tests (non-blocking, reported)
+    needs: code
+    if: needs.code.outputs.present == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     continue-on-error: true

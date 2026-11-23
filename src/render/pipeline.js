@@ -121,10 +121,14 @@ export function writeAll(outputs, rename = renameSync) {
       writeFileSync(tmp, bytes);
     }
     outputs.forEach(({ file }, i) => {
-      if (existsSync(file)) {
-        const backup = `${file}.${process.pid}.bak`;
-        rename(file, backup);
-        backups.set(file, backup);
+      // The same name in another case (`Exigences-De-Securite` before small words were lower case): it is this output
+      // under its old spelling, so it goes like the file it replaces. A disk that ignores case would keep the old one.
+      const name = basename(file);
+      const listed = readdirSync(dirname(file)).filter((n) => n.toLowerCase() === name.toLowerCase());
+      for (const old of listed.map((n) => join(dirname(file), n))) {
+        const backup = `${old}.${process.pid}.bak`;
+        rename(old, backup);
+        backups.set(old, backup);
       }
       rename(temps[i], file);
       placed.push(file);
@@ -197,12 +201,12 @@ export function renamedLeftovers(job, record, fresh) {
   const current = basename(job.base);
   const prev = record[job.rel] ?? {};
   const names = new Set([...(Array.isArray(prev.current) ? prev.current : []), ...(Array.isArray(prev.left) ? prev.left : [])]
-    .filter((n) => typeof n === 'string' && n === basename(n) && stem(n) !== current));
+    .filter((n) => typeof n === 'string' && n === basename(n) && stem(n).toLowerCase() !== current.toLowerCase()));
   const id = current.split('_')[0];
   if (fresh && existsSync(dir)) {
     const all = readdirSync(dir);
     for (const name of all) {
-      if (extname(name) !== '.html' || stem(name) === current || !name.startsWith(`${id}_`)) continue;
+      if (extname(name) !== '.html' || stem(name).toLowerCase() === current.toLowerCase() || !name.startsWith(`${id}_`)) continue;
       let entry = null;
       try { entry = dossierEntry(readFileSync(join(dir, name), 'utf8')); } catch { continue; }
       if (!entry) continue;

@@ -2,6 +2,21 @@
 
 This file is curated by hand for each release. At tag time, `recade release-notes <from>..<to> --version <v> --write` produces the raw list from the conventional commits, and this section is then edited from it.
 
+## 1.3.0 (2026-11-23)
+
+### A code repository with no code yet
+
+- The CI of a code repository starts with a job `Code present`. While the repository holds only the harness files (`.claude/`, `.githooks/`, `.github/`, `CLAUDE.md`, the README, the licence, `.gitignore`), the lint, build, test, end to end, security and quarantine jobs are skipped, and the run summary says why. GitHub counts a skipped job as passing, so a new repository is no longer red until its first slice. The style job always runs. Install the harness again to get it.
+
+### The plugin in a cloud session
+
+- A cloud session does not add the marketplace a repository lists, so its guard found no Recade plugin and refused every write. The harness now adds a `SessionStart` hook: in a cloud session only (`CLAUDE_CODE_REMOTE=true`), when no Recade plugin is found, it installs the public plugin with `claude plugin`, and the guard finds it at the next tool call. On a machine of the team it does nothing. When the install fails, the session is told why, and the refusal of the guard says how to install the plugin in the setup script of the cloud environment. Install the harness again to get it.
+- `recade harness install` merges every hook event of the harness settings the way it merged the guard: the hook of the harness first, the project's own hooks kept after it.
+
+### Names of the deliverables
+
+- A short word after the first word of a title (`de`, `du`, `of`, `the`, `und`, `do`) stays in lower case in the file name: `D3_Exigences-de-Securite.docx`, not `D3_Exigences-De-Securite.docx`. A file of the old spelling is replaced by the new one at the next render, also on a disk that ignores case, and is never reported as left behind.
+
 ## 1.2.2 (2026-11-23)
 
 ### The agents of the plugin in a slice session

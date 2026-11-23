@@ -9,8 +9,21 @@ const MAX_LENGTH = 60;
 const COPY = /^(.+?)\.([a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*)$/;
 
 /**
+ * The short words a title keeps in lower case after its first word: articles, prepositions and conjunctions of the
+ * languages Recade writes in (English, French, Spanish, Portuguese, Italian, German), and the elided `d` and `l`.
+ */
+const SMALL = new Set([
+  'a', 'an', 'the', 'and', 'or', 'nor', 'but', 'of', 'in', 'on', 'at', 'to', 'for', 'by', 'with', 'from', 'as', 'vs',
+  'de', 'du', 'des', 'la', 'le', 'les', 'l', 'd', 'et', 'ou', 'au', 'aux', 'en', 'pour', 'par', 'sur', 'un', 'une', 'avec', 'sans', 'dans',
+  'del', 'el', 'los', 'las', 'y', 'o', 'e', 'con', 'para', 'por', 'una', 'do', 'da', 'dos', 'das', 'os', 'em', 'no', 'na', 'um', 'uma', 'com',
+  'di', 'della', 'il', 'lo', 'gli', 'per',
+  'der', 'die', 'das', 'und', 'oder', 'von', 'zu', 'im', 'mit', 'fur',
+]);
+
+/**
  * A title as a file name part: accents dropped (`é` to `e`, `ß` to `ss`), every run of other characters a hyphen,
- * the first letter of each word upper case, the rest as written. At most 60 characters, cut at a hyphen. A title in
+ * the first letter of each word upper case, the rest as written. A short word after the first (`de`, `of`, `und`)
+ * stays in lower case when it is written so. At most 60 characters, cut at a hyphen. A title in
  * a script with no Latin letters gives an empty string.
  * @param {string} title
  */
@@ -19,7 +32,7 @@ export function slugTitle(title) {
     .normalize('NFKD')
     .replace(/\p{M}/gu, '')
     .replace(/[^\x00-\x7F]/g, (c) => LETTERS[c] ?? ' ');
-  const words = plain.split(/[^A-Za-z0-9]+/).filter(Boolean).map((w) => w[0].toUpperCase() + w.slice(1));
+  const words = plain.split(/[^A-Za-z0-9]+/).filter(Boolean).map((w, i) => (i > 0 && SMALL.has(w) ? w : w[0].toUpperCase() + w.slice(1)));
   let out = '';
   for (const word of words) {
     const next = out === '' ? word : `${out}-${word}`;

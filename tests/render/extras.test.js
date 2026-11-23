@@ -520,7 +520,7 @@ test('the registers take their title in the deliverable language: a French proje
   writeFileSync(state, readFileSync(state, 'utf8').replace('deliverables: [en]', 'deliverables: [fr]'));
   const { code, err } = await cli(root, ['decisions', 'reviews'], {}, t);
   assert.equal(code, 0, err);
-  assert.deepEqual(listDeliverables(root), ['DECISIONS_Registre-Des-Decisions.docx', 'DECISIONS_Registre-Des-Decisions.xlsx', 'REVIEWS_Notes-De-Revue.docx']);
+  assert.deepEqual(listDeliverables(root), ['DECISIONS_Registre-des-Decisions.docx', 'DECISIONS_Registre-des-Decisions.xlsx', 'REVIEWS_Notes-de-Revue.docx']);
 });
 
 test('extras: the old names are left as they were and named once; deliverables.pdf adds the PDF', { skip }, async (t) => {
