@@ -800,14 +800,14 @@ test('slices.md reads the registry, asks for prefixed touches, and Step 6 asks o
   for (const part of ['touch-prefix', 'touch-repo', 'touch-empty']) assert.ok(step4.includes(part), part);
   const last = stepSection('slices.md', 6);
   const at = (s) => last.indexOf(s);
-  for (const part of ['the workspace repository', 'Push the workspace to GitHub after each Recade commit?', '`Yes, push automatically`', '`No, I push myself (default)`', '--auto-push', 'recade workspace auto-push off',
+  for (const part of ['the workspace repository', 'Push the workspace to GitHub at the end of each turn?', '`Yes, push automatically`', '`No, I push myself (default)`', '--auto-push', 'recade workspace auto-push off',
     'only the default branch', 'one warning line', 'Create the GitHub repository for the code repository', "--repo '<name>'", 'visibility', '`<owner>/<project>-<name>`', 'never copied into a code repository', 'no issue is created in a code repository',
     'already has its first commit']) {
     assert.ok(last.includes(part), part);
   }
   assert.ok(at('--dry-run') < at('Create the private repository and the board now?'));
-  assert.ok(at('Create the private repository and the board now?') < at('Push the workspace to GitHub after each Recade commit?'));
-  assert.ok(at('Push the workspace to GitHub after each Recade commit?') < at('Create the GitHub repository for the code repository'));
+  assert.ok(at('Create the private repository and the board now?') < at('Push the workspace to GitHub at the end of each turn?'));
+  assert.ok(at('Push the workspace to GitHub at the end of each turn?') < at('Create the GitHub repository for the code repository'));
   assert.ok(at('Create the GitHub repository for the code repository') < at("Then run `recade github init --project"));
   assert.equal(last.includes('git -C \'<dir>\' add -A'), false);
   assert.equal(last.includes('chore: initial project documents'), false);

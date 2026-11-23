@@ -235,7 +235,8 @@ test('auto-push calls only the workspace repository: no code repository is pushe
     if (r === undefined) { t.skip(`${mode} did not run`); continue; }
     assert.equal(stateOf(r.dir).workspace?.auto_push, true, `${mode}: the owner said yes, and it is recorded`);
     const pushes = r.gh.network.filter((n) => n.sub === 'push');
-    assert.ok(pushes.length >= 2, `${mode}: the workspace was pushed after its steps (${pushes.length})`);
+    assert.ok(pushes.length >= 2, `${mode}: the workspace was pushed at the end of the turns (${pushes.length})`);
+    assert.ok(pushes.length <= PHASES[mode].length + 1, `${mode}: one push for each turn at most, none for each step (${pushes.length})`);
     for (const p of pushes) {
       assert.equal(p.cwd, r.dir, `${mode}: the push runs in the workspace`);
       assert.deepEqual(p.args.slice(-2), ['origin', 'main']);

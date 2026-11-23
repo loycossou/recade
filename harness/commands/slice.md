@@ -207,7 +207,7 @@ A `no-code` slice is one of two kinds. Its sheet tells which.
   - **A line that only a person or a third party can close** (a signature, a field test, an outside audit) stays open: say who closes it.
   - When a line stays open, list the open lines with what closes each, say that `/slice <S-nn>` resumes the slice, and stop: the status stays `todo`.
 
-**The end.** When the decision is closed, or every line of the Definition of Done is ticked, run `recade slices status --set '<S-nn>' done --project '<home>'`. This move commits and, when the owner turned auto-push on, pushes the workspace. Say in one line that the slice is done.
+**The end.** When the decision is closed, or every line of the Definition of Done is ticked, run `recade slices status --set '<S-nn>' done --project '<home>'`. This move commits; when the owner turned auto-push on, the workspace is pushed at the end of the turn. Say in one line that the slice is done.
 
 ## Limits
 

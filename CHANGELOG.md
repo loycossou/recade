@@ -2,6 +2,12 @@
 
 This file is curated by hand for each release. At tag time, `recade release-notes <from>..<to> --version <v> --write` produces the raw list from the conventional commits, and this section is then edited from it.
 
+## 1.5.0 (2026-11-23)
+
+### One push at the end of the turn, none after each step
+
+- No Recade command pushes the workspace any more: a gate, a closed decision, a slice `done`, `/board` and a retro only commit. With auto-push on, the workspace is pushed once, at the end of each turn of a session, by the Stop hook of the plugin (`recade workspace push`), with every commit of the turn. Before, several steps of one turn each made their own push. The code repositories are unchanged: the code of a slice leaves the machine once, when its pull request is opened, and the owner merges it. Install the harness again to get the new wording of `/slice` and `/board`.
+
 ## 1.4.1 (2026-11-23)
 
 ### The board and the slices with no code

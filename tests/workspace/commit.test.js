@@ -390,15 +390,19 @@ const gitSafe = (ws) => {
   must(git(ws, 'config', 'user.email', ['ci', 'example.invalid'].join('@')));
 };
 
-test('state pass in a workspace commits recade/state.yaml and, with auto-push on, pushes once', async () => {
+test('a step only commits, even with auto-push on: the one push is the end of the turn (recade workspace push)', async () => {
   const ws = await workspace({ workspace: { auto_push: true, auto_push_since: '2026-11-18' } });
   gitSafe(ws);
+  must(git(ws, 'remote', 'add', 'origin', tmp()));
   const rec = recorder();
   const t = makeIO(ws, { run: rec.exec });
   assert.equal(await run(['state', 'pass', 'G0'], t.io), 0);
-  assert.equal(subjects(ws).length, 2);
+  assert.equal(await run(['state', 'pass', 'G1'], makeIO(ws, { run: rec.exec }).io), 0);
+  assert.equal(subjects(ws).length, 3);
   assert.match(subjects(ws)[1], /^chore\(recade\): G0 passed$/);
-  assert.deepEqual(files(ws), ['recade/state.yaml']);
+  assert.deepEqual(rec.pushes, []);
+  const end = makeIO(ws, { run: rec.exec });
+  assert.equal(await run(['workspace', 'push'], end.io), 0);
   assert.equal(rec.pushes.length, 1);
   assert.deepEqual(rec.pushes[0].cmd, ['git', 'push', 'origin', 'main']);
   assert.equal(rec.pushes[0].cwd, ws);
@@ -414,22 +418,20 @@ test('state pass with auto-push off commits and makes no push call at all', asyn
   assert.deepEqual(rec.pushes, []);
 });
 
-test('a failing push never fails the command: exit 0, one warning line on stderr, stdout unchanged', async () => {
+test('a failing end-of-turn push never fails: exit 0, one warning line on stderr, nothing on stdout', async () => {
   const ws = await workspace({ workspace: { auto_push: true } });
   gitSafe(ws);
-  const ok1 = recorder();
-  const quiet = makeIO(ws, { run: ok1.exec });
-  assert.equal(await run(['state', 'pass', 'G0'], quiet.io), 0);
-  const ws2 = await workspace({ workspace: { auto_push: true } });
-  gitSafe(ws2);
+  must(git(ws, 'remote', 'add', 'origin', tmp()));
   const bad = recorder({ pushCode: 128 });
-  const t = makeIO(ws2, { run: bad.exec });
-  assert.equal(await run(['state', 'pass', 'G0'], t.io), 0);
+  assert.equal(await run(['state', 'pass', 'G0'], makeIO(ws, { run: bad.exec }).io), 0);
+  assert.deepEqual(bad.pushes, []);
+  const t = makeIO(ws, { run: bad.exec });
+  assert.equal(await run(['workspace', 'push'], t.io), 0);
   assert.equal(bad.pushes.length, 1);
   assert.equal(t.err.join('').trim().split('\n').length, 1);
   assert.match(t.err.join(''), /^recade: warning: workspace push failed: fatal: Authentication failed\n$/);
-  assert.equal(t.out.join(''), quiet.out.join(''));
-  assert.equal(subjects(ws2).length, 2);
+  assert.equal(t.out.join(''), '');
+  assert.equal(subjects(ws).length, 2);
 });
 
 test('a folder that is not a git workspace commits and pushes nothing', async () => {
@@ -496,7 +498,7 @@ test('Review Focus 2 at the CLI: two sessions move two slices to done at once, b
   assert.equal(must(git(ws, 'status', '--porcelain')).stdout, '');
 });
 
-test('slices status --set to a status other than done commits the move and does not push', async () => {
+test('slices status --set commits each move and pushes none, done included', async () => {
   const ws = await workspace({ workspace: { auto_push: true } });
   gitSafe(ws);
   write(ws, 'slices/S-01-one.md', STATUS_SHEET('S-01').replace('no-code', 'standard'));
@@ -516,7 +518,7 @@ test('slices status --set to a status other than done commits the move and does 
   }
   assert.deepEqual(rec.pushes, []);
   assert.equal(await run(['slices', 'status', '--set', 'S-01', 'done'], makeIO(ws, { run: rec.exec }).io), 0);
-  assert.equal(rec.pushes.length, 1);
+  assert.deepEqual(rec.pushes, []);
   assert.equal(must(git(ws, 'status', '--porcelain')).stdout, '');
 });
 
@@ -637,7 +639,7 @@ test('protect on a code repository still refuses when no CI job is found', async
 
 const INC_SHEET = (id, extra = '') => `---\ndoc_id: ${id}\ntitle: "Slice ${id}"\nrepos: [app]\nbranch: slice/${id.toLowerCase()}-x\nformat: small\nlane: standard\nimplementer: implementer\nincrement: INC-1\ndepends_on: []\nblocks: []\nexternal_prerequisite: none\nprovisionals_used: []\nsize: S\ntouches:\n  - "src/${id.toLowerCase()}/**"\n${extra}---\n\n# ${id}: Slice ${id}\n\n## Scope\n\n- LOAN-01 (the gist)\n\n## Definition of Done\n\n| # | Command (counts tests) | Expected | Done |\n|---|---|---|---|\n| 1 | \`make test\` (3 tests) | All green | [x] |\n\n## Work order\n\n1. Build it.\n`;
 
-test('retro commits retros/INC-n.md only, then pushes when auto-push is on', async () => {
+test('retro commits retros/INC-n.md only, and pushes nothing even with auto-push on', async () => {
   const ws = await workspace({ workspace: { auto_push: true } });
   gitSafe(ws);
   write(ws, 'slices/S-01-x.md', INC_SHEET('S-01'));
@@ -653,7 +655,7 @@ test('retro commits retros/INC-n.md only, then pushes when auto-push is on', asy
   assert.equal(subjects(ws).at(-1), 'docs(retros): INC-1 written');
   assert.deepEqual(files(ws), ['retros/INC-1.md']);
   assert.match(must(git(ws, 'status', '--porcelain')).stdout, /design\/unrelated\.md/);
-  assert.equal(rec.pushes.length, 1);
+  assert.deepEqual(rec.pushes, []);
 });
 
 test('board reconcile --apply commits the STATUS.md move; a dry run commits nothing', async () => {

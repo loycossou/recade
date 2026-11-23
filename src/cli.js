@@ -25,7 +25,7 @@ import { createProject } from './project/scaffold.js';
 import { SYNC_ADVICE } from './workspace/layout.js';
 import { REPO_NAME } from './project/touches.js';
 import { addRepo, listRepos, checkRepos, syncRepos, stripCredentials, VISIBILITIES } from './workspace/repos.js';
-import { commitWorkspace, checkWorkspace, pushPending, pushWorkspace, CommitError, defaultExec as commitExec } from './workspace/commit.js';
+import { commitWorkspace, checkWorkspace, pushPending, CommitError, defaultExec as commitExec } from './workspace/commit.js';
 import { initAdopt, preflight, writeOwnFile, AdoptError } from './project/adopt.js';
 import { scan as scanInventory, renderInventory, scanWorkspace, renderWorkspaceInventory } from './project/inventory.js';
 import { checkTeam } from './project/doctrine.js';
@@ -343,7 +343,7 @@ export const commands = {
         return { fail: { code: 2, text: `Cannot write ${root}/recade/state.yaml: ${oneLine(err)}` } };
       }
       return { next: computed };
-    }, { push: sub === 'pass' });
+    });
     if (step.exit !== undefined) return step.exit;
     if (step.value.fail !== undefined) {
       const { usage: text, code, text: line } = step.value.fail;
@@ -417,7 +417,7 @@ export const commands = {
         io.stderr.write('recade: this project is not a workspace under git, so there is nothing to commit here.\n');
         return 1;
       }
-      const step = await endStep(io, root, wanted.paths, wanted.message, () => ({}), { push: false, own: false });
+      const step = await endStep(io, root, wanted.paths, wanted.message, () => ({}), { own: false });
       if (step.exit !== undefined) return step.exit;
       io.stdout.write(step.committed === false ? 'Nothing to commit.\n' : `Committed ${wanted.paths.length} path${wanted.paths.length === 1 ? '' : 's'}: ${wanted.message}\n`);
       return 0;
@@ -456,7 +456,7 @@ export const commands = {
     try {
       const step = await endStep(io, found.dir, ['recade/state.yaml'], `chore(recade): auto-push ${rest[0]}`, () => {
         saveState(found.dir, withAutoPush(loadState(found.dir) ?? {}, rest[0] === 'on', io));
-      }, { push: false });
+      });
       if (step.exit !== undefined) return step.exit;
     } catch (err) {
       io.stderr.write(`${oneLine(err)}\n`);
@@ -499,7 +499,7 @@ export const commands = {
         const step = await endStep(io, found.dir, ['recade/state.yaml', 'slices'], `chore(recade): repository ${parsed.positional[0]} added`, () => addRepo(found.dir, parsed.positional[0], {
           ...(clone === undefined ? { new: true } : { clone }), role: parsed.values['--role'], visibility: parsed.values['--visibility'],
         }, { exec: (cmd, cmdArgs) => exec(cmd, cmdArgs, 120000), cwd: io.invokedFrom ?? io.cwd }), {
-          push: false, around: true, stage: (entry) => ['recade/state.yaml', ...entry.prefixed.map((c) => c.sheet)],
+          around: true, stage: (entry) => ['recade/state.yaml', ...entry.prefixed.map((c) => c.sheet)],
         });
         if (step.exit !== undefined) {
           // The clone was made but its record was put back: remove the folder too, so the same command can run again.
@@ -579,7 +579,7 @@ export const commands = {
         const v = parsed.values;
         const step = await endStep(io, root, ['intake/provisionals.md'], (id) => `docs(intake): ${id} opened`, () => openProvisional(root, {
           what: v['--what'], why: v['--why'], assumption: v['--assumption'], owner: v['--owner'], due: v['--due'],
-        }), { push: false });
+        }));
         if (step.exit !== undefined) return step.exit;
         io.stdout.write(`${step.value}\n`);
       } else if (sub === 'close') {
@@ -587,7 +587,7 @@ export const commands = {
         const id = parsed.positional[0];
         const step = await endStep(io, root, ['intake/provisionals.md'], `docs(intake): ${id} closed`, () => closeProvisional(root, id, {
           value: parsed.values['--value'], replacedIn: parsed.values['--replaced-in'] ?? '', date,
-        }), { push: false });
+        }));
         if (step.exit !== undefined) return step.exit;
         io.stdout.write(`${id} closed on ${date}.\n`);
       } else {
@@ -649,7 +649,7 @@ export const commands = {
         const step = await endStep(io, root, ['decisions'], (id) => `docs(decisions): ${id} opened`, () => newDecision(root, {
           document: v['--doc'], question: v['--question'], why: v['--why'], known: v['--known'], unknown: v['--unknown'],
           options, recommendation: v['--recommendation'], changeMind: v['--change-mind'], due: v['--due'],
-        }, { date }), { push: false, own: false, stage: (id) => [`decisions/${id}.md`] });
+        }, { date }), { own: false, stage: (id) => [`decisions/${id}.md`] });
         if (step.exit !== undefined) return step.exit;
         io.stdout.write(`${step.value}\n`);
       } else if (sub === 'close') {
@@ -722,7 +722,7 @@ export const commands = {
     }
     if (move !== null) {
       // Read, change, write and commit under the commit lock of the workspace: two sessions that move a status at once both
-      // land. Every move is committed (so the next one finds the file clean); only done is pushed.
+      // land. Every move is committed (so the next one finds the file clean); none is pushed here.
       // The first slice that becomes done records its day in the state, once: the state is then committed with STATUS.md.
       // An uncommitted change of the state that is not ours never blocks the move: the day is then left for a later move.
       const noteFirst = move.status === 'done' && firstSliceDue(root) && await firstSliceFree(io, root);
@@ -748,7 +748,7 @@ export const commands = {
           }
         }
         return { moved };
-      }, { push: (r) => r.moved?.to === 'done' });
+      });
       if (step.exit !== undefined) return step.exit;
       if (step.value.fail !== undefined) {
         io.stderr.write(`${step.value.message}\n`);
@@ -788,7 +788,7 @@ export const commands = {
         return { fail: 2, message: `Cannot write slices/${file}: ${oneLine(err)}` };
       }
       return { count: fresh.status.length };
-    }, { push: false });
+    });
     if (step.exit !== undefined) return step.exit;
     if (step.value.fail !== undefined) {
       io.stderr.write(`${step.value.message}\n`);
@@ -992,7 +992,7 @@ export const commands = {
           if (wip !== undefined) saveState(root, state);
           else if (repoDir === null) saveState(root, state);
           io.stdout.write(`harness.required_gates: ${(shown.required_gates ?? []).join(', ') || 'none'}${repoDir === null ? '' : ` (${REPO_SETTINGS})`}\nharness.threshold_files: ${(shown.threshold_files ?? []).join(', ') || 'none'}\nharness.wip_limit: ${state.harness?.wip_limit ?? `not set (default ${DEFAULT_MAX})`}\n`);
-        }, { push: false });
+        });
         if (step.exit !== undefined) return step.exit;
       } catch (err) {
         io.stderr.write(`${oneLine(err)}\n`);
@@ -1674,7 +1674,7 @@ export const commands = {
         const done = await initGithub(root, { owner, exec, dryRun, repos });
         if (autoPush && done.repo !== null && loadState(root)?.kind === 'workspace') saveState(root, withAutoPush(loadState(root), true, io));
         return done;
-      }, { push: false, around: true });
+      }, { around: true });
       if (step.exit !== undefined) return step.exit;
       result = step.value;
     }
@@ -1980,21 +1980,20 @@ async function decisionTeam(args, io, usage) {
     if (sub === 'add') {
       const v = parsed.values;
       const step = await endStep(io, root, ['decisions/TEAM.md'], (id) => `docs(decisions): ${id} decided by the team`,
-        () => addTeamDecision(root, { document: v['--doc'], question: v['--question'], decided: v['--decided'], why: v['--why'] }, { date }),
-        { push: false });
+        () => addTeamDecision(root, { document: v['--doc'], question: v['--question'], decided: v['--decided'], why: v['--why'] }, { date }));
       if (step.exit !== undefined) return step.exit;
       io.stdout.write(`${step.value}\n`);
     } else if (sub === 'challenge' && parsed.flags.has('--reopen')) {
       const id = parsed.positional[0];
       const step = await endStep(io, root, ['decisions'], (r) => `docs(decisions): ${id} challenged, ${r.dec} reopens ${r.supersedes}`,
-        () => reopenTeamDecision(root, id, { date }), { push: false, own: false, stage: (r) => ['decisions/TEAM.md', `decisions/${r.dec}.md`] });
+        () => reopenTeamDecision(root, id, { date }), { own: false, stage: (r) => ['decisions/TEAM.md', `decisions/${r.dec}.md`] });
       if (step.exit !== undefined) return step.exit;
       io.stdout.write(`${id} challenged: ${step.value.dec} reopens ${step.value.supersedes} for the owner.\n`);
     } else if (sub === 'challenge') {
       const id = parsed.positional[0];
       const dec = parsed.values['--dec'];
       const step = await endStep(io, root, ['decisions/TEAM.md'], `docs(decisions): ${id} challenged`,
-        () => challengeTeamDecision(root, id, { dec, date }), { push: false });
+        () => challengeTeamDecision(root, id, { dec, date }));
       if (step.exit !== undefined) return step.exit;
       io.stdout.write(`${id} challenged: ${dec} replaces it.\n`);
     } else {
@@ -2562,8 +2561,8 @@ function parseDodTick(rest) {
 
 /**
  * `recade slices dod <S-nn> --tick <n>`: tick lines of the Definition of Done in the sheet of the workspace. The edit and its
- * commit (`docs(slices): tick DoD row n of S-nn`) run under the commit lock of the workspace, and nothing is pushed: a tick is
- * not an end of phase. The sheet must have no change of its own that the step did not make.
+ * commit (`docs(slices): tick DoD row n of S-nn`) run under the commit lock of the workspace, and nothing is pushed: the Stop hook pushes at the end
+ * of the turn. The sheet must have no change of its own that the step did not make.
  */
 /**
  * `recade slices merge <S-nn> [--dry-run]`: the owner's merge of a slice on the local forge. The dry run prints the git
@@ -2647,7 +2646,7 @@ async function slicesDod(rest, io) {
       }
     }
     return { changed };
-  }, { push: false });
+  });
   if (step.exit !== undefined) return step.exit;
   if (step.value.fail !== undefined) {
     io.stderr.write(`${step.value.message}\n`);
@@ -2747,7 +2746,7 @@ async function adoptPhase(args, io) {
       owner = loaded.config.github_owner;
     }
     // The reading and the gh calls come first, then the lock for the commit of the state it recorded (the owner, the board, the links).
-    const step = await endStep(io, root, ['recade/state.yaml'], 'chore(recade): adopt board recorded', () => adoptBoard(root, { exec, repoName: parsed.values['--repo'], project, create: parsed.flags.has('--create'), accept, owner }), { push: false, around: true });
+    const step = await endStep(io, root, ['recade/state.yaml'], 'chore(recade): adopt board recorded', () => adoptBoard(root, { exec, repoName: parsed.values['--repo'], project, create: parsed.flags.has('--create'), accept, owner }), { around: true });
     if (step.exit !== undefined) return step.exit;
     const r = step.value;
     if (json) io.stdout.write(`${JSON.stringify(r, null, 2)}\n`);
@@ -3018,12 +3017,12 @@ function gitWorkspace(root) {
 
 /**
  * End of a step that changes workspace files. In a workspace under git, `mutate` runs under the commit lock, only
- * `paths` are committed, and the workspace is pushed when the owner turned auto-push on; a failed push is one warning
- * line on stderr and changes no exit code. Elsewhere `mutate` just runs. Returns `{value}`, or `{exit}` when the commit
+ * `paths` are committed, and nothing is pushed: the commits leave the machine once, at the end of the turn, through the
+ * Stop hook of the plugin (`recade workspace push`). Elsewhere `mutate` just runs. Returns `{value}`, or `{exit}` when the commit
  * step refuses (staged changes elsewhere, a path edited by someone else, wrong branch, lock held or stale), before
- * `mutate` ran. `push: false` commits without the automatic push (steps that are not an end of phase).
+ * `mutate` ran.
  */
-async function endStep(io, root, paths, message, mutate, { push = true, around = false, ...options } = {}) {
+async function endStep(io, root, paths, message, mutate, { around = false, ...options } = {}) {
   const ws = gitWorkspace(root);
   if (ws === null) return { value: await mutate() };
   const exec = io.run ?? commitExec;
@@ -3056,10 +3055,6 @@ async function endStep(io, root, paths, message, mutate, { push = true, around =
     if (!(err instanceof CommitError)) throw err;
     io.stderr.write(`${oneLine(err)}\n`);
     return { exit: err.exit, ...('after' in err ? { after: err.after } : {}) };
-  }
-  if (done.committed && (typeof push === 'function' ? push(done.value) : push)) {
-    const pushed = await pushWorkspace(ws, { exec });
-    if (pushed.warning !== undefined) io.stderr.write(`recade: warning: ${pushed.warning}\n`);
   }
   return { value: done.value, committed: done.committed };
 }

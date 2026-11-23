@@ -749,6 +749,8 @@ export async function runE2E({ mode, tmp, exec = defaultExec, example = EXAMPLE,
       phaseStart = Date.now();
       touched.clear();
       const out = await play[phase]();
+      // The end of the session's turn: the Stop hook of the plugin pushes the commits of the phase, in one push.
+      await cli(['workspace', 'push']);
       const gates = Array.isArray(out) ? out : out.gates;
       steps.push({ phase, gate: gates.at(-1), gates, files: [...touched].sort(), ms: Date.now() - phaseStart, ...(Array.isArray(out) ? {} : { verify: out.verify }) });
       if (phase === stopAfter) break;
