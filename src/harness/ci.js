@@ -33,10 +33,10 @@ const ROWS = {
 
 /** Runtime name to its setup action and its Dependabot ecosystem. */
 const RUNTIMES = {
-  node: { uses: 'actions/setup-node@v4', input: 'node-version', ecosystem: 'npm' },
-  python: { uses: 'actions/setup-python@v5', input: 'python-version', ecosystem: 'pip' },
-  go: { uses: 'actions/setup-go@v5', input: 'go-version', ecosystem: 'gomod' },
-  java: { uses: 'actions/setup-java@v4', input: 'java-version', ecosystem: 'maven', extra: { distribution: 'temurin' } },
+  node: { uses: 'actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020', tag: 'v4.4.0', input: 'node-version', ecosystem: 'npm' },
+  python: { uses: 'actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065', tag: 'v5.6.0', input: 'python-version', ecosystem: 'pip' },
+  go: { uses: 'actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff', tag: 'v5.6.0', input: 'go-version', ecosystem: 'gomod' },
+  java: { uses: 'actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3', tag: 'v4.9.1', input: 'java-version', ecosystem: 'maven', extra: { distribution: 'temurin' } },
 };
 
 /** Ecosystems an explicit `Dependency ecosystem` row may name (the Dependabot package-ecosystem values). */
@@ -111,7 +111,7 @@ function setupLines(runtime, stackName) {
       `    echo "The row Runtime of the harness technical sheet is not filled. Fill it in ${stackName}, then install the harness again." >&2 && exit 1`,
     ];
   }
-  const lines = [`- uses: ${runtime.uses} # major tag`, '  with:', `    ${runtime.input}: "${runtime.version}"`];
+  const lines = [`- uses: ${runtime.uses} # ${runtime.tag}`, '  with:', `    ${runtime.input}: "${runtime.version}"`];
   for (const [k, v] of Object.entries(runtime.extra ?? {})) lines.push(`    ${k}: ${v}`);
   return lines;
 }

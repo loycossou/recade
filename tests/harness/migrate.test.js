@@ -17,7 +17,7 @@ const OLD_WS_COMMANDS = ['status', 'board', 'parallel', 'merge-order', 'retro', 
 
 /**
  * A workspace of the old layout: the project commands only at the root, every agent, the slice commands and the protocol
- * in each code repository, the slice worktrees under repos/<repo>/.claude/worktrees/, and no worktrees/ in .gitignore.
+ * in each code repository, the slice worktrees under repos/<repo>/.claude/worktrees/, and worktrees/ not kept out of git.
  * The team changed two files of api; one file of web is known by the install record only.
  */
 async function oldLayout() {
@@ -27,6 +27,8 @@ async function oldLayout() {
   for (const f of md(join(ws.dir, '.claude', 'commands'))) if (!OLD_WS_COMMANDS.includes(f.replace(/\.md$/, ''))) rmSync(join(ws.dir, '.claude', 'commands', f));
   rmSync(join(ws.dir, '.claude', 'agents', 'implementer.md'));
   writeFileSync(join(ws.dir, '.gitignore'), readFileSync(join(ws.dir, '.gitignore'), 'utf8').replace('worktrees/\n', ''));
+  const exclude = join(ws.dir, '.git', 'info', 'exclude');
+  writeFileSync(exclude, readFileSync(exclude, 'utf8').replace('worktrees/\n', ''));
   for (const name of ['api', 'web']) {
     const repo = ws.repo(name);
     install(repo, { pluginRoot: plugin, target: 'code', workspace: ws.dir, ref: REF });
@@ -84,10 +86,11 @@ test('migrate moves the clean worktrees, installs the root, removes the copies t
   const web = ws.repo('web');
   const r = migrate(ws.dir, { pluginRoot: plugin, ref: REF });
   assert.deepEqual(r.errors, []);
-  // The workspace root holds every command and every agent, and ignores worktrees/.
+  // The workspace root holds every command and every agent, and keeps worktrees/ out of git by its exclude file.
   assert.deepEqual(md(join(ws.dir, '.claude', 'commands')), md(join(plugin, 'harness', 'commands')));
   assert.deepEqual(md(join(ws.dir, '.claude', 'agents')), md(join(plugin, 'harness', 'agents')));
-  assert.ok(readFileSync(join(ws.dir, '.gitignore'), 'utf8').split('\n').includes('worktrees/'));
+  assert.ok(readFileSync(join(ws.dir, '.git', 'info', 'exclude'), 'utf8').split('\n').includes('worktrees/'));
+  assert.equal(readFileSync(join(ws.dir, '.gitignore'), 'utf8').split('\n').includes('worktrees/'), false);
   // The clean worktree moved, on its branch, and the workspace does not see it.
   const moved = join(ws.dir, 'worktrees', 'api', 'S-01');
   assert.equal(existsSync(apiTree), false);

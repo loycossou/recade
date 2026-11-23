@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { parseDocument } from 'yaml';
 import { InstallError, install } from '../../src/harness/install.js';
@@ -38,6 +39,21 @@ test('TARGETS: the workspace gets every command and every agent, a code reposito
   for (const p of TARGETS.code.pointers) assert.ok(existsSync(join(plugin, 'harness', 'pointer', `${p}.md`)), p);
 });
 
+test('a workspace install moves repos/ and worktrees/ of an older .gitignore to .git/info/exclude, and git still ignores them', async () => {
+  const ws = await makeWorkspace();
+  writeFileSync(join(ws.dir, '.gitignore'), 'repos/\nworktrees/\nartifacts/\n');
+  writeFileSync(join(ws.dir, '.git', 'info', 'exclude'), '# git ls-files --others --exclude-from=.git/info/exclude\n');
+  const r = installWs(ws);
+  assert.deepEqual(read(ws.dir, '.gitignore').split('\n').filter((l) => ['repos/', 'worktrees/'].includes(l)), []);
+  assert.ok(read(ws.dir, '.gitignore').split('\n').includes('artifacts/'), 'the other lines stay');
+  assert.match(read(ws.dir, '.git/info/exclude'), /^# git ls-files.*\nrepos\/\nworktrees\/\n$/, 'lines are only added');
+  assert.match(r.warnings.join('\n'), /Commit \.gitignore/);
+  mkdirSync(join(ws.dir, 'worktrees', 'api', 'S-01'), { recursive: true });
+  writeFileSync(join(ws.dir, 'worktrees', 'api', 'S-01', 'build.gradle.kts'), 'x\n');
+  assert.equal(git(ws.dir, 'status', '--porcelain', '--', 'worktrees', 'repos').stdout, '', 'git still ignores the checkouts');
+  assert.equal(git(ws.dir, 'check-ignore', 'worktrees/api/S-01/build.gradle.kts').stdout.trim(), 'worktrees/api/S-01/build.gradle.kts');
+});
+
 test('a workspace install writes every command, every agent, the guard, the hooks and workspace.yml, and ignores worktrees/', async () => {
   const ws = await makeWorkspace();
   const r = installWs(ws);
@@ -57,7 +73,13 @@ test('a workspace install writes every command, every agent, the guard, the hook
   assert.equal(git(ws.dir, 'config', '--get', 'core.hooksPath').stdout.trim(), '.githooks');
   assert.equal(r.written.every((w) => w.status === 'created'), true);
   const ignore = read(ws.dir, '.gitignore');
-  for (const line of ['repos/', 'worktrees/', 'artifacts/', 'tmp/', '.recade/', '.claude/settings.local.json']) assert.ok(ignore.split('\n').includes(line), line);
+  for (const line of ['artifacts/', 'tmp/', '.recade/', '.claude/settings.local.json']) assert.ok(ignore.split('\n').includes(line), line);
+  // The code checkouts are kept out by .git/info/exclude, which only git reads: a tool run in a checkout does not skip it.
+  const exclude = read(ws.dir, '.git/info/exclude').split('\n');
+  for (const line of ['repos/', 'worktrees/']) {
+    assert.ok(exclude.includes(line), line);
+    assert.equal(ignore.split('\n').includes(line), false, `${line} is not in .gitignore`);
+  }
   assert.equal(installWs(ws).written.every((w) => w.status === 'unchanged'), true, 'a second install changes nothing');
   // The install record holds the hash of each file it wrote.
   const record = JSON.parse(read(ws.dir, '.recade/installed.json'));
@@ -450,4 +472,26 @@ test('the CI workflows fetch the Recade tools with the deploy key when one is se
       assert.doesNotMatch(step, /accept-new|ssh-keyscan/, name);
     }
   }
+});
+
+test('the pre-commit hook passes each staged path whole to the style check, a space included, and never sets IFS', () => {
+  for (const name of ['pre-commit', 'pre-commit-workspace']) {
+    assert.equal(/^\s*IFS=/m.test(readFileSync(new URL(`../../harness/githooks/${name}`, import.meta.url), 'utf8')), false, `${name}: IFS is never assigned`);
+  }
+  const root = mkdtempSync(join(tmpdir(), 'recade-hook-'));
+  const fake = join(root, 'plugin');
+  mkdirSync(join(fake, 'bin'), { recursive: true });
+  // The fake CLI records its arguments, then fails the style check.
+  writeFileSync(join(fake, 'bin', 'recade.js'), `require('fs').writeFileSync(${JSON.stringify(join(root, 'args.json'))}, JSON.stringify(process.argv.slice(2))); process.exit(process.argv[2] === 'lint-style' ? 1 : 0);\n`);
+  const repo = join(root, 'repo');
+  mkdirSync(repo);
+  git(repo, 'init', '-q', '-b', 'main');
+  writeFileSync(join(repo, 'a b.md'), 'x\n');
+  writeFileSync(join(repo, 'c.md'), 'y\n');
+  git(repo, 'add', '.');
+  const r = spawnSync('sh', [new URL('../../harness/githooks/pre-commit', import.meta.url).pathname], { cwd: repo, encoding: 'utf8', env: { ...process.env, RECADE_PLUGIN_ROOT: fake } });
+  assert.equal(r.status, 1, r.stderr);
+  assert.match(r.stderr, /style errors in the staged files/);
+  assert.deepEqual(JSON.parse(readFileSync(join(root, 'args.json'), 'utf8')), ['lint-style', 'a b.md', 'c.md']);
+  rmSync(root, { recursive: true, force: true });
 });

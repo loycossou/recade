@@ -5,7 +5,7 @@ import { loadState, saveState } from '../state.js';
 import { frontMatterLength } from '../frontmatter-lines.js';
 import { checkSlices } from '../project/slices.js';
 import { LAUNCHER } from '../harness/install.js';
-import { checkLink, linkRepo } from './layout.js';
+import { checkLink, keepLocal, linkRepo } from './layout.js';
 import { LEGACY_DIR, WORKTREES_DIR } from './worktrees.js';
 
 /** A repository name: lowercase words joined by single hyphens. It is also the folder name under `repos/`. */
@@ -89,6 +89,9 @@ export async function addRepo(ws, name, spec, { exec, cwd = process.cwd() }) {
     throw new Error(`"${name}" is not a repository name. Use lowercase words joined by hyphens, for example api or web-app.`);
   }
   if (listRepos(ws).some((r) => r.name === name)) throw new Error(`The repository ${name} is already in the registry.`);
+  try {
+    keepLocal(ws);
+  } catch { /* not a git workspace yet */ }
   const cloning = typeof spec?.clone === 'string';
   if (cloning === (spec?.new === true)) throw new Error('Give exactly one of --new or --clone <url>.');
   if (cloning && (spec.clone.trim() === '' || /[\0\r\n]/.test(spec.clone))) throw new Error('The clone source is empty or is not one line.');
@@ -261,6 +264,10 @@ export async function syncRepos(ws, { exec, pluginRoot }) {
     writeFileSync(join(ws, '.recade', 'plugin-root'), `${pluginRoot}\n`);
   }
   await hooksOn(ws, 'workspace');
+  // The code checkouts stay out of the git of the workspace on this machine too (a fresh clone has no exclude file).
+  try {
+    keepLocal(ws);
+  } catch { /* the guard of each step says it again */ }
   for (const entry of listRepos(ws)) {
     const repo = String(entry.name);
     if (!usableName(repo)) {

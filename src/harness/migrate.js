@@ -4,7 +4,8 @@ import { ownFile, writeOwnFile } from '../project/adopt.js';
 import { REPO_NAME, WORKSPACE_PREFIX } from '../project/touches.js';
 import { SECOND_OPINION_MODELS } from '../models.js';
 import { loadState } from '../state.js';
-import { WORKTREES_DIR, WORKTREES_IGNORE, ignoresWorktrees, legacyWorktrees, listWorktrees, worktreePath, worktreeRel } from '../workspace/worktrees.js';
+import { keptOut } from '../workspace/layout.js';
+import { WORKTREES_DIR, WORKTREES_IGNORE, legacyWorktrees, listWorktrees, worktreePath, worktreeRel } from '../workspace/worktrees.js';
 import { INSTALL_RECORD, LAUNCHER, SPEC_LINE, genericOf, install, isAdopt, legacyCopies, matchesInstallRecord, pluginVersion, readInstallRecord } from './install.js';
 import { fingerprint, knownTexts } from './history.js';
 import { withModelLine } from './models.js';
@@ -173,9 +174,8 @@ export function migrate(ws, { pluginRoot, dryRun = false, exec = defaultExec, re
   const names = (Array.isArray(state.repos) ? state.repos : []).map((e) => e?.name).filter((n) => typeof n === 'string' && REPO_NAME.test(n) && n !== WORKSPACE_PREFIX);
   const adopt = isAdopt(home);
 
-  // 1. The harness at the root of the workspace, with worktrees/ in its .gitignore.
-  const ignorePath = join(home, '.gitignore');
-  const ignored = ignoresWorktrees(existsSync(ignorePath) ? readFileSync(ignorePath, 'utf8') : '');
+  // 1. The harness at the root of the workspace, with worktrees/ kept out of git (its .git/info/exclude).
+  const ignored = keptOut(home, WORKTREES_IGNORE);
   if (dryRun) {
     out.ignore = ignored ? 'present' : 'would add';
     const missing = ['commands', 'agents'].flatMap((kind) => readdirSync(join(pluginRoot, 'harness', kind)).filter((f) => f.endsWith('.md')).map((f) => `.claude/${kind}/${f}`)).filter((f) => !existsSync(join(home, f)));
@@ -297,7 +297,7 @@ export function formatMigrate(r) {
       lines.push(`Harness at the root of the workspace: ${count('created')} created, ${count('updated')} updated, ${count('unchanged')} unchanged, ${count('kept')} kept.`);
     }
   }
-  lines.push(`.gitignore of the workspace: ${r.ignore === 'present' ? `${WORKTREES_IGNORE} already there` : `${WORKTREES_IGNORE} ${r.ignore === 'added' ? 'added' : 'would be added'}`}.`);
+  lines.push(`Kept out of the git of the workspace (.git/info/exclude): ${r.ignore === 'present' ? `${WORKTREES_IGNORE} already there` : `${WORKTREES_IGNORE} ${r.ignore === 'added' ? 'added' : 'would be added'}`}.`);
   for (const m of r.moves) {
     lines.push(m.status === 'refused'
       ? `refused     ${m.repo} ${m.slice}: ${m.from} stays where it is: ${m.reason}.`

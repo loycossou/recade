@@ -33,15 +33,9 @@ fi
 
 staged=$(git diff --cached --name-only --diff-filter=ACMR | grep -E '\.(md|js|json|yml|yaml|txt)$' || true)
 if [ -n "$staged" ]; then
-  # One argument per line, so a path with a space stays whole.
   status=0
-  old_ifs=$IFS
-  IFS='
-'
-  # shellcheck disable=SC2086
-  set -- $staged
-  IFS=$old_ifs
-  node "$RECADE_PLUGIN_ROOT/bin/recade.js" lint-style "$@" || status=$?
+  # One argument per line, read by node itself, so a path with a space stays whole.
+  printf '%s\n' "$staged" | node -e 'const a = require("fs").readFileSync(0, "utf8").split("\n").filter(Boolean); const r = require("child_process").spawnSync(process.execPath, [process.argv[1], "lint-style", ...a], { stdio: "inherit" }); process.exit(r.status ?? 1);' "$RECADE_PLUGIN_ROOT/bin/recade.js" || status=$?
   if [ "$status" -ne 0 ]; then
     echo "recade pre-commit: style errors in the staged files. Fix them, then commit again." >&2
     exit 1

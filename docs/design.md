@@ -555,7 +555,7 @@ Every Recade project lives in one folder, `<slug>-workspace`, which is a **priva
   .recade/                   ignored, local to this machine
 ```
 
-The `.gitignore` of the workspace holds `repos/`, `worktrees/`, `artifacts/`, `tmp/` and `.recade/`. The rendered documents in `docs/deliverables/` are committed. A worktree, a build or a draft never goes outside this folder. A code repository name is lower-case words joined by hyphens (`api`, `web-app`), and is never `workspace`.
+The `.gitignore` of the workspace holds `artifacts/`, `tmp/` and `.recade/`. The code checkouts, `repos/` and `worktrees/`, are kept out of the git of the workspace by its `.git/info/exclude`, which only git reads: in the `.gitignore`, a tool run inside a checkout that honours the ignore files of the folders above it (a dependency scanner, a search) would skip the whole checkout. Each command that makes a checkout (`recade repo sync`, `recade repo add`, `recade slices open`, the harness install) writes the two lines when they are missing, and the harness install moves them out of an older `.gitignore`. The rendered documents in `docs/deliverables/` are committed. A worktree, a build or a draft never goes outside this folder. A code repository name is lower-case words joined by hyphens (`api`, `web-app`), and is never `workspace`.
 
 ### 10.2 The registry and the link
 
@@ -577,7 +577,7 @@ Every session starts at the root of the workspace, and the owner types every com
 
 | Target | Command | Gets | Does not get |
 |---|---|---|---|
-| Workspace | `recade harness install --target workspace` | Every command and every agent, the protocol, the guard, git hooks (style check and ID index), `.github/workflows/workspace.yml` (style, ID index, slice check), `worktrees/` in `.gitignore` | Gates, the CI of a code repository |
+| Workspace | `recade harness install --target workspace` | Every command and every agent, the protocol, the guard, git hooks (style check and ID index), `.github/workflows/workspace.yml` (style, ID index, slice check), `repos/` and `worktrees/` in `.git/info/exclude` | Gates, the CI of a code repository |
 | Code repository | `recade harness install --target code --repo <name>` | What belongs to the code: the git hooks with the gate check and stamps, the CI, the conflict check, the optional second opinion, Dependabot, the settings and the guard (so a session opened by hand there stays held), the pointer command `/slice` that sends that session to the workspace, the link | Any agent, any other command, the protocol, any document of Recade |
 
 The CI of a code repository starts with the job `Code present`: while the repository holds only the harness files (`.claude/`, `.githooks/`, `.github/`, `CLAUDE.md`, `AGENTS.md`, the README, the licence, `.gitignore`, `.gitattributes`, `.editorconfig`, `tests/quarantine.json`), the quality, end to end, security and quarantine jobs are skipped and the run summary says so. GitHub counts a skipped job as passing, so a required check does not hold a new repository red until its first slice. The style job always runs.
@@ -644,7 +644,7 @@ A doctrine file `team/<role>.md` has a header (role, `inspired_by`, model, effor
 
 ## A private Recade
 
-The CI workflows fetch the Recade tools from `loycossou/recade` at the ref pinned at install. While that repository is private, a project on another account cannot read it, and the step `Fetch the Recade tools` fails with `could not read Username`. Give each repository of the project a read-only deploy key:
+Every action the workflow templates call is pinned to a full commit, with its release in a comment (`actions/checkout@<sha> # v4.4.0`): a tag can be moved, a commit cannot. Dependabot moves the commit and the comment together, and waits 7 days before a new version of an action or a dependency (`cooldown`). The CI workflows fetch the Recade tools from `loycossou/recade` at the ref pinned at install. While that repository is private, a project on another account cannot read it, and the step `Fetch the Recade tools` fails with `could not read Username`. Give each repository of the project a read-only deploy key:
 
 1. `ssh-keygen -t ed25519 -N '' -C recade-ci -f recade-ci` makes the pair.
 2. `gh repo deploy-key add recade-ci.pub --repo loycossou/recade --title '<project> CI'` adds the public half, read-only.

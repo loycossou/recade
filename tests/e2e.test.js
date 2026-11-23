@@ -105,7 +105,7 @@ for (const mode of MODES) {
   });
 }
 
-test('every mode ends with a clean workspace of exactly the planned tree, and its .gitignore keeps the code repositories out', (t) => {
+test('every mode ends with a clean workspace of exactly the planned tree, and git keeps the code repositories out', (t) => {
   const TRACKED = ['.claude', '.githooks', '.github', '.gitignore', 'BIBLE.md', 'CLAUDE.md', 'INDEX.md', 'decisions', 'design', 'docs', 'intake', 'recade', 'retros', 'slices', 'team'];
   for (const mode of MODES) {
     const r = results[mode];
@@ -115,7 +115,13 @@ test('every mode ends with a clean workspace of exactly the planned tree, and it
     assert.deepEqual(top.filter((x) => !TRACKED.includes(x)), [], `${mode}: only the planned folders and files are tracked`);
     for (const x of ['recade', 'slices', 'docs', '.claude', '.githooks', 'BIBLE.md', 'CLAUDE.md']) assert.ok(top.includes(x), `${mode}: ${x} is tracked`);
     const lines = read(r.dir, '.gitignore').split('\n').map((l) => l.trim());
-    for (const ignored of ['repos/', 'worktrees/', 'artifacts/', 'tmp/', '.recade/']) assert.ok(lines.includes(ignored), `${mode}: .gitignore holds ${ignored}`);
+    for (const ignored of ['artifacts/', 'tmp/', '.recade/']) assert.ok(lines.includes(ignored), `${mode}: .gitignore holds ${ignored}`);
+    // The code checkouts are kept out by .git/info/exclude, so a tool run inside one does not take it for ignored.
+    const exclude = read(r.dir, '.git/info/exclude').split('\n').map((l) => l.trim());
+    for (const local of ['repos/', 'worktrees/']) {
+      assert.ok(exclude.includes(local), `${mode}: .git/info/exclude holds ${local}`);
+      assert.equal(lines.includes(local), false, `${mode}: .gitignore does not hold ${local}`);
+    }
     for (const name of r.repos) {
       assert.ok(existsSync(join(r.dir, 'repos', name, '.git')), `${mode}: ${name} is a repository of its own`);
       assert.equal(spawnSync('git', ['-C', r.dir, 'check-ignore', '-q', `repos/${name}/package.json`]).status, 0, `${mode}: repos/${name} is ignored by the workspace`);

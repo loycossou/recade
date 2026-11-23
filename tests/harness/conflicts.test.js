@@ -154,7 +154,7 @@ test('conflicts.yml: read-only permissions, lists the PR branches with gh, runs 
   assert.equal(wf.jobs.conflicts.if, 'github.event.pull_request.head.repo.full_name == github.repository');
   assert.equal(steps[0].with['fetch-depth'], 0);
   for (const s of steps.filter((x) => x.uses?.startsWith('actions/checkout'))) assert.equal(s.with['persist-credentials'], false);
-  assert.equal(steps.every((s) => s.uses === undefined || /@v\d+$/.test(s.uses)), true, 'actions are pinned to a major version');
+  assert.equal(steps.every((s) => s.uses === undefined || /@[0-9a-f]{40}$/.test(s.uses)), true, 'actions are pinned to a commit');
   const script = steps.map((s) => s.run ?? '').join('\n');
   assert.match(script, /gh pr list --state open .*--json headRefName/);
   assert.match(script, /git fetch --no-tags origin "\+refs\/heads\/\$\{name\}:refs\/remotes\/origin\/\$\{name\}"/);

@@ -8,8 +8,85 @@ export const WORKSPACE_TREE = Object.freeze([
   'recade', 'intake/attachments', 'team', 'design', 'decisions', 'retros', 'docs/figures', 'docs/deliverables', 'docs/source', 'slices',
 ]);
 
-/** What the workspace `.gitignore` holds: the code repositories, the slice worktrees, the heavy outputs, the drafts and the per-machine state. */
-export const IGNORED = Object.freeze(['repos/', 'worktrees/', 'artifacts/', 'tmp/', '.recade/']);
+/** What the workspace `.gitignore` holds: the heavy outputs, the drafts and the per-machine state. */
+export const IGNORED = Object.freeze(['artifacts/', 'tmp/', '.recade/']);
+
+/**
+ * The folders that hold code checkouts: the code repositories and the slice worktrees. They are kept out of the git of
+ * the workspace by `.git/info/exclude`, which only git reads, and not by `.gitignore`: a tool run inside a checkout
+ * that honours the `.gitignore` files of the folders above it (a dependency scanner, a search) would otherwise skip
+ * the whole checkout as ignored.
+ */
+export const LOCAL_ONLY = Object.freeze(['repos/', 'worktrees/']);
+
+/** The lines that mean the same as `entry` (`repos/`) in an ignore file. */
+const sameLines = (entry) => {
+  const bare = entry.replace(/\/$/, '');
+  return [entry, `/${entry}`, bare, `/${bare}`];
+};
+
+/** The `info/exclude` file of the git of `ws`, or null when `ws` has no `.git`. A `.git` file (a worktree) is followed. */
+export function excludeFile(ws) {
+  const dotGit = join(ws, '.git');
+  let st;
+  try {
+    st = statSync(dotGit);
+  } catch {
+    return null;
+  }
+  if (st.isDirectory()) return join(dotGit, 'info', 'exclude');
+  const m = /^gitdir:\s*(.+)$/m.exec(readFileSync(dotGit, 'utf8'));
+  if (m === null) return null;
+  const gitdir = resolve(ws, m[1].trim());
+  // A linked worktree shares the info/exclude of its main repository.
+  let common = gitdir;
+  try {
+    common = resolve(gitdir, readFileSync(join(gitdir, 'commondir'), 'utf8').trim());
+  } catch { /* not a linked worktree */ }
+  return join(common, 'info', 'exclude');
+}
+
+/** Does `text` (an ignore file) hold `entry`, in any of its forms? */
+export const holds = (text, entry) => String(text ?? '').split(/\r?\n/).map((l) => l.trim()).some((l) => sameLines(entry).includes(l));
+
+/**
+ * Keep the code checkouts (`LOCAL_ONLY`) out of the git of the workspace through `.git/info/exclude`. Lines are only
+ * added to the exclude file. With `drop`, their lines also leave the `.gitignore` of the workspace (older workspaces
+ * had them there): only the harness install does it, since that file is tracked and the install is committed.
+ * Returns what it did, or null when `ws` is not a git checkout.
+ * @param {string} ws
+ * @param {{drop?: boolean}} [options]
+ * @returns {{excluded: string[], dropped: string[]} | null}
+ */
+export function keepLocal(ws, { drop = false } = {}) {
+  const file = excludeFile(ws);
+  if (file === null) return null;
+  const before = existsSync(file) ? readFileSync(file, 'utf8') : '';
+  const excluded = LOCAL_ONLY.filter((e) => !holds(before, e));
+  if (excluded.length > 0) {
+    mkdirSync(dirname(file), { recursive: true });
+    appendFileSync(file, `${before === '' || before.endsWith('\n') ? '' : '\n'}${excluded.join('\n')}\n`);
+  }
+  const dropped = [];
+  const ignorePath = join(ws, '.gitignore');
+  if (drop && existsSync(ignorePath)) {
+    const text = readFileSync(ignorePath, 'utf8');
+    const kept = text.split('\n').filter((l) => {
+      const hit = LOCAL_ONLY.find((e) => sameLines(e).includes(l.trim()));
+      if (hit !== undefined) dropped.push(l.trim());
+      return hit === undefined;
+    });
+    if (dropped.length > 0) writeFileSync(ignorePath, kept.join('\n'));
+  }
+  return { excluded, dropped };
+}
+
+/** Is `entry` kept out of the git of `ws`, by its exclude file or by its `.gitignore`? */
+export function keptOut(ws, entry) {
+  const file = excludeFile(ws);
+  const read = (f) => (f !== null && existsSync(f) ? readFileSync(f, 'utf8') : '');
+  return holds(read(file), entry) || holds(read(join(ws, '.gitignore')), entry);
+}
 
 /** Where a code repository records its workspace: a per-machine file with one line, the workspace path. */
 export const LINK_FILE = '.recade/workspace';
@@ -53,7 +130,8 @@ export function assertParent(parent) {
 }
 
 /**
- * Create `<parent>/<slug>-workspace`: the tree, `git init -b main`, the `.gitignore` of the five ignored entries and
+ * Create `<parent>/<slug>-workspace`: the tree, `git init -b main`, the `.gitignore` of the three ignored entries, the
+ * `.git/info/exclude` of the code checkouts, and
  * a first `recade/state.yaml` that says `kind: workspace`. Refuses an existing folder that is not empty. If anything
  * fails, what this call created is removed.
  * @param {string} parent
@@ -74,6 +152,7 @@ export async function createWorkspace(parent, slug, { exec }) {
     if (git.code !== 0) throw new Error(`git init failed: ${oneLine(git.stderr) || `exit ${git.code}`}`);
     saveState(dir, { version: 1, kind: 'workspace' });
     writeFileSync(join(dir, '.gitignore'), `${IGNORED.join('\n')}\n`);
+    keepLocal(dir);
     for (const d of WORKSPACE_TREE) {
       if (readdirSync(join(dir, d)).length === 0) writeFileSync(join(dir, d, '.gitkeep'), '');
     }

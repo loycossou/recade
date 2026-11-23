@@ -8,11 +8,11 @@ import { registryNames, reposOf } from '../project/touches.js';
 import { loadState } from '../state.js';
 import { findStack, techSheet } from './claudemd.js';
 import { handleHook, parseWrites } from './guard.js';
-import { SYNC_ADVICE, checkLink, findWorkspace } from '../workspace/layout.js';
+import { LOCAL_ONLY, SYNC_ADVICE, checkLink, findWorkspace, keptOut } from '../workspace/layout.js';
 import { LAUNCHER, SPEC_LINE, isAdopt, isLocalForge, legacyCopies, workflowFiles } from './install.js';
 import { loadModels, modelWarnings, secondOpinionOf, sensitiveLane, syncAgents, withSecondOpinion } from './models.js';
 import { checkGate, defaultExec, fingerprint, runGate } from './stamps.js';
-import { WORKTREES_IGNORE, ignoresWorktrees, legacyWorktrees } from '../workspace/worktrees.js';
+import { legacyWorktrees } from '../workspace/worktrees.js';
 import { WORKSPACE_WORKFLOW, preCommitTemplate, selectFor } from './targets.js';
 
 /**
@@ -138,8 +138,7 @@ export async function verify(root, { pluginRoot, target, runHook, only } = {}) {
       if (old.length > 0) add('warn', 'layout', `The harness of the old layout is still here (${old.length} file${old.length === 1 ? '' : 's'}, such as ${old[0]}): every command and agent now lives in the workspace. Run: recade harness migrate --dry-run, from the workspace.`);
     }
     if (forWorkspace) {
-      const ignore = existsSync(join(root, '.gitignore')) ? read(join(root, '.gitignore')) : '';
-      if (!ignoresWorktrees(ignore)) add('error', 'layout', `.gitignore does not hold ${WORKTREES_IGNORE}, so the slice worktrees would be committed. Run: recade harness install`);
+      for (const entry of LOCAL_ONLY.filter((e) => !keptOut(root, e))) add('error', 'layout', `The workspace does not keep ${entry} out of git (neither .git/info/exclude nor .gitignore holds it), so the code checkouts would be committed. Run: recade harness install`);
       if (legacyWorktrees(root, { exec: defaultExec }).length > 0) add('warn', 'layout', 'Slice worktrees of the old layout are still under repos/<repo>/.claude/worktrees/. Run: recade harness migrate --dry-run');
     }
     const scan = (dir) => (existsSync(dir) ? readdirSync(dir, { recursive: true, withFileTypes: true }).filter((e) => e.isFile()).map((e) => join(e.parentPath ?? e.path, e.name)) : []);

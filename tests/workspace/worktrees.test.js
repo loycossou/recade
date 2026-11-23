@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { install } from '../../src/harness/install.js';
 import { defaultExec } from '../../src/harness/stamps.js';
@@ -61,9 +61,20 @@ test('openSlice: a no-code slice opens nothing, a branch without a worktree is a
   sheet(ws, 'S-06', 'pay', { touches: ['api:src/pay/**'], branch: 'feature/pay' });
   assert.match(openSlice(ws.dir, 'S-06', { exec }).errors[0], /the rule is slice\/S-06-pay/);
   assert.match(openSlice(ws.dir, 'S-09', { exec }).errors[0], /no sheet for S-09/);
+  // An older workspace that kept worktrees/ out by .gitignore only: the line goes to .git/info/exclude, the slice opens.
+  const exclude = join(ws.dir, '.git', 'info', 'exclude');
+  writeFileSync(exclude, '');
   writeFileSync(join(ws.dir, '.gitignore'), 'repos/\n');
   sheet(ws, 'S-07', 'refunds', { touches: ['api:src/refunds/**'] });
-  assert.match(openSlice(ws.dir, 'S-07', { exec }).errors[0], /does not hold worktrees\//);
+  assert.deepEqual(openSlice(ws.dir, 'S-07', { exec }).errors, []);
+  assert.deepEqual(readFileSync(exclude, 'utf8').split('\n').filter(Boolean), ['repos/', 'worktrees/']);
+  assert.equal(readFileSync(join(ws.dir, '.gitignore'), 'utf8'), 'repos/\n', 'the tracked .gitignore is left as it is');
+  // A workspace with no git at all cannot keep them out: the slice does not open.
+  const bare = await workspace();
+  sheet(bare, 'S-07', 'refunds', { touches: ['api:src/refunds/**'] });
+  rmSync(join(bare.dir, '.git'), { recursive: true, force: true });
+  writeFileSync(join(bare.dir, '.gitignore'), '');
+  assert.match(openSlice(bare.dir, 'S-07', { exec }).errors[0], /does not keep worktrees\/ out of git/);
 });
 
 test('recade slices open runs from the workspace, prints the worktrees, and exits 1 when one is missing', async () => {

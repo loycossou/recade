@@ -391,7 +391,7 @@ test('second-opinion.yml: least privilege, no pull_request_target, no PR code ch
   assert.equal(checkouts[0].with.ref, '${{ github.event.pull_request.base.sha }}');
   assert.equal(checkouts[0].with['persist-credentials'], false);
   assert.equal(/head\.(ref|sha)|merge_commit|refs\/pull/.test(WF_TEXT.replace(/^\s*#.*$/gm, '')), false, 'the head of the PR is never checked out or named');
-  assert.equal(JOB.steps.every((s) => s.uses === undefined || /@v\d+$/.test(s.uses)), true, 'actions pinned to a major tag');
+  assert.equal(JOB.steps.every((s) => s.uses === undefined || /@[0-9a-f]{40}$/.test(s.uses)), true, 'actions pinned to a commit');
   assert.ok(JOB['timeout-minutes'] <= 30);
   assert.ok(WF.concurrency['cancel-in-progress']);
 });

@@ -3,11 +3,12 @@ import { basename, isAbsolute, join, relative, resolve } from 'node:path';
 import { REPO_NAME, WORKSPACE_PREFIX, reposOf } from '../project/touches.js';
 import { checkSlices } from '../project/slices.js';
 import { loadState } from '../state.js';
+import { keepLocal, keptOut } from './layout.js';
 
 /**
  * The slice worktrees of a workspace (docs/design.md, section 10.1). Every session starts at the root of the workspace,
  * and the worktree of a slice in a code repository is `<workspace>/worktrees/<repo>/<S-nn>`: a git worktree of
- * `repos/<repo>`, on the branch of the slice, kept out of git by the `.gitignore` of the workspace. The owner never
+ * `repos/<repo>`, on the branch of the slice, kept out of git by the `.git/info/exclude` of the workspace. The owner never
  * chooses a folder: `recade slices open <S-nn>` reads the `touches:` of the sheet and opens one worktree for each
  * repository it names. A `no-code` slice works in the workspace and opens none.
  *
@@ -98,12 +99,12 @@ export function openSlice(ws, id, { exec }) {
     out.errors.push(`The touches: of ${id} name no code repository of the registry (${registry.join(', ') || 'empty'}), so there is no worktree to open.`);
     return out;
   }
-  let ignore = '';
+  // The worktrees stay out of the git of the workspace through its exclude file (an older .gitignore line moves there).
   try {
-    ignore = readFileSync(join(home, '.gitignore'), 'utf8');
-  } catch { /* no .gitignore */ }
-  if (!ignoresWorktrees(ignore)) {
-    out.errors.push(`The .gitignore of the workspace does not hold ${WORKTREES_IGNORE}, so the worktrees would be committed. Run /recade:harness (recade harness install --target workspace, or recade harness migrate for an older project).`);
+    keepLocal(home);
+  } catch { /* checked just below */ }
+  if (!keptOut(home, WORKTREES_IGNORE)) {
+    out.errors.push(`The workspace does not keep ${WORKTREES_IGNORE} out of git (neither .git/info/exclude nor .gitignore holds it), so the worktrees would be committed. Run /recade:harness (recade harness install --target workspace, or recade harness migrate for an older project).`);
     return out;
   }
   for (const repo of repos) {

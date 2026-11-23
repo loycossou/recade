@@ -48,7 +48,7 @@ jobs:
           echo "::notice::second opinion runs locally with /second-opinion (set the secret RECADE_WORKSPACE_TOKEN and the variable RECADE_WORKSPACE_REPOSITORY to run it here)"
       # The base commit: the harness files as they are on the target branch.
       - if: env.RECADE_WORKSPACE_READY == 'true'
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ github.event.pull_request.base.sha }}
           fetch-depth: 1
@@ -121,7 +121,7 @@ jobs:
       - name: Second opinion
         if: env.RECADE_WORKSPACE_READY == 'true' && steps.workspace.outputs.found == 'true'
         # Actions are pinned to a major tag. A team that wants stricter pinning uses the full commit SHA, with the tag in a comment.
-        uses: anthropics/claude-code-action@v1
+        uses: anthropics/claude-code-action@4a461cbbb72e467c61b1e47547fc0d7dacece34a # v1.0.288
         env:
           GH_TOKEN: ${{ github.token }}
         with:

@@ -2,6 +2,19 @@
 
 This file is curated by hand for each release. At tag time, `recade release-notes <from>..<to> --version <v> --write` produces the raw list from the conventional commits, and this section is then edited from it.
 
+## 1.5.1 (2026-11-24)
+
+### Tools run inside a code checkout see its files
+
+- The workspace keeps `repos/` and `worktrees/` out of its git by `.git/info/exclude`, not by its `.gitignore`. A tool run inside a code repository or a slice worktree that honours the ignore files of the folders above it (a dependency scanner such as `osv-scanner`, a search) took the whole checkout for ignored and found nothing. `recade repo sync`, `recade repo add` and `recade slices open` write the two lines when they are missing. The harness install also takes them out of an older `.gitignore`, and says to commit it.
+
+### The harness files pass a static analysis
+
+- Every action of the CI templates (`ci.yml`, `conflicts.yml`, `second-opinion.yml`, `workspace.yml`, and the setup action of the stack) is pinned to a full commit, with its release in a comment. A tag can be moved; a commit cannot.
+- `dependabot.yml` waits 7 days before it proposes a new version (`cooldown`), for the dependencies and for the actions.
+- The pre-commit hooks (code repository and workspace) no longer change `IFS` to pass the staged files to the style check. Each path still arrives whole, a space included.
+- Install the harness again in the workspace and in each code repository to get them.
+
 ## 1.5.0 (2026-11-23)
 
 ### One push at the end of the turn, none after each step

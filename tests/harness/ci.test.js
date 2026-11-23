@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -429,4 +429,17 @@ test('second opinion: a last step removes the clone and the private copy in ever
   assert.match(header, /fine-grained/i);
   assert.match(header, /Contents.*read.only/i);
   assert.match(header, /workspace repository only/i);
+});
+
+test('every action of the workflow templates is pinned to a full commit, with its release in a comment', () => {
+  const dir = new URL('../../harness/ci/', import.meta.url).pathname;
+  const uses = readdirSync(dir).filter((f) => f.endsWith('.yml')).flatMap((f) => readFileSync(dir + f, 'utf8').split('\n')
+    .filter((l) => /^\s*(- )?uses: /.test(l)).map((l) => [f, l.trim()]));
+  assert.ok(uses.length >= 10);
+  for (const [f, l] of uses) assert.match(l, /uses: [\w.-]+\/[\w.-]+@[0-9a-f]{40} # v\d+\.\d+\.\d+$/, `${f}: ${l}`);
+});
+
+test('dependabot.yml waits a few days before a new version (cooldown), for each ecosystem', () => {
+  const doc = parse(read('../../harness/dependabot.yml').replace('__RECADE_ECOSYSTEM__', 'npm'));
+  for (const u of doc.updates) assert.equal(u.cooldown?.['default-days'], 7, u['package-ecosystem']);
 });

@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parse } from 'yaml';
 import {
-  WORKSPACE_TREE, IGNORED, LINK_FILE, createWorkspace, findWorkspace, linkRepo, checkLink,
+  WORKSPACE_TREE, IGNORED, LOCAL_ONLY, LINK_FILE, keepLocal, keptOut, createWorkspace, findWorkspace, linkRepo, checkLink,
 } from '../../src/workspace/layout.js';
 import { defaultExec } from '../../src/doctor.js';
 import { git } from '../harness/fixture-project.js';
@@ -28,13 +28,14 @@ async function withRepo(parent = tmp(), name = 'api') {
   return { dir, repo, parent };
 }
 
-test('constants: the tracked tree, the five ignored entries and the link file', () => {
-  assert.deepEqual(IGNORED, ['repos/', 'worktrees/', 'artifacts/', 'tmp/', '.recade/']);
+test('constants: the tracked tree, the ignored entries, the code checkouts and the link file', () => {
+  assert.deepEqual(IGNORED, ['artifacts/', 'tmp/', '.recade/']);
+  assert.deepEqual(LOCAL_ONLY, ['repos/', 'worktrees/']);
   assert.equal(LINK_FILE, '.recade/workspace');
   for (const d of ['recade', 'intake', 'team', 'design', 'decisions', 'retros', 'docs/figures', 'docs/deliverables', 'docs/source', 'slices']) {
     assert.ok(WORKSPACE_TREE.some((t) => t === d || t.startsWith(`${d}/`)), d);
   }
-  assert.ok(!WORKSPACE_TREE.some((t) => IGNORED.some((i) => t.startsWith(i))));
+  assert.ok(!WORKSPACE_TREE.some((t) => [...IGNORED, ...LOCAL_ONLY].some((i) => t.startsWith(i))));
 });
 
 test('createWorkspace makes <slug>-workspace with the tree, the four ignored lines and kind: workspace', async () => {

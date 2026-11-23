@@ -5,14 +5,13 @@ import { frontMatterLength } from '../frontmatter-lines.js';
 import { ownFile, readCreated, writeOwnFile } from '../project/adopt.js';
 import { REPO_NAME } from '../project/touches.js';
 import { loadState } from '../state.js';
-import { checkLink, findWorkspace, linkRepo } from '../workspace/layout.js';
+import { checkLink, findWorkspace, keepLocal, linkRepo } from '../workspace/layout.js';
 import { findStack } from './claudemd.js';
 import { fillCi, fillDependabot } from './ci.js';
 import { defaultExec } from './stamps.js';
 import { withModelLine } from './models.js';
 import { SECOND_OPINION_MODELS } from '../models.js';
 import { POINTER_COMMANDS, POINTER_MARK, TARGET_NAMES, WORKSPACE_WORKFLOW, preCommitTemplate, selectFor, thresholdCandidates } from './targets.js';
-import { WORKTREES_IGNORE } from '../workspace/worktrees.js';
 
 /**
  * Install the harness template of the plugin (`harness/`) into a project, and install it again later.
@@ -522,10 +521,10 @@ export function install(root, { pluginRoot: given, target, workspace, team = 'te
   const before = existsSync(ignorePath) ? read(ignorePath) : '';
   let ignore = before;
   const lines = ignore.split(/\r?\n/).map((l) => l.trim());
-  // The slice worktrees live under worktrees/ of the workspace. A code repository keeps .claude/worktrees/ ignored: Claude
-  // Code makes its own worktrees there.
+  // The slice worktrees live under worktrees/ of the workspace, kept out of git by its .git/info/exclude (keepLocal,
+  // below), not by its .gitignore. A code repository keeps .claude/worktrees/ ignored: Claude Code makes its own there.
   const ignored = target === 'workspace'
-    ? [['.recade/', '.recade'], [WORKTREES_IGNORE, '/worktrees/', 'worktrees', '/worktrees'], ['.claude/settings.local.json', '.claude/', '.claude']]
+    ? [['.recade/', '.recade'], ['.claude/settings.local.json', '.claude/', '.claude']]
     : [['.recade/', '.recade'], ['.claude/worktrees/', '.claude/worktrees', '.claude/', '.claude'], ['.claude/settings.local.json', '.claude/', '.claude']];
   for (const [line, ...same] of ignored) {
     if ([line, ...same].some((l) => lines.includes(l))) continue;
@@ -538,6 +537,12 @@ export function install(root, { pluginRoot: given, target, workspace, team = 'te
       else appendFileSync(ignorePath, ignore.slice(before.length));
     } else if (adopt) writeOwnFile(root, '.gitignore', ignore);
     else writeFileSync(ignorePath, ignore);
+  }
+  // The code repositories and the slice worktrees: out of the git of the workspace through .git/info/exclude, which only
+  // git reads. A .gitignore line would hide every checkout from the tools that honour the ignore files above them.
+  if (target === 'workspace') {
+    const kept = keepLocal(root, { drop: true });
+    if (kept?.dropped.length > 0) warnings.push(`repos/ and worktrees/ are now kept out of git by .git/info/exclude, so their lines left .gitignore (${kept.dropped.join(', ')}). Commit .gitignore.`);
   }
   // An adopted repository may run its own git hooks: a hooks folder set in the git config, a hook in .git/hooks, or its own
   // .githooks/. That is the owner's to change (adopt.md asks, and a DEC records the answer), never silently replaced.
