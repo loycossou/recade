@@ -636,3 +636,14 @@ A doctrine file `team/<role>.md` has a header (role, `inspired_by`, model, effor
 | `budgets`, in `recade/state.yaml`, in words | D1 10,000, D2 9,000, D3 7,000, PLAN 7,000, STACK 6,000, BIBLE 8,000 | `src/budgets.js` |
 | The model of the `second-opinion` agent | `claude-opus-5-5` (Opus 5.5) | `harness/models.yaml` |
 <!-- /generated:defaults -->
+
+## A private Recade
+
+The CI workflows fetch the Recade tools from `loycossou/recade` at the ref pinned at install. While that repository is private, a project on another account cannot read it, and the step `Fetch the Recade tools` fails with `could not read Username`. Give each repository of the project a read-only deploy key:
+
+1. `ssh-keygen -t ed25519 -N '' -C recade-ci -f recade-ci` makes the pair.
+2. `gh repo deploy-key add recade-ci.pub --repo loycossou/recade --title '<project> CI'` adds the public half, read-only.
+3. `gh secret set RECADE_DEPLOY_KEY --repo <owner>/<repo> < recade-ci` stores the private half in the workspace repository and in each code repository (or once for the organisation, with `--org` and the `admin:org` scope).
+4. Delete both files.
+
+The workflows fetch over SSH when `RECADE_DEPLOY_KEY` is set, with the host key GitHub publishes pinned, and over HTTPS otherwise. A run that gets no secrets (a Dependabot pull request, a fork) still fails on that step until Recade is public.

@@ -117,7 +117,8 @@ test('permissions are least privilege: read only, no secret, no pull_request_tar
     if (job.permissions) assert.ok(Object.values(job.permissions).every((v) => v === 'read' || v === 'none'), `${name} writes nothing`);
   }
   assert.ok(!('pull_request_target' in doc.on));
-  assert.doesNotMatch(CI, /secrets\./);
+  // One secret only: the read-only deploy key of a private Recade, read by the step that fetches the tools.
+  assert.deepEqual([...new Set(CI.match(/secrets\.\w+/g) ?? [])], ['secrets.RECADE_DEPLOY_KEY']);
   assert.doesNotMatch(CI, /:\s*write\b/);
 });
 

@@ -150,11 +150,23 @@ jobs:
         env:
           REPOSITORY: ${{ env.RECADE_REPOSITORY }}
           REF: ${{ env.RECADE_REF }}
+          # A read-only deploy key of a private Recade repository, when the project has one (README, "A private Recade").
+          DEPLOY_KEY: ${{ secrets.RECADE_DEPLOY_KEY }}
         run: |
           set -euo pipefail
           tools="${RUNNER_TEMP}/recade-tools"
           git init --quiet "$tools"
-          git -C "$tools" fetch --quiet --depth 1 "https://github.com/${REPOSITORY}.git" "$REF"
+          url="https://github.com/${REPOSITORY}.git"
+          if [ -n "${DEPLOY_KEY:-}" ]; then
+            ssh_dir="${RUNNER_TEMP}/recade-ssh"
+            mkdir -p -m 700 "$ssh_dir"
+            (umask 077 && printf '%s\n' "$DEPLOY_KEY" > "$ssh_dir/key")
+            # The host key GitHub publishes (gh api meta), pinned: no first-use trust.
+            echo 'github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl' > "$ssh_dir/known_hosts"
+            export GIT_SSH_COMMAND="ssh -i $ssh_dir/key -o User=git -o IdentitiesOnly=yes -o UserKnownHostsFile=$ssh_dir/known_hosts -o StrictHostKeyChecking=yes"
+            url="ssh://github.com/${REPOSITORY}.git"
+          fi
+          git -C "$tools" fetch --quiet --depth 1 "$url" "$REF"
           git -C "$tools" checkout --quiet FETCH_HEAD
           npm ci --omit=dev --ignore-scripts --prefix "$tools"
           echo "RECADE_BIN=${tools}/bin/recade.js" >> "$GITHUB_ENV"
@@ -211,11 +223,23 @@ jobs:
         env:
           REPOSITORY: ${{ env.RECADE_REPOSITORY }}
           REF: ${{ env.RECADE_REF }}
+          # A read-only deploy key of a private Recade repository, when the project has one (README, "A private Recade").
+          DEPLOY_KEY: ${{ secrets.RECADE_DEPLOY_KEY }}
         run: |
           set -euo pipefail
           tools="${RUNNER_TEMP}/recade-tools"
           git init --quiet "$tools"
-          git -C "$tools" fetch --quiet --depth 1 "https://github.com/${REPOSITORY}.git" "$REF"
+          url="https://github.com/${REPOSITORY}.git"
+          if [ -n "${DEPLOY_KEY:-}" ]; then
+            ssh_dir="${RUNNER_TEMP}/recade-ssh"
+            mkdir -p -m 700 "$ssh_dir"
+            (umask 077 && printf '%s\n' "$DEPLOY_KEY" > "$ssh_dir/key")
+            # The host key GitHub publishes (gh api meta), pinned: no first-use trust.
+            echo 'github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl' > "$ssh_dir/known_hosts"
+            export GIT_SSH_COMMAND="ssh -i $ssh_dir/key -o User=git -o IdentitiesOnly=yes -o UserKnownHostsFile=$ssh_dir/known_hosts -o StrictHostKeyChecking=yes"
+            url="ssh://github.com/${REPOSITORY}.git"
+          fi
+          git -C "$tools" fetch --quiet --depth 1 "$url" "$REF"
           git -C "$tools" checkout --quiet FETCH_HEAD
           npm ci --omit=dev --ignore-scripts --prefix "$tools"
           echo "RECADE_BIN=${tools}/bin/recade.js" >> "$GITHUB_ENV"

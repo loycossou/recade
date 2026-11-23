@@ -436,3 +436,18 @@ test('gate check inside a code repository with no required_gates of its own name
   writeFileSync(join(root, 'recade', 'state.yaml'), 'version: 1\nmode: scratch\n');
   assert.match((await cli(root, ['gate', 'check'])).stdout, /No required gates in recade\/state\.yaml/);
 });
+
+test('the CI workflows fetch the Recade tools with the deploy key when one is set, the host key of GitHub pinned', () => {
+  for (const name of ['ci.yml', 'workspace.yml']) {
+    const text = readFileSync(join(plugin, 'harness', 'ci', name), 'utf8');
+    const steps = text.split('- name: Fetch the Recade tools').slice(1);
+    assert.ok(steps.length >= 1, name);
+    for (const step of steps) {
+      assert.match(step, /DEPLOY_KEY: \$\{\{ secrets\.RECADE_DEPLOY_KEY \}\}/, name);
+      assert.match(step, /StrictHostKeyChecking=yes/, name);
+      assert.match(step, /github\.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl/, name);
+      assert.match(step, /url="https:\/\/github\.com\/\$\{REPOSITORY\}\.git"/, name);
+      assert.doesNotMatch(step, /accept-new|ssh-keyscan/, name);
+    }
+  }
+});

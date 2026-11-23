@@ -2,6 +2,12 @@
 
 This file is curated by hand for each release. At tag time, `recade release-notes <from>..<to> --version <v> --write` produces the raw list from the conventional commits, and this section is then edited from it.
 
+## 1.1.1 (2026-11-23)
+
+### A private Recade
+
+- The CI workflows fetch the Recade tools over SSH with a read-only deploy key when the secret `RECADE_DEPLOY_KEY` is set, with the host key GitHub publishes pinned, and over HTTPS otherwise. A project on another account can now run its checks while Recade is private. The README says how to set the key.
+
 ## 1.1.0 (2026-11-23)
 
 ### One entry point: every session starts at the root of the workspace
