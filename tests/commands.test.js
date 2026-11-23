@@ -994,7 +994,7 @@ test('the plugin README, the design document and the changelog describe the extr
   const design = readFileSync(join(repo, 'docs', 'design.md'), 'utf8');
   for (const part of [...parts, 'in memory']) assert.ok(design.includes(part), `design: ${part}`);
   const changelog = readFileSync(join(repo, 'CHANGELOG.md'), 'utf8');
-  const unreleased = changelog.slice(changelog.indexOf('## Unreleased'), changelog.indexOf('\n## 1.0.0'));
+  const unreleased = changelog.slice(changelog.indexOf('## 1.1.0'), changelog.indexOf('\n## 1.0.0'));
   for (const part of ['deliverables.extras', 'recade render extras']) assert.ok(unreleased.includes(part), `CHANGELOG: ${part}`);
   for (const text of [readme, design]) assert.ok(text.includes('delete them by hand'));
 });
@@ -1042,7 +1042,7 @@ test('the README, the design document and the changelog describe the design refe
     for (const part of ['design/references.md', 'DESIGN_<Title>.docx', 'Mobbin', 'Refero', 'Nicelydone', 'own account']) assert.ok(text.includes(part), `${name}: ${part}`);
   }
   const changelog = readFileSync(join(repo, 'CHANGELOG.md'), 'utf8');
-  const unreleased = changelog.slice(changelog.indexOf('## Unreleased'), changelog.indexOf('\n## 1.0.0'));
+  const unreleased = changelog.slice(changelog.indexOf('## 1.1.0'), changelog.indexOf('\n## 1.0.0'));
   for (const part of ['design/references.md', 'design-references.pdf', 'Mobbin']) assert.ok(unreleased.includes(part), `CHANGELOG: ${part}`);
 });
 

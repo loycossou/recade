@@ -68,7 +68,9 @@ test('migrate --dry-run says what it would do and changes nothing', async () => 
   assert.match(r.stdout, /would move {2}api S-01: .*\.claude\/worktrees\/S-01 -> .*worktrees\/api\/S-01/);
   assert.match(r.stdout, /refused {5}web S-02: .*uncommitted changes \(1 file: wip\.ts\)/);
   assert.match(r.stdout, /would remove api \.claude\/agents\/implementer\.md/);
-  assert.match(r.stdout, /kept {8}api \.claude\/agents\/domain-reviewer\.md: it holds text of the team below the specialisation line/);
+  assert.match(r.stdout, /would remove api \.claude\/agents\/domain-reviewer\.md \(the text of an earlier version of Recade; the text of the team: would carry it to the copy of the workspace\)/);
+  assert.match(r.stdout, /kept {8}api \.claude\/agents\/reviewer\.md: it differs from what Recade v/);
+  assert.match(r.stdout, /Harness at the root of the workspace: would install it \(/);
   assert.match(r.stdout, /worktrees\/ would be added/);
   assert.equal(readFileSync(join(ws.dir, '.gitignore'), 'utf8'), before);
   assert.ok(existsSync(apiTree) && existsSync(webTree));
@@ -98,7 +100,8 @@ test('migrate moves the clean worktrees, installs the root, removes the copies t
   assert.match(refused.reason, /uncommitted changes \(1 file: wip\.ts\)/);
   assert.ok(existsSync(join(webTree, 'wip.ts')));
   // The pristine copies are gone; the team's stay, with the reason; the pointer replaces the old /slice.
-  assert.deepEqual(md(join(api, '.claude', 'agents')), ['domain-reviewer.md', 'reviewer.md']);
+  assert.deepEqual(md(join(api, '.claude', 'agents')), ['reviewer.md']);
+  assert.ok(readFileSync(join(ws.dir, '.claude', 'agents', 'domain-reviewer.md'), 'utf8').split(SPEC_LINE)[1].includes('- DG-01: no negative balance.'), 'the text of the team is in the copy of the workspace');
   assert.match(r.kept.find((k) => k.file.endsWith('reviewer.md') && !k.file.includes('domain')).reason, /differs from what Recade v/);
   assert.equal(existsSync(join(api, '.claude', 'protocol.md')), false);
   assert.deepEqual(md(join(api, '.claude', 'commands')), ['slice.md']);
@@ -119,10 +122,10 @@ test('migrate moves the clean worktrees, installs the root, removes the copies t
   // A third run finds only the files the team changed, and moves nothing.
   const third = migrate(ws.dir, { pluginRoot: plugin, ref: REF });
   assert.deepEqual([third.moves, third.removed, third.pointers], [[], [], []]);
-  assert.deepEqual(third.kept.map((k) => k.file).sort(), ['.claude/agents/domain-reviewer.md', '.claude/agents/reviewer.md']);
+  assert.deepEqual(third.kept.map((k) => k.file).sort(), ['.claude/agents/reviewer.md']);
   assert.deepEqual(third.install.written.filter((w) => w.status !== 'unchanged'), []);
   // Once the team moved its text and deleted its copies, nothing of the old layout is left.
-  for (const f of ['domain-reviewer.md', 'reviewer.md']) rmSync(join(api, '.claude', 'agents', f));
+  rmSync(join(api, '.claude', 'agents', 'reviewer.md'));
   assert.match((await cli(ws.dir, ['harness', 'migrate', '--ref', REF])).stdout, /Nothing of the old layout is left\./);
   assert.equal(checkRepos(ws.dir).findings.some((f) => f.problem === 'old layout'), false);
   // The workspace verifies.
@@ -142,7 +145,7 @@ test('migrate runs from the workspace only, and refuses a locked worktree or a t
   assert.match(r.moves.find((m) => m.repo === 'api').reason, /taken already/);
 });
 
-test('migrate never removes a specialised file of an adopted repository, and carries its text to the workspace', async () => {
+test('migrate removes a specialised file of an adopted repository only once its text is carried to the workspace, and keeps one edited above the line', async () => {
   const { writeOwnFile } = await import('../../src/project/adopt.js');
   const { specialise } = await import('../../src/harness/specialise.js');
   const ws = await makeWorkspace({ repos: ['api'] });
@@ -154,21 +157,57 @@ test('migrate never removes a specialised file of an adopted repository, and car
   specialise(repo, 'agent', 'domain-reviewer', '## Domain grid\n\n- DG-01: no negative balance.', { adopt: true });
   // A file only Recade wrote goes, as before.
   writeOwnFile(repo, '.claude/agents/reviewer.md', old('agents', 'reviewer'));
+  // A file edited above the line, with the text of the team below it, stays: its edit is not Recade's.
+  writeOwnFile(repo, '.claude/agents/explorer.md', `${old('agents', 'explorer').replace('## Writes', 'A line of ours.\n\n## Writes')}\n## Ours\n\n- keep me.\n`);
   const dry = migrate(ws.dir, { pluginRoot: plugin, ref: REF, dryRun: true });
-  assert.deepEqual(dry.removed.map((x) => x.file), ['.claude/agents/reviewer.md']);
-  assert.match(dry.kept[0].reason, /text of the team below the specialisation line/);
-  assert.match(dry.kept[0].carried, /would carry/);
+  assert.deepEqual(dry.removed.map((x) => x.file).sort(), ['.claude/agents/domain-reviewer.md', '.claude/agents/reviewer.md']);
+  assert.match(dry.removed.find((x) => x.file.includes('domain')).note, /the text of the team: would carry it/);
+  assert.deepEqual(dry.kept.map((k) => k.file), ['.claude/agents/explorer.md']);
+  assert.ok(existsSync(join(repo, '.claude', 'agents', 'domain-reviewer.md')), 'the dry run removes nothing');
   const r = migrate(ws.dir, { pluginRoot: plugin, ref: REF });
   assert.deepEqual(r.errors, []);
-  assert.ok(existsSync(join(repo, '.claude', 'agents', 'domain-reviewer.md')), 'the specialised copy stays');
+  assert.equal(existsSync(join(repo, '.claude', 'agents', 'domain-reviewer.md')), false);
   assert.equal(existsSync(join(repo, '.claude', 'agents', 'reviewer.md')), false);
-  assert.equal(r.kept[0].carried, 'carried to the copy of the workspace');
+  assert.ok(existsSync(join(repo, '.claude', 'agents', 'explorer.md')), 'the file edited above the line stays');
+  assert.match(r.removed.find((x) => x.file.includes('domain')).note, /the text of the team: carried to the copy of the workspace/);
   const copy = readFileSync(join(ws.dir, '.claude', 'agents', 'domain-reviewer.md'), 'utf8');
   assert.ok(copy.split(SPEC_LINE)[1].includes('- DG-01: no negative balance.'));
-  // A second run keeps it again and carries nothing twice.
+  // The kept file carried its text below the line too; a second run carries nothing twice.
+  const explorer = readFileSync(join(ws.dir, '.claude', 'agents', 'explorer.md'), 'utf8');
+  assert.ok(explorer.split(SPEC_LINE)[1].includes('- keep me.'));
   const again = migrate(ws.dir, { pluginRoot: plugin, ref: REF });
   assert.equal(again.kept[0].carried, 'already in the copy of the workspace');
   assert.equal(readFileSync(join(ws.dir, '.claude', 'agents', 'domain-reviewer.md'), 'utf8'), copy);
+  assert.equal(readFileSync(join(ws.dir, '.claude', 'agents', 'explorer.md'), 'utf8'), explorer);
+});
+
+test('migrate removes a protocol copy only when the workspace protocol holds its text word for word', async () => {
+  const { ws } = await oldLayout();
+  const api = ws.repo('api');
+  const web = ws.repo('web');
+  const proto = (dir) => join(dir, '.claude', 'protocol.md');
+  writeFileSync(proto(api), `${readFileSync(proto(api), 'utf8')}\n## Lanes of api\n\n- api: standard.\n`);
+  writeFileSync(proto(web), `${readFileSync(proto(web), 'utf8')}\n## Lanes of web\n\n- web: standard.\n`);
+  install(ws.dir, { pluginRoot: plugin, target: 'workspace', ref: REF });
+  writeFileSync(proto(ws.dir), `${readFileSync(proto(ws.dir), 'utf8')}\n## Lanes of api\n\n- api: standard.\n`);
+  const r = migrate(ws.dir, { pluginRoot: plugin, ref: REF, dryRun: true });
+  assert.ok(r.removed.some((x) => x.repo === 'api' && x.file === '.claude/protocol.md'));
+  const kept = r.kept.find((k) => k.repo === 'web' && k.file === '.claude/protocol.md');
+  assert.match(kept.carried, /^not carried: .*compare it with the copy of the workspace/);
+});
+
+test('the template history knows every current template, and a fingerprint ignores the version and the model line', async () => {
+  const { fingerprint, knownTexts } = await import('../../src/harness/history.js');
+  const known = knownTexts(plugin);
+  for (const kind of ['agents', 'commands', 'pointer']) {
+    for (const f of md(join(plugin, 'harness', kind))) assert.ok(known.has(fingerprint(readFileSync(join(plugin, 'harness', kind, f), 'utf8'))), `${kind}/${f}: run node tools/harness-history.js`);
+  }
+  assert.ok(known.has(fingerprint(readFileSync(join(plugin, 'harness', 'protocol.md'), 'utf8'))), 'protocol.md: run node tools/harness-history.js');
+  const text = old('agents', 'reviewer');
+  assert.equal(fingerprint(text.replace(`v${version}:`, 'v0.0.1:')), fingerprint(text));
+  assert.equal(fingerprint(text.replace(/^model: .*$/m, 'model: fable')), fingerprint(text));
+  assert.equal(fingerprint(`${text}\n## Ours\n`), fingerprint(text), 'the text below the line does not count');
+  assert.notEqual(fingerprint(text.replace('## Writes', 'A line of ours.\n\n## Writes')), fingerprint(text));
 });
 
 test('migrate moves the ledger of a moved worktree to the workspace, and never overwrites one there', async () => {

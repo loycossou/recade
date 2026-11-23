@@ -6,6 +6,7 @@ import { SECOND_OPINION_MODELS } from '../models.js';
 import { loadState } from '../state.js';
 import { WORKTREES_DIR, WORKTREES_IGNORE, ignoresWorktrees, legacyWorktrees, listWorktrees, worktreePath, worktreeRel } from '../workspace/worktrees.js';
 import { INSTALL_RECORD, LAUNCHER, SPEC_LINE, genericOf, install, isAdopt, legacyCopies, matchesInstallRecord, pluginVersion, readInstallRecord } from './install.js';
+import { fingerprint, knownTexts } from './history.js';
 import { withModelLine } from './models.js';
 import { specialise } from './specialise.js';
 import { defaultExec } from './stamps.js';
@@ -20,9 +21,10 @@ import { POINTER_COMMANDS } from './targets.js';
  *    `git worktree move`. A worktree with uncommitted changes, a locked one, or one whose new place is taken stays where
  *    it is, and the reason is reported.
  * 3. Remove the old harness copies from each code repository (its agents, its commands, its protocol) only where they are
- *    exactly what Recade installed: the hash of the install record, the record of an adopted repository, or the text the
- *    install of that version writes. A file the team changed stays, and is reported. The pointer command takes the place of
- *    the old `/slice` when that one was removed.
+ *    Recade's: the hash of the install record, the record of an adopted repository, the text the install of that version
+ *    writes, or, above the line, the text of an earlier version (`harness/history.json`) once the text of the team below
+ *    the line is in the copy of the workspace. A file the team changed above the line stays, and is reported. The pointer
+ *    command takes the place of the old `/slice` when that one was removed.
  *
  * `dryRun` changes nothing and says what would be done. A second run finds nothing to do.
  */
@@ -35,6 +37,7 @@ const real = (p) => {
     return resolve(p);
   }
 };
+const CARRIED = new Set(['carried to the copy of the workspace', 'already in the copy of the workspace', 'would carry it to the copy of the workspace']);
 const HEADER_VERSION = /^<!-- recade-harness v(\S+): specialise below the line -->$/m;
 
 /**
@@ -106,7 +109,13 @@ function carry(home, repoDir, file, dryRun) {
   const text = teamText(readFileSync(join(repoDir, file), 'utf8'));
   if (text === '') return null;
   const target = specialisable(file);
-  if (target === null) return `not carried: recade harness specialise does not write ${file}, so copy the text by hand`;
+  if (target === null) {
+    // The protocol: recade harness specialise does not write it, so the text counts as carried only when the copy of the
+    // workspace holds it already, word for word.
+    const copy = existsSync(join(home, file)) ? teamText(readFileSync(join(home, file), 'utf8')) : '';
+    if (copy.includes(text)) return 'already in the copy of the workspace';
+    return `not carried: recade harness specialise does not write ${file}, so compare it with the copy of the workspace and copy what it lacks by hand`;
+  }
   if (!existsSync(join(home, file))) return dryRun ? 'would carry it to the copy of the workspace' : `not carried: the workspace has no ${file}`;
   if (dryRun) return 'would carry it to the copy of the workspace';
   try {
@@ -221,6 +230,7 @@ export function migrate(ws, { pluginRoot, dryRun = false, exec = defaultExec, re
 
   // 3. The old harness copies of each code repository, removed where they are exactly Recade's.
   const version = pluginVersion(pluginRoot);
+  const earlier = knownTexts(pluginRoot);
   for (const repo of names) {
     const dir = join(home, 'repos', repo);
     if (!existsSync(join(dir, '.git'))) continue;
@@ -228,11 +238,18 @@ export function migrate(ws, { pluginRoot, dryRun = false, exec = defaultExec, re
     let recordChanged = false;
     for (const file of legacyCopies(dir)) {
       const why = changedBy(dir, file, pluginRoot, adopt);
+      let note;
       if (why !== null) {
-        out.kept.push({ repo, file, reason: why, carried: carry(home, dir, file, dryRun) });
-        continue;
+        const carried = carry(home, dir, file, dryRun);
+        // Above the line, the text of an earlier version of Recade: a re-install would replace it, so the copy goes once
+        // the text of the team below the line, if any, is in the copy of the workspace.
+        if (!(earlier.has(fingerprint(readFileSync(join(dir, file), 'utf8'))) && (carried === null || CARRIED.has(carried)))) {
+          out.kept.push({ repo, file, reason: why, carried });
+          continue;
+        }
+        note = carried === null ? 'the text of an earlier version of Recade' : `the text of an earlier version of Recade; the text of the team: ${carried}`;
       }
-      out.removed.push({ repo, file, status: dryRun ? 'would remove' : 'removed' });
+      out.removed.push({ repo, file, status: dryRun ? 'would remove' : 'removed', ...(note ? { note } : {}) });
       if (dryRun) continue;
       rmSync(join(dir, file));
       dropEmpty(resolve(join(dir, file), '..'), join(dir, '.claude'));
@@ -260,7 +277,9 @@ export function migrate(ws, { pluginRoot, dryRun = false, exec = defaultExec, re
       writeFileSync(join(dir, INSTALL_RECORD), `${JSON.stringify({ version, files: record }, null, 2)}\n`);
     }
   }
-  if (out.kept.some((k) => k.carried === null || k.carried.startsWith('not carried'))) out.notes.push('A kept file was changed by the team. Its own text now belongs in the copy of the workspace: add it there with recade harness specialise agent|command <name> --file <path> --target workspace, then delete the old copy by hand.');
+  const uncarried = out.kept.filter((k) => k.carried === null || k.carried.startsWith('not carried'));
+  if (uncarried.some((k) => specialisable(k.file) !== null)) out.notes.push('A kept file was changed by the team. Its own text now belongs in the copy of the workspace: add it there with recade harness specialise agent|command <name> --file <path> --target workspace, then delete the old copy by hand.');
+  if (uncarried.some((k) => specialisable(k.file) === null)) out.notes.push('A kept protocol holds text of the team that the protocol of the workspace does not hold word for word. Compare the two below the line, copy into the workspace what it lacks, then delete the old copy by hand.');
   if (!dryRun && out.kept.some((k) => k.carried !== null && !k.carried.startsWith('not carried'))) out.notes.push('The text of the team below the line of a kept file is in the copy of the workspace now. The old copy stays in the code repository: check the workspace copy, then delete the old one by hand.');
   if (!dryRun && out.removed.length > 0) out.notes.push('The removed files are deletions in each code repository: commit them there (git add the paths, then commit), as /recade:harness does.');
   return out;
@@ -270,7 +289,9 @@ export function migrate(ws, { pluginRoot, dryRun = false, exec = defaultExec, re
 export function formatMigrate(r) {
   const lines = [r.dryRun ? 'Dry run: nothing was changed.' : 'Migration to the workspace root.'];
   if (r.install !== null) {
-    if (r.install.dryRun) lines.push(`Harness at the root of the workspace: would install it${r.install.missing.length > 0 ? ` (${r.install.missing.length} command and agent files are missing there)` : ''}.`);
+    if (r.install.dryRun) lines.push(r.install.missing.length > 0
+      ? `Harness at the root of the workspace: would install it (${r.install.missing.length} command and agent files are missing there).`
+      : 'Harness at the root of the workspace: in place already (every command and every agent is there); the run would bring it to this version.');
     else {
       const count = (s) => r.install.written.filter((w) => w.status === s).length;
       lines.push(`Harness at the root of the workspace: ${count('created')} created, ${count('updated')} updated, ${count('unchanged')} unchanged, ${count('kept')} kept.`);
@@ -284,7 +305,7 @@ export function formatMigrate(r) {
   }
   for (const x of r.left) lines.push(`left        ${x.repo} ${x.name}: ${x.path} stays where it is: ${x.reason}.`);
   for (const l of r.ledgers) lines.push(`${l.status.padEnd(11)} ${l.repo} ${l.slice} ledger: ${l.from} -> ${l.to}${l.reason ? ` (${l.reason})` : ''}`);
-  for (const x of r.removed) lines.push(`${x.status.padEnd(11)} ${x.repo} ${x.file}`);
+  for (const x of r.removed) lines.push(`${x.status.padEnd(11)} ${x.repo} ${x.file}${x.note ? ` (${x.note})` : ''}`);
   for (const x of r.pointers) lines.push(`${x.status.padEnd(11)} ${x.repo} ${x.file} (the pointer to the workspace)`);
   for (const x of r.kept) lines.push(`kept        ${x.repo} ${x.file}: ${x.reason}${x.carried ? `; the text of the team: ${x.carried}` : ''}.`);
   if (r.moves.length === 0 && r.removed.length === 0 && r.pointers.length === 0 && r.kept.length === 0 && r.left.length === 0 && r.ledgers.length === 0) lines.push('Nothing of the old layout is left.');

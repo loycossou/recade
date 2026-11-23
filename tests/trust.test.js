@@ -79,6 +79,6 @@ test('the README, the design document, the delivery chain and the changelog desc
   assert.ok(design.includes('**Trust the team.**') && design.includes('skills/decision-sorting/SKILL.md') && design.includes('--by team'));
   assert.ok(read('docs/delivery.md').includes('A project in trust mode (`decisions: trust`)'));
   const changelog = read('CHANGELOG.md');
-  assert.ok(changelog.indexOf('### Trust the team') > changelog.indexOf('## Unreleased'));
+  assert.ok(changelog.indexOf('### Trust the team') > changelog.indexOf('## 1.1.0'));
   assert.ok(changelog.indexOf('### Trust the team') < changelog.indexOf('### One command to publish'));
 });
