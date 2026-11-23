@@ -123,7 +123,33 @@ function pluginRoot(start) {
     const root = readFileSync(file, 'utf8').split('\n')[0].trim();
     if (root !== '' && existsSync(join(root, 'harness', 'hooks', 'guard.mjs'))) return root;
   }
-  return null;
+  return installedPlugin();
+}
+
+/**
+ * The folder of the Recade plugin as Claude Code installed it, from its record of installed plugins, or null. The
+ * fallback of a fresh clone of a workspace (a cloud session), which has no `.recade/plugin-root`, the file each machine
+ * writes for itself: with the plugin installed there, the guard runs instead of refusing every write.
+ */
+function installedPlugin() {
+  const home = process.env.CLAUDE_CONFIG_DIR || (process.env.HOME ? join(process.env.HOME, '.claude') : null);
+  if (home === null) return null;
+  let record;
+  try {
+    record = JSON.parse(readFileSync(join(home, 'plugins', 'installed_plugins.json'), 'utf8'));
+  } catch {
+    return null;
+  }
+  const found = [];
+  for (const [key, entries] of Object.entries(record?.plugins ?? {})) {
+    if (!key.startsWith('recade@') || !Array.isArray(entries)) continue;
+    for (const e of entries) {
+      const path = typeof e?.installPath === 'string' ? e.installPath : '';
+      if (path !== '' && existsSync(join(path, 'harness', 'hooks', 'guard.mjs'))) found.push({ path, at: String(e.lastUpdated ?? e.installedAt ?? '') });
+    }
+  }
+  found.sort((a, b) => b.at.localeCompare(a.at));
+  return found[0]?.path ?? null;
 }
 
 /** The deny decision of a guard that cannot run, or '' for a tool it does not hold or a reinstall command. */
@@ -150,7 +176,7 @@ try {
   }
   const cwd = typeof event?.cwd === 'string' && existsSync(event.cwd) ? event.cwd : process.cwd();
   const root = pluginRoot(cwd);
-  if (root === null) out = failClosed(event, '.recade/plugin-root is missing or points to no plugin folder with harness/hooks/guard.mjs', cwd, { rootMissing: true });
+  if (root === null) out = failClosed(event, '.recade/plugin-root is missing or points to no plugin folder with harness/hooks/guard.mjs, and no Recade plugin is installed on this machine', cwd, { rootMissing: true });
   else {
     try {
       const { runGuard } = await import(pathToFileURL(join(root, 'harness', 'hooks', 'guard.mjs')).href);

@@ -2,6 +2,14 @@
 
 This file is curated by hand for each release. At tag time, `recade release-notes <from>..<to> --version <v> --write` produces the raw list from the conventional commits, and this section is then edited from it.
 
+## 1.2.1 (2026-11-23)
+
+### The agents of the plugin under the guard
+
+- The guard reads the Writes of an agent of the plugin itself (`recade:spike-runner`, `recade:stack-analyst`, the writers of the documents) in `agents/` of the plugin. Before, it looked only in the project and in `harness/agents/`, so once the harness was installed these agents had no Writes and could write nothing in the workspace: a spike could not run, an amend could not rewrite a document.
+- A placeholder of a Writes line other than `<S-nn>`, `<touches>` and `<conflicted-files>` (`spikes/<layer>-<option>/**`, `docs/D1.<lang>.md`) stands for one part of a name, `*`. It used to match nothing.
+- A clone of a workspace with no `.recade/plugin-root` (a cloud session, a fresh clone) finds the Recade plugin that Claude Code installed on that machine, from its record of installed plugins, and the guard runs. With no plugin installed, write tools and Bash stay refused, as before.
+
 ## 1.2.0 (2026-11-23)
 
 ### A deck for the steering committee

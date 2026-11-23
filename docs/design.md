@@ -609,7 +609,7 @@ Run in a code repository, the command means that repository. Run at the root of 
 
 ### 10.8 Another machine, a moved workspace
 
-`recade repo sync`, run from the workspace, clones the repositories of the registry that are missing from `repos/`, writes `.recade/workspace` and `.recade/plugin-root` in each repository, and repairs the git worktrees of the slices of a moved workspace, under `worktrees/` (and under `.claude/worktrees/` of a repository not migrated yet). A repository with no remote cannot be cloned: it is skipped with the reason. `/recade:resume` offers the sync when something is missing. A link is valid when the path it names is the workspace that holds the repository in `repos/` (for a worktree, the main repository of the worktree is used).
+`recade repo sync`, run from the workspace, clones the repositories of the registry that are missing from `repos/`, writes `.recade/workspace` and `.recade/plugin-root` in each repository, and repairs the git worktrees of the slices of a moved workspace, under `worktrees/` (and under `.claude/worktrees/` of a repository not migrated yet). A repository with no remote cannot be cloned: it is skipped with the reason. `/recade:resume` offers the sync when something is missing. When `.recade/plugin-root` is missing (a fresh clone, a cloud session), the hook launcher falls back to the Recade plugin that Claude Code installed on that machine, read from `plugins/installed_plugins.json` of its config folder; with none, write tools and Bash are refused. A link is valid when the path it names is the workspace that holds the repository in `repos/` (for a worktree, the main repository of the worktree is used).
 
 ### 10.9 Deliverables and drafts
 

@@ -271,8 +271,10 @@ test('handleHook: a denial is logged to .recade/guard.log', async () => {
   assert.match(readFileSync(join(repo, '.recade', 'guard.log'), 'utf8'), /deny Bash/);
 });
 
+// A config folder with no installed plugin by default, so the record of this machine never answers for a test.
+const noPlugins = mkdtempSync(join(tmpdir(), 'recade-config-'));
 const runLauncher = (cwd, input, env = {}) =>
-  spawnSync('node', [launcherMjs], { cwd, input, encoding: 'utf8', env: { ...process.env, RECADE_PLUGIN_ROOT: '', CLAUDE_PROJECT_DIR: cwd, ...env } });
+  spawnSync('node', [launcherMjs], { cwd, input, encoding: 'utf8', env: { ...process.env, RECADE_PLUGIN_ROOT: '', CLAUDE_PROJECT_DIR: cwd, CLAUDE_CONFIG_DIR: noPlugins, ...env } });
 
 const runMjs = (cwd, input, env = {}) =>
   spawnSync('node', [guardMjs], { cwd, input, encoding: 'utf8', env: { ...process.env, RECADE_PLUGIN_ROOT: plugin, ...env } });
@@ -2414,4 +2416,38 @@ test('root: a removal is judged like a write: only in the worktree of the slice,
   denied(await inTree('rm -rf ../S-02'));
   // The main session is not held to the touches.
   assert.equal(await s.sh(null, `rm -rf ${wt.api}/src/tmp`), '');
+});
+
+test('guard: an agent of the plugin itself (recade:spike-runner) writes by the Writes of agents/ of the plugin, its placeholders matching one part of a name', async () => {
+  const { ws, wt } = makeWorkspace();
+  // The spike runner writes its own option folder in the workspace, and nothing else.
+  assert.equal(await write(ws, 'recade:spike-runner', join(ws, 'spikes', 'pdf-typst', 'RESULT.md')), '');
+  assert.equal(await write(ws, 'recade:spike-runner', join(ws, 'spikes', 'data-jdbc', 'src', 'Main.java')), '');
+  denied(await write(ws, 'recade:spike-runner', join(ws, 'spikes', 'TASK-pdf.md')));
+  denied(await write(ws, 'recade:spike-runner', join(ws, 'docs', 'STACK.md')));
+  denied(await write(ws, 'recade:spike-runner', join(wt.api, 'src', 'x.js')));
+  // The stack analyst writes STACK and the tasks of the spikes.
+  assert.equal(await write(ws, 'recade:stack-analyst', join(ws, 'docs', 'STACK.md')), '');
+  assert.equal(await write(ws, 'recade:stack-analyst', join(ws, 'spikes', 'TASK-pdf.md')), '');
+  denied(await write(ws, 'recade:stack-analyst', join(ws, 'BIBLE.md')));
+  // A bare type is read from the project and the harness only: the agents of the plugin give it nothing.
+  denied(await write(ws, 'spike-runner', join(ws, 'spikes', 'pdf-typst', 'RESULT.md')));
+});
+
+test('launcher: a clone with no .recade/plugin-root finds the Recade plugin Claude Code installed, and still refuses without one', () => {
+  const repo = makeRepo();
+  rmSync(join(repo, '.recade', 'plugin-root'), { force: true });
+  const ev = (tool, input) => JSON.stringify({ cwd: repo, tool_name: tool, tool_input: input });
+  // No plugin installed: closed.
+  assert.equal(JSON.parse(runLauncher(repo, ev('Bash', { command: 'ls' })).stdout).hookSpecificOutput.permissionDecision, 'deny');
+  // The record of the installed plugins names this plugin (and an older copy that is gone): the guard runs and judges.
+  const config = mkdtempSync(join(tmpdir(), 'recade-config-'));
+  mkdirSync(join(config, 'plugins'), { recursive: true });
+  writeFileSync(join(config, 'plugins', 'installed_plugins.json'), JSON.stringify({ version: 2, plugins: {
+    'other@market': [{ installPath: join(config, 'nowhere') }],
+    'recade@recade': [{ installPath: join(config, 'gone'), lastUpdated: '2027-01-01T00:00:00Z' }, { installPath: plugin, lastUpdated: '2026-11-23T00:00:00Z' }],
+  } }));
+  const env = { CLAUDE_CONFIG_DIR: config };
+  assert.equal(runLauncher(repo, ev('Bash', { command: 'ls' }), env).stdout, '');
+  assert.equal(JSON.parse(runLauncher(repo, ev('Bash', { command: 'git push origin main' }), env).stdout).hookSpecificOutput.permissionDecision, 'deny');
 });

@@ -114,7 +114,8 @@ export function parseTouches(sheetText) {
 
 /**
  * Replace the placeholders of the Writes globs. `<S-nn>` comes from the branch name, `<touches>` from the sheet of
- * that slice, `<conflicted-files>` from git. A glob whose placeholder cannot be resolved is not allowed and
+ * that slice, `<conflicted-files>` from git. Any other placeholder, such as `<layer>` in `spikes/<layer>-<option>/**`,
+ * stands for one part of a name and becomes `*`. A glob whose placeholder cannot be resolved is not allowed and
  * its reason is listed in `unresolved`: the write is refused with it.
  * @param {string[]} globs
  * @param {{branch: () => string|null, touches: (id: string) => string[]|null, conflicted: () => string[]|null}} ctx
@@ -158,7 +159,7 @@ export function resolveGlobs(globs, ctx) {
       const id = slice();
       if (id === null) unresolved.push(`${glob} cannot be resolved: the branch is not slice/S-nn-...`);
       else out.push(glob.replaceAll('<S-nn>', id));
-    } else out.push(glob);
+    } else out.push(glob.replace(/<[a-z][a-z-]*>/g, '*'));
   }
   return { globs: out, unresolved };
 }
@@ -328,9 +329,21 @@ export function logGuard(root, message) {
   }
 }
 
-/** The text of an agent file: the project copy first, then the plugin copy. Null when neither exists. */
-function agentFile(name, root, pluginRoot) {
-  const dirs = [join(root, '.claude', 'agents'), pluginRoot ? join(pluginRoot, 'harness', 'agents') : null];
+/**
+ * The text of an agent file, or null. `agentType` is the type of the event: `implementer` for an agent of the harness,
+ * installed in the project, or `recade:spike-runner` for an agent of the plugin itself, which lives in `agents/` of the
+ * plugin (the agents of the phases: the spike runner, the stack analyst, the writers of the documents). A type of the
+ * plugin is read from the plugin first; a bare one from the project copy, then the harness copy of the plugin.
+ */
+function agentFile(agentType, root, pluginRoot) {
+  const at = agentType.lastIndexOf(':');
+  const name = agentType.slice(at + 1);
+  if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) return null;
+  const ofPlugin = at > 0 && agentType.slice(0, at) === 'recade';
+  const project = join(root, '.claude', 'agents');
+  const harness = pluginRoot ? join(pluginRoot, 'harness', 'agents') : null;
+  const own = pluginRoot ? join(pluginRoot, 'agents') : null;
+  const dirs = ofPlugin ? [own, harness, project] : [project, harness];
   for (const dir of dirs) {
     if (dir === null) continue;
     const file = join(dir, `${name}.md`);
@@ -422,9 +435,8 @@ export async function handleHook(stdin, { cwd = process.cwd(), pluginRoot, home 
   const branch = run(root, ['symbolic-ref', '--short', '-q', 'HEAD']);
   const thresholds = thresholdsOf(root);
   let allow = null;
-  const name = agentType === null ? null : agentType.slice(agentType.lastIndexOf(':') + 1);
-  if (name !== null && /^[a-z0-9][a-z0-9-]*$/.test(name) && (WRITE_TOOLS.has(tool) || tool === 'Bash')) {
-    const text = agentFile(name, root, pluginRoot);
+  if (agentType !== null && (WRITE_TOOLS.has(tool) || tool === 'Bash')) {
+    const text = agentFile(agentType, root, pluginRoot);
     const writes = text === null ? null : parseWrites(text);
     if (writes !== null) {
       allow = resolveGlobs(writes, {
@@ -644,7 +656,7 @@ export function resolveEntries(lines, ctx) {
       else if (id !== null) entries.push({ repo, glob: glob.replaceAll('<S-nn>', id) });
       else if (ctx.anySlice === true) entries.push({ repo, glob: glob.replaceAll('<S-nn>', 'S-*') });
       else unresolved.push(`${line} cannot be resolved: ${noSlice}`);
-    } else entries.push({ repo, glob });
+    } else entries.push({ repo, glob: glob.replace(/<[a-z][a-z-]*>/g, '*') });
   }
   const list = id === null ? null : touchList();
   const sliceRepos = Array.isArray(list) ? reposOf(list, registry).filter(known) : [];
@@ -926,8 +938,7 @@ async function handleWorkspaceHook({ kind, dir, cwdGiven = true, tool, input, ag
     if (destroys !== null) return refuse(session.root, destroys);
   }
 
-  const name = agentType === null ? null : agentType.slice(agentType.lastIndexOf(':') + 1);
-  const text = name !== null && /^[a-z0-9][a-z0-9-]*$/.test(name) ? agentFile(name, session.root, pluginRoot) : null;
+  const text = agentType === null ? null : agentFile(agentType, session.root, pluginRoot);
   const listed = text === null ? null : parseWrites(text);
   // An agent with no Writes section (a general-purpose or custom agent) writes only the touches of the session's own
   // repository.
