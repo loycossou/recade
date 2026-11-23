@@ -185,6 +185,21 @@ test('reconcile: a merged slice with its DoD ticked is done in STATUS.md and on 
   for (const c of gh.comments) assert.equal(/\u2014/.test(c.body), false);
 });
 
+test('reconcile: a no-code slice has no pull request: the board follows STATUS.md, and a done one is Done with its issue closed', () => {
+  const root = project({ 'S-01': { status: 'done', lane: 'no-code', story: 'LOAN-01', touches: [] }, 'S-02': { status: 'todo', lane: 'no-code', story: 'PAY-01', touches: [] } });
+  const gh = fakeBoard({ items: { 'S-01': 'Backlog', 'LOAN-01': 'Backlog', 'S-02': 'Backlog', 'PAY-01': 'Backlog' } });
+  const result = reconcile(root, { exec: gh.exec, apply: true });
+  assert.deepEqual(result.errors, []);
+  assert.equal(gh.calls.some(([a, b]) => a === 'pr' && b === 'view'), false, 'no pull request is looked for');
+  assert.equal(itemStatus(gh, 'S-01'), 'Done');
+  assert.equal(itemStatus(gh, 'LOAN-01'), 'Done', 'the story of a done slice is done');
+  assert.equal(itemStatus(gh, 'S-02'), 'Backlog');
+  assert.deepEqual(gh.states.filter(([id]) => id.startsWith('S-')), [['S-01', 'close', 'completed']]);
+  assert.equal(statusOf(root, 'S-01'), 'done');
+  const row = result.rows.find((r) => r.id === 'S-01');
+  assert.equal(row.pr, 'none (no-code)');
+});
+
 test('reconcile: a dry run prints the table and writes nothing', () => {
   const root = project({ 'S-01': { status: 'ready-to-merge', story: 'LOAN-01' } });
   const before = readFileSync(join(root, 'slices', 'STATUS.md'), 'utf8');

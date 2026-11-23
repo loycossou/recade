@@ -2,6 +2,12 @@
 
 This file is curated by hand for each release. At tag time, `recade release-notes <from>..<to> --version <v> --write` produces the raw list from the conventional commits, and this section is then edited from it.
 
+## 1.4.1 (2026-11-23)
+
+### The board and the slices with no code
+
+- `recade board reconcile` (run by `/board`) no longer looks for a pull request for a `no-code` slice, which never has one. The board follows `slices/STATUS.md` for it: a done slice goes to `Done`, its stories with it, and its issue is closed like the one of a merged slice. Before, a done slice with no code was shown `In review`, or stayed where it was.
+
 ## 1.4.0 (2026-11-23)
 
 ### A slice with no code goes to the end

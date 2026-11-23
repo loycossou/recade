@@ -345,6 +345,19 @@ export function reconcile(root, { exec = defaultExec, apply = false, deferStatus
     /** The pull requests of the slice, one for each repository, when it spans the registry; null for a single one in the project folder. */
     let pulls = null;
     const names = sliceRepoOrder(s, registry);
+    if (s.lane === 'no-code') {
+      // A no-code slice has no pull request and never will: /slice closes it in STATUS.md, with its DoD ticked. The board
+      // follows STATUS.md, and the issue of a done slice is closed like the one of a merged slice.
+      row.pr = 'none (no-code)';
+      const current = s.status;
+      const dod = dodState(sheet.text);
+      const reason = current === 'done' && dod.open > 0 ? `STATUS.md says done with ${dod.open} line${dod.open === 1 ? '' : 's'} of the DoD open` : '';
+      effective.set(s.id, { status: current, done: current === 'done', reason });
+      row.target = BOARD_STATUS[current] ?? '';
+      row.reason = reason;
+      if (current === 'done') closes.add(s.id);
+      continue;
+    }
     if (!BRANCH.test(sheet.branch)) row.reason = 'its sheet names no usable branch, so there is no pull request to look at';
     else {
       try {
