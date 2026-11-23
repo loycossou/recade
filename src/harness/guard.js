@@ -352,6 +352,14 @@ function agentFile(agentType, root, pluginRoot) {
   return null;
 }
 
+/** Is this agent type an agent of the plugin itself, read from `agents/` of the plugin? */
+function pluginAgent(agentType, pluginRoot) {
+  const at = agentType.lastIndexOf(':');
+  if (at <= 0 || agentType.slice(0, at) !== 'recade' || !pluginRoot) return false;
+  const name = agentType.slice(at + 1);
+  return /^[a-z0-9][a-z0-9-]*$/.test(name) && existsSync(join(pluginRoot, 'agents', `${name}.md`));
+}
+
 /**
  * The threshold files a project state lists under `harness.threshold_files`, read without a YAML parser. `error` is true
  * when the key is there but its value cannot be read (a form this reader does not know), so the caller refuses writes.
@@ -939,7 +947,10 @@ async function handleWorkspaceHook({ kind, dir, cwdGiven = true, tool, input, ag
   }
 
   const text = agentType === null ? null : agentFile(agentType, session.root, pluginRoot);
-  const listed = text === null ? null : parseWrites(text);
+  // An agent of the plugin itself (the agents of the phases: the spike runner, the stack analyst, the writers of the
+  // documents) only ever writes the workspace: its lines are workspace lines, in a session that runs a slice too.
+  const ofPlugin = text !== null && pluginAgent(agentType, pluginRoot);
+  const listed = text === null ? null : parseWrites(text)?.map((line) => (ofPlugin && !line.startsWith('<') && !/^[a-z0-9][a-z0-9-]*:/.test(line) ? `${WORKSPACE_PREFIX}:${line}` : line)) ?? null;
   // An agent with no Writes section (a general-purpose or custom agent) writes only the touches of the session's own
   // repository.
   const narrow = agentType !== null && listed === null;

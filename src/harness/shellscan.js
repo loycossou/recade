@@ -625,8 +625,14 @@ export function checkBash(command, deny = {}) {
         return `${f} holds a threshold. Editing it through the shell is refused. A human changes thresholds.`;
       }
     }
-    const flat = collapse(command);
-    if (FIXED_SHELL.some((re) => re.test(command) || re.test(flat)) || tokenize(command).some((tokens) => tokens.some(namesHarness))) {
+    const harness = (c) => FIXED_SHELL.some((re) => re.test(c) || re.test(collapse(c))) || tokenize(c).some((tokens) => tokens.some(namesHarness));
+    if (harness(command)) {
+      // The usual case is no change at all: a command that reads .recade/plugin-root to find the plugin and writes a file
+      // of its own. It stays refused (the guard does not tell a read from a write in one command), with the way out.
+      const readsRoot = /\$\(\s*(?:cat|head(?:\s+-n?\s*1|\s+-1)?)\s+["']?[^)"'\s]*\.recade\/plugin-root["']?\s*\)/g;
+      if (readsRoot.test(command) && !harness(command.replace(readsRoot, 'PLUGIN'))) {
+        return 'This command reads .recade/plugin-root and writes a file in the same command, and the guard does not tell that read from a change of the harness. Read the plugin folder in a command of its own, then write its path itself in the next command.';
+      }
       return 'The stamps, the hooks, the settings and the project state are not changed through the shell. A human does that.';
     }
     if (writesGitFolder(command)) {

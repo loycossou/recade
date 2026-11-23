@@ -2451,3 +2451,28 @@ test('launcher: a clone with no .recade/plugin-root finds the Recade plugin Clau
   assert.equal(runLauncher(repo, ev('Bash', { command: 'ls' }), env).stdout, '');
   assert.equal(JSON.parse(runLauncher(repo, ev('Bash', { command: 'git push origin main' }), env).stdout).hookSpecificOutput.permissionDecision, 'deny');
 });
+
+test('root: in a session that runs a slice, an agent of the plugin writes its own workspace folders, and still nothing else', async () => {
+  const { ws, wt } = makeWorkspace({ touches: ['api:src/**'] });
+  const s = atRoot(ws);
+  await bind(ws, 'S-01');
+  assert.equal(await s.write('recade:spike-runner', join(ws, 'spikes', 'pdf-typst', 'RESULT.md')), '');
+  assert.equal(await s.write('recade:stack-analyst', join(ws, 'docs', 'STACK.md')), '');
+  denied(await s.write('recade:spike-runner', join(ws, 'docs', 'STACK.md')));
+  denied(await s.write('recade:spike-runner', join(ws, 'BIBLE.md')));
+  // Its lines never reach the code: the worktree of the slice stays the implementer's.
+  denied(await s.write('recade:spike-runner', join(ws, 'worktrees', 'api', 'S-01', 'src', 'a.js')));
+  // A harness agent's unprefixed lines still do not count in the workspace of a slice session.
+  denied(await s.write('implementer', join(ws, 'spikes', 'pdf-typst', 'RESULT.md')));
+});
+
+test('checkBash: reading .recade/plugin-root in a command that writes is refused with its own way out, a change of the harness keeps its message', async () => {
+  const { checkBash } = await import('../../src/harness/shellscan.js');
+  for (const c of ['node "$(cat /w/.recade/plugin-root)/bin/recade.js" spikes check > /w/spikes/a/check.txt', 'R=$(head -1 /w/.recade/plugin-root) && printf x > /w/spikes/a/MANIFEST.json']) {
+    assert.match(checkBash(c), /reads \.recade\/plugin-root and writes a file in the same command/, c);
+  }
+  for (const c of ['cat /w/.recade/plugin-root; date > /w/.recade/x', 'R=$(cat /w/.recade/plugin-root) > /w/.recade/plugin-root', 'echo x > .claude/settings.json']) {
+    assert.match(checkBash(c), /The stamps, the hooks, the settings and the project state/, c);
+  }
+  assert.equal(checkBash('date > /w/spikes/a/.start'), null);
+});

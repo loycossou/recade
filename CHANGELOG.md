@@ -2,6 +2,13 @@
 
 This file is curated by hand for each release. At tag time, `recade release-notes <from>..<to> --version <v> --write` produces the raw list from the conventional commits, and this section is then edited from it.
 
+## 1.2.2 (2026-11-23)
+
+### The agents of the plugin in a slice session
+
+- An agent of the plugin itself writes the workspace by its Writes lines in a session that runs a slice too. Its lines are workspace lines: these agents never write code. Before, in a session tied to a slice by `/slice`, the guard counted only the `workspace:` lines, and the spike runner could write nothing.
+- A command that reads `.recade/plugin-root` and writes a file in the same command is still refused, now with its own reason and the way out (read the plugin folder in a command of its own first). It used to say that the stamps, the hooks and the settings are not changed through the shell, which was not the case.
+
 ## 1.2.1 (2026-11-23)
 
 ### The agents of the plugin under the guard
