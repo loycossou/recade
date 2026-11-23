@@ -4,6 +4,12 @@
  */
 export const EXTRAS = Object.freeze(['stack', 'decisions', 'design', 'reviews']);
 
+/**
+ * The values of `deliverables.deck`, the PowerPoint deck for a steering committee: `ask` until the owner answered the
+ * question of `/recade:start` or `/recade:docs`, then `yes` or `no`. The deck is rendered only on `yes`.
+ */
+export const DECK_CHOICES = Object.freeze(['ask', 'yes', 'no']);
+
 /** True when `value` is the name of an extra deliverable. */
 export const isExtra = (value) => typeof value === 'string' && EXTRAS.includes(value);
 

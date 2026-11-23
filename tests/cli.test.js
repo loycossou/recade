@@ -21,11 +21,11 @@ function makeIO() {
   };
 }
 
-test('recade version prints 1.1.1 and exits 0', async () => {
+test('recade version prints 1.2.0 and exits 0', async () => {
   const t = makeIO();
   const code = await run(['version'], t.io);
   assert.equal(code, 0);
-  assert.equal(t.stdout().trim(), '1.1.1');
+  assert.equal(t.stdout().trim(), '1.2.0');
 });
 
 test('unknown command exits 2 with a hint on stderr', async () => {
@@ -57,5 +57,25 @@ test('listFiles ignores .git, node_modules and .superpowers and returns sorted r
     assert.deepEqual(listFiles(root, { exts: ['.md'], ignore: ['custom'] }), ['a.md', 'b.md', 'sub/c.md']);
   } finally {
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('recade version fails with ERR_MODULE_NOT_FOUND when a dependency is missing, so the setup runs npm ci', async () => {
+  const { cpSync, mkdirSync, mkdtempSync, readdirSync, rmSync, symlinkSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join, dirname } = await import('node:path');
+  const { fileURLToPath } = await import('node:url');
+  const { spawnSync } = await import('node:child_process');
+  const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+  const dir = mkdtempSync(join(tmpdir(), 'recade-deps-'));
+  try {
+    for (const p of ['package.json', 'src', 'bin', 'render', 'harness', 'templates', 'skills', 'commands', 'agents', 'tools']) cpSync(join(root, p), join(dir, p), { recursive: true });
+    mkdirSync(join(dir, 'node_modules'));
+    for (const name of readdirSync(join(root, 'node_modules'))) if (name !== 'pptxgenjs') symlinkSync(join(root, 'node_modules', name), join(dir, 'node_modules', name));
+    const r = spawnSync(process.execPath, [join(dir, 'bin', 'recade.js'), 'version'], { encoding: 'utf8' });
+    assert.equal(r.status, 1);
+    assert.match(r.stderr, /ERR_MODULE_NOT_FOUND.*missing: pptxgenjs/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });

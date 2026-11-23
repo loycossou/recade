@@ -1,6 +1,6 @@
 {
   "name": "recade",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "description": "Takes a software project from an idea to agents shipping it slice by slice, with an expert-inspired team, real documents and a human at every gate.",
   "type": "module",
   "engines": {
@@ -40,6 +40,7 @@
     "jszip": "^3",
     "marked": "^18",
     "playwright": "^1.65",
+    "pptxgenjs": "^4",
     "yaml": "^2"
   }
 }

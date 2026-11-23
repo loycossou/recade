@@ -9,7 +9,7 @@ import { checkRoot, renderIndexMd } from './index/check.js';
 import { stringify } from 'yaml';
 import { configPath, loadConfig, saveConfig, setConfigValue } from './config.js';
 import { WRITER_CHOICES, WRITER_MODELS, isSecondOpinionChoice, isWriterChoice } from './models.js';
-import { EXTRAS, isExtra } from './deliverables.js';
+import { DECK_CHOICES, EXTRAS, isExtra } from './deliverables.js';
 import { firstSliceDue, loadState, noteFirstSliceDone, saveState } from './state.js';
 import {
   PHASES, GATES, ADOPT_GATES, SETTINGS, decisionsOf, phasesOf, gatesOf, normalizeState, canStart, passGate, resetFrom, nextAction, projectRoot, workspaceOf, currentPhase, setSetting, trackOf, forgeOf, firstSliceLine,
@@ -127,7 +127,7 @@ function renderHelp() {
   out += `${term('recade release-notes')}Release notes from conventional commits: recade release-notes <from>..<to> [--version <v>] [--write]\n`;
   out += `${term('recade spikes')}Before a spike, check that this machine has the free memory and disk it needs, record what it holds and print the environment of the runner: recade spikes check --spike <layer>-<option> [--json]. After the spikes, remove what their manifests list and nothing else: recade spikes clean [--spike <layer>-<option>] [--json]\n`;
   out += `${term('recade docs')}Measure the project documents against their word budgets: recade docs size [D1|D2|D3|PLAN|STACK|BIBLE ...] [--json] | budgets [--json]. The team's own choices: recade decision team add | list | challenge\n`;
-  out += `${term('recade render')}Render Markdown documents to DOCX and XLSX and an HTML dossier, named <ID>_<Title> in the document language (PDF too with deliverables.pdf true): recade render <file.md...> [--format docx,xlsx,html,pdf] [--out <dir>] [--no-check], or the extras you chose (deliverables.extras: stack, decisions, design, reviews): recade render extras --project <dir> [--no-check]\n`;
+  out += `${term('recade render')}Render Markdown documents to DOCX and XLSX and an HTML dossier, named <ID>_<Title> in the document language (PDF too with deliverables.pdf true): recade render <file.md...> [--format docx,xlsx,html,pdf] [--out <dir>] [--no-check], or the extras you chose (deliverables.extras: stack, decisions, design, reviews; the PowerPoint deck with deliverables.deck yes): recade render extras --project <dir> [--no-check]\n`;
   return out;
 }
 
@@ -152,7 +152,21 @@ function renderHelpMarkdown() {
  */
 export const commands = {
   async version(_args, io) {
-    const { version } = JSON.parse(readFileSync(pkgUrl, 'utf8'));
+    const { version, dependencies = {} } = JSON.parse(readFileSync(pkgUrl, 'utf8'));
+    // The probe of /recade:setup and of Step 0: every dependency must resolve, without loading it. A plugin updated
+    // without `npm ci` lacks the new ones, and this is where the setup notices it.
+    const missing = Object.keys(dependencies).filter((name) => {
+      try {
+        import.meta.resolve(name);
+        return false;
+      } catch {
+        return true;
+      }
+    });
+    if (missing.length > 0) {
+      io.stderr.write(`ERR_MODULE_NOT_FOUND: the plugin dependencies are not all installed (missing: ${missing.join(', ')}). Run npm ci --omit=dev in the plugin folder.\n`);
+      return 1;
+    }
     io.stdout.write(`${version}\n`);
     return 0;
   },
@@ -2843,7 +2857,7 @@ const EXTRAS_USAGE = 'Usage: recade render extras [--project <dir>] [--no-check]
 
 /**
  * `recade render extras`: render the extra deliverables the owner chose (`deliverables.extras` of the user config)
- * into docs/deliverables. Exit 0 when none is chosen or a source is missing (a warning line), 1 when a check, a
+ * into docs/deliverables, and the deck for a steering committee when `deliverables.deck` is `yes`. Exit 0 when none is chosen or a source is missing (a warning line), 1 when a check, a
  * figure, Chromium or a write fails, 2 for a usage error.
  */
 async function renderExtrasCommand(args, io) {
@@ -2870,10 +2884,15 @@ async function renderExtrasCommand(args, io) {
     io.stderr.write(`deliverables.extras in ${configPath(io.env)} is not valid. Unknown extra deliverable: ${String(bad)}. ${fix}\n`);
     return 1;
   }
-  if (chosen.length === 0) {
-    io.stdout.write('No extra deliverables chosen. Choose some with: recade config set deliverables.extras stack,decisions,design,reviews\n');
-    return 0;
+  const deck = loaded.config.deliverables?.deck ?? 'ask';
+  if (!DECK_CHOICES.includes(deck)) {
+    io.stderr.write(`deliverables.deck in ${configPath(io.env)} must be ${DECK_CHOICES.join(', ')}. Fix it with: recade config set deliverables.deck yes (or no).\n`);
+    return 1;
   }
+  if (chosen.length === 0) io.stdout.write('No extra deliverables chosen. Choose some with: recade config set deliverables.extras stack,decisions,design,reviews\n');
+  if (deck === 'ask') io.stdout.write('No deck: deliverables.deck is ask, so the owner has not said yet. /recade:docs asks it, or: recade config set deliverables.deck yes (or no).\n');
+  else if (deck === 'no') io.stdout.write('No deck: deliverables.deck is no. Turn it on with: recade config set deliverables.deck yes\n');
+  if (chosen.length === 0 && deck !== 'yes') return 0;
   let engine;
   try {
     engine = await import('./render/extras.js');
@@ -2884,7 +2903,7 @@ async function renderExtrasCommand(args, io) {
   const warn = (warnings) => { for (const w of warnings ?? []) io.stderr.write(`Warning: ${w}\n`); };
   try {
     const { outputs, findings, warnings, stale } = await engine.renderExtras(root, chosen, {
-      check: !args.includes('--no-check'), pdf: loaded.config.deliverables?.pdf === true, env: io.env,
+      check: !args.includes('--no-check'), pdf: loaded.config.deliverables?.pdf === true, deck: deck === 'yes', env: io.env,
       // Test seams, as for render.
       chromiumStatus: io.chromiumStatus ? () => io.chromiumStatus(io.env) : undefined,
       withBrowser: io.withBrowser,

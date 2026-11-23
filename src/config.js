@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { parse, stringify } from 'yaml';
 import { configDir } from './paths.js';
 import { SECOND_OPINION_CHOICES, WRITER_CHOICES, isSecondOpinionChoice, isWriterChoice } from './models.js';
-import { parseExtras } from './deliverables.js';
+import { DECK_CHOICES, parseExtras } from './deliverables.js';
 
 export const DEFAULT_CONFIG = Object.freeze({
   version: 1,
@@ -19,7 +19,7 @@ export const DEFAULT_CONFIG = Object.freeze({
   projects_root: '~/projects',
   voice: 'randall-munroe',
   models: Object.freeze({ writer: 'opus', second_opinion: 'opus' }),
-  deliverables: Object.freeze({ extras: Object.freeze([]), pdf: false }),
+  deliverables: Object.freeze({ extras: Object.freeze([]), pdf: false, deck: 'ask' }),
   // The owner's stack preferences: for each language, the framework the stack analyst puts first when it fits.
   stack: Object.freeze({ prefer: Object.freeze({ php: 'symfony' }) }),
 });
@@ -169,6 +169,7 @@ export function setConfigValue(config, key, raw) {
     value = raw.trim();
     if (key === 'voice' && value === '') throw new Error('voice cannot be empty.');
     if (key === 'models.writer' && !isWriterChoice(value)) throw new Error(`models.writer must be ${WRITER_CHOICES.join(' or ')}.`);
+    if (key === 'deliverables.deck' && !DECK_CHOICES.includes(value)) throw new Error(`deliverables.deck must be ${DECK_CHOICES.join(', ')}.`);
     if (key === 'models.second_opinion' && !isSecondOpinionChoice(value)) throw new Error(`models.second_opinion must be ${SECOND_OPINION_CHOICES.join(' or ')}.`);
   }
   if (LANGUAGE_KEYS.has(key)) {

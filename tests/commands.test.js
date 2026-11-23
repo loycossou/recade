@@ -959,6 +959,50 @@ test('start.md asks the extra files once, with multiSelect and four options, aft
   assert.equal(step4.split('multiSelect').length, 2);
 });
 
+test('start.md asks the deck as its own single-choice question right after the extra files, No first, and saves it', () => {
+  const step4 = stepSection('start.md', 4);
+  const deck = step4.slice(step4.indexOf('6. Deck'), step4.indexOf('7. Writing voice'));
+  for (const part of [
+    '"Do you want a PowerPoint deck that sums up the project for a steering committee?"',
+    '- **No** (recommended):',
+    '- **Yes**:',
+    'Saved as `no`.',
+    'Saved as `yes`.',
+    '`recade config set deliverables.deck <yes or no>`',
+    'Skip it when `recade config get deliverables.deck` prints `yes` or `no`.',
+  ]) assert.ok(deck.includes(part), part);
+  assert.ok(deck.indexOf('**No**') < deck.indexOf('**Yes**'));
+  assert.ok(step4.indexOf('Extra files') < step4.indexOf('6. Deck'));
+  assert.equal(deck.includes('multiSelect'), false);
+});
+
+test('docs.md asks the deck once before render extras when deliverables.deck is ask, in trust mode too', () => {
+  const point5 = stepSection('docs.md', 9).split('\n').find((l) => l.startsWith('5. '));
+  for (const part of [
+    '`recade config get deliverables.deck`',
+    'When it prints `ask`',
+    '"Do you want a PowerPoint deck that sums up the project for a steering committee?"',
+    '`No` (recommended',
+    'Ask it in trust mode too',
+    '`recade config set deliverables.deck <yes or no>`',
+  ]) assert.ok(point5.includes(part), part);
+  assert.ok(point5.indexOf('deliverables.deck <yes or no>') < point5.indexOf("`recade render extras --project '<dir>'`"));
+  assert.ok(point5.indexOf('`No` (recommended') < point5.indexOf('`Yes`'));
+});
+
+test('the README, the design document and the changelog describe deliverables.deck', () => {
+  const readme = readFileSync(join(repo, 'README.md'), 'utf8');
+  const design = readFileSync(join(repo, 'docs', 'design.md'), 'utf8');
+  for (const text of [readme, design]) {
+    assert.ok(text.includes('deliverables.deck'));
+    assert.ok(text.includes('DECK_<Title>.pptx'));
+  }
+  const changelog = readFileSync(join(repo, 'CHANGELOG.md'), 'utf8');
+  const top = changelog.slice(changelog.indexOf('## 1.2.0'), changelog.indexOf('\n## 1.1.1'));
+  assert.ok(top.startsWith('## 1.2.0 (2026-11-23)\n\n### A deck for the steering committee'));
+  assert.ok(top.includes('deliverables.deck'));
+});
+
 test('setup.md and help.md show deliverables.extras and how to change it', () => {
   for (const f of ['setup.md', 'help.md']) {
     const text = read(f);

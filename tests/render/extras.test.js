@@ -244,13 +244,14 @@ test('a heading inside a code fence of a review note is not moved down', () => {
 // ---------------------------------------------------------------------------------------------------------------
 // The command
 
-test('with no extra chosen, render extras prints one line, writes nothing and exits 0', async (t) => {
+test('with no extra chosen and no deck, render extras prints one line for each, writes nothing and exits 0', async (t) => {
   const root = project(t);
   for (const extras of [undefined, []]) {
     const { code, out, err } = await cli(root, extras, {}, t);
     assert.equal(code, 0, err);
-    assert.equal(out.trim().split('\n').length, 1);
+    assert.equal(out.trim().split('\n').length, 2);
     assert.match(out, /No extra deliverables chosen/);
+    assert.match(out, /^No deck: deliverables\.deck is ask/m);
     assert.match(out, /recade config set deliverables\.extras/);
     assert.equal(err, '');
   }

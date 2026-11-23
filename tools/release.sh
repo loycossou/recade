@@ -71,8 +71,15 @@ if git -C "$REL" diff --cached --quiet; then
   echo "release: main has nothing new for the release repository."
   COMMITTED=0
 else
-  # 6a. Tests and checks on the copy, before the commit.
+  # 6a. Tests and checks on the copy, before the commit. A new or changed dependency is installed first, as the
+  # installed plugin gets it from this folder.
   LOG="$(mktemp)"
+  if [ -f "$REL/package-lock.json" ] && { [ ! -d "$REL/node_modules" ] || ! git -C "$REL" diff --cached --quiet -- package-lock.json; }; then
+    if ! (cd "$REL" && npm ci --no-audit --no-fund >"$LOG" 2>&1); then
+      fail "npm ci failed in $REL (full log: $LOG). Nothing was committed; run git -C \"$REL\" reset --hard to drop the copy."
+    fi
+    echo "release: dependencies installed with npm ci."
+  fi
   if ! (cd "$REL" && npm test >"$LOG" 2>&1) || ! grep -q '^# fail 0' "$LOG"; then
     grep -E '^# (pass|fail)|^not ok' "$LOG" | head -20 >&2 || true
     fail "npm test failed in $REL (full log: $LOG). Nothing was committed; run git -C \"$REL\" reset --hard to drop the copy."

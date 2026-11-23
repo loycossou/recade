@@ -67,7 +67,7 @@ export function collectFigures(blocks, out = []) {
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 /** Pixel size from the IHDR chunk, or null when the bytes are not a PNG (signature, IHDR, length, size). */
-function pngSize(png) {
+export function pngSize(png) {
   if (png.length < 33 || !png.subarray(0, 8).equals(PNG_SIGNATURE) || png.toString('latin1', 12, 16) !== 'IHDR') return null;
   const width = png.readUInt32BE(16);
   const height = png.readUInt32BE(20);

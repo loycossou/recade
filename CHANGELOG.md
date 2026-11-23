@@ -2,6 +2,19 @@
 
 This file is curated by hand for each release. At tag time, `recade release-notes <from>..<to> --version <v> --write` produces the raw list from the conventional commits, and this section is then edited from it.
 
+## 1.2.0 (2026-11-23)
+
+### A deck for the steering committee
+
+- A PowerPoint deck that sums up the project for a steering committee, `DECK_<Title>.pptx` in `docs/deliverables/`, named in the documents language. It is never made without asking: the user config key `deliverables.deck` is `ask` by default, `/recade:start` asks it right after the extra files (`No` recommended), and `/recade:docs` asks it once before `recade render extras` when it is still `ask`. `recade config set deliverables.deck yes` (or `no`) changes it.
+- `recade render extras` writes it on `yes`: a title, then the project (context and goal, key figures, scope), the technical side (architecture with the first figure of D2, security essentials) and the delivery (the lots as a timeline, the decisions, the open provisional values, the next gate and the milestones ahead), each part opened by a divider. A missing source drops its slide with a `Warning:` line.
+- The slides are full of colour: full-bleed title and dividers with vector motifs, a coloured band on every other slide, cards and big numbers. The look and feel slide shows the board of the chosen art direction, and the figure of D2 gets a slide of its own. The project is named as its documents write it, accents included.
+- It is in the colours of the logo when the project has one, else of the art direction tokens, else of the render theme, with the logo on every slide, text contrast checked against WCAG AA, and Inter Tight everywhere. One new dependency, `pptxgenjs` (MIT).
+
+### Dependencies checked at setup
+
+- `recade version`, the probe of `/recade:setup` and of the first step of each command, now fails with `ERR_MODULE_NOT_FOUND` when a dependency of the plugin is missing, so the setup runs `npm ci` after an update that adds one (here `pptxgenjs`).
+
 ## 1.1.1 (2026-11-23)
 
 ### A private Recade

@@ -10,7 +10,8 @@ import { chromiumStatus as defaultChromiumStatus, withBrowser as defaultWithBrow
 import { splitFrontMatter } from './frontmatter.js';
 import { parseDocument } from './parse.js';
 import { loadTheme, loadLabels } from './theme.js';
-import { allowRequest, insideProject } from './figures.js';
+import { allowRequest, collectFigures, insideProject, pngSize, renderFigures } from './figures.js';
+import { chosenBoard, deckBytes, deckContent, deckPalette, displayName, findLogo, imageColours } from './deck.js';
 import { renderTablesWorkbook, stackMatrixSheets } from './xlsx.js';
 import { deliverableName, slugTitle } from './names.js';
 import {
@@ -288,6 +289,111 @@ export async function printBoard(browser, file, root) {
 }
 
 // ---------------------------------------------------------------------------------------------------------------
+// The deck for a steering committee
+
+/** Width and height of a JPEG from its first frame header, or null. */
+function jpegSize(bytes) {
+  if (bytes[0] !== 0xff || bytes[1] !== 0xd8) return null;
+  for (let at = 2; at + 9 < bytes.length;) {
+    if (bytes[at] !== 0xff) return null;
+    const marker = bytes[at + 1];
+    const length = bytes.readUInt16BE(at + 2);
+    if (marker >= 0xc0 && marker <= 0xcf && ![0xc4, 0xc8, 0xcc].includes(marker)) {
+      return { height: bytes.readUInt16BE(at + 5), width: bytes.readUInt16BE(at + 7) };
+    }
+    at += 2 + length;
+  }
+  return null;
+}
+
+/**
+ * The top of a design board as a PNG, as wide as the picture slide, with the same rules as its PDF: JavaScript off, the network off, and only
+ * data URLs and files inside the project fetched.
+ */
+async function shootBoard(browser, file, root) {
+  const context = await browser.newContext({ javaScriptEnabled: false, offline: true, viewport: { width: 1600, height: 680 }, deviceScaleFactor: 1.5 });
+  try {
+    await context.route('**/*', (route) => (allowRequest(route.request().url(), root) ? route.continue() : route.abort()));
+    const page = await context.newPage();
+    await page.goto(pathToFileURL(file).href, { waitUntil: 'load' });
+    await page.evaluate(() => document.fonts.ready.then(() => undefined));
+    return Buffer.from(await page.screenshot({ type: 'png' }));
+  } finally {
+    await context.close();
+  }
+}
+
+/** One figure drawn to a PNG through the figure cache, with the browser of the run only when the cache has none. */
+async function drawFigure(root, doc, figure, theme, { browser, mark }) {
+  const drawn = await renderFigures({ ...doc, blocks: [figure] }, {
+    withBrowser: async (fn) => { mark('figures'); return fn(await browser.get()); },
+    cacheDir: join(root, CACHE_DIR, 'figures'), docDir: join(root, 'docs'), projectRoot: root, theme,
+  });
+  const image = drawn.get(figure.id);
+  return image?.png ? { bytes: image.png, width: image.width, height: image.height, mime: 'image/png' } : null;
+}
+
+/**
+ * The deck as one extra file. Its content is read now, so the warnings come with the others; its pictures (the logo,
+ * the first figure of D2) are drawn when the browser of the run exists. A picture that cannot be drawn is a warning.
+ */
+function deckJob(root, meta, lots, outDir, warnings, theme) {
+  const labels = loadLabels(meta.language).deck;
+  const project = displayName(root, meta.project);
+  const { entries } = readDecisions(root);
+  const content = deckContent(root, { project, date: meta.date, labels, decisions: { entries } });
+  warnings.push(...content.warnings);
+  const title = `${project}, ${labels.title}`;
+  const file = join(outDir, `${deliverableName('DECK', { title, project })}.pptx`);
+  return { file, build: async (ctx) => {
+    const images = {};
+    let logoColours = [];
+    const logo = findLogo(root);
+    if (logo) {
+      try {
+        const bytes = readFileSync(logo.file);
+        logoColours = imageColours(bytes, logo.ext);
+        if (logo.ext === '.png') {
+          const size = pngSize(bytes);
+          if (size) images.logo = { bytes, ...size, mime: 'image/png' };
+        } else if (logo.ext === '.svg') {
+          const figure = { type: 'figure', id: 'deck-logo', line: 1, source: { kind: 'svg', path: relative(join(root, 'docs'), logo.file) } };
+          images.logo = await drawFigure(root, { file: logo.rel, meta: {}, blocks: [] }, figure, theme(), ctx);
+        } else {
+          const size = jpegSize(bytes);
+          if (size) images.logo = { bytes, ...size, mime: 'image/jpeg' };
+        }
+      } catch (err) {
+        warnings.push(`deck: the logo ${logo.rel} could not be drawn, the deck uses its colours only: ${oneLine(err)}`);
+      }
+    }
+    if (content.slides.some((s) => s.kind === 'figure')) {
+      try {
+        const text = readFileSync(join(root, 'docs', 'D2.md'), 'utf8');
+        const doc = parseDocument(text, 'docs/D2.md', { lots });
+        const [figure] = collectFigures(doc.blocks);
+        if (figure) images.architecture = await drawFigure(root, doc, figure, theme(), ctx);
+      } catch (err) {
+        warnings.push(`deck: the first figure of docs/D2.md could not be drawn, the architecture slide is text only: ${oneLine(err)}`);
+      }
+    }
+    const board = content.slides.some((s) => s.image === 'board') ? chosenBoard(root) : null;
+    if (board) {
+      try {
+        ctx.mark('pdf');
+        const bytes = await shootBoard(await ctx.browser.get(), board.file, root);
+        const size = pngSize(bytes);
+        if (size) images.board = { bytes, ...size, mime: 'image/png' };
+      } catch (err) {
+        warnings.push(`deck: the board ${board.rel} could not be pictured, the look and feel slide is left out: ${oneLine(err)}`);
+      }
+    }
+    const palette = deckPalette(root, theme(), logoColours);
+    return deckBytes(content, { project, date: meta.date, title, palette, labels, language: meta.language, images });
+  } };
+}
+
+// ---------------------------------------------------------------------------------------------------------------
 
 /**
  * Render the extra deliverables the owner chose, into `docs/deliverables`. Every source is read, checked and built
@@ -299,10 +405,12 @@ export async function printBoard(browser, file, root) {
  * - `design`: one `DESIGN_<Board>.pdf` for each HTML board of `design/directions/`, and `DESIGN_<Title>.docx` from
  *   `design/references.md` when it exists.
  * - `reviews`: REVIEWS_<Title>.docx, from the notes of `docs/reviews/`, built in memory.
+ * - `deck` (the option, `deliverables.deck` set to `yes`): DECK_<Title>.pptx, the summary of the project for a
+ *   steering committee. A missing source drops its slide with a warning.
  * `stale` lists the files of an older render left as they were (the old names, a PDF no longer asked for).
  * @param {string} root project folder
  * @param {string[]} extras names among `stack`, `decisions`, `design`, `reviews`
- * @param {{check?:boolean, pdf?:boolean, date?:string, env?:Record<string,string|undefined>,
+ * @param {{check?:boolean, pdf?:boolean, deck?:boolean, date?:string, env?:Record<string,string|undefined>,
  *   chromiumStatus?:typeof defaultChromiumStatus, withBrowser?:typeof defaultWithBrowser,
  *   rename?:(from:string, to:string)=>void}} [options]
  * @returns {Promise<{outputs:string[], findings:Finding[], warnings:string[], stale:string[]}>}
@@ -420,6 +528,7 @@ export async function renderExtras(root, extras, options = {}) {
         }
       }
     }
+    if (options.deck === true) extraFiles.push(deckJob(root, meta(), lots, outDir, warnings, () => (theme ??= loadTheme(root))));
   } catch (err) {
     throw fail(err);
   }
@@ -443,7 +552,7 @@ export async function renderExtras(root, extras, options = {}) {
         needs = 'pdf';
         files.push({ file: item.file, bytes: await printBoard(await browser.get(), item.print, root) });
       } else {
-        files.push({ file: item.file, bytes: await item.build() });
+        files.push({ file: item.file, bytes: await item.build({ browser, mark: (what) => { needs = what; } }) });
       }
     }
   } catch (err) {

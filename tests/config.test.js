@@ -40,7 +40,7 @@ test('DEFAULT_CONFIG has the documented values', () => {
     projects_root: '~/projects',
     voice: 'randall-munroe',
     models: { writer: 'opus', second_opinion: 'opus' },
-    deliverables: { extras: [], pdf: false },
+    deliverables: { extras: [], pdf: false, deck: 'ask' },
     stack: { prefer: { php: 'symfony' } },
   });
 });
@@ -406,6 +406,29 @@ test('deliverables.extras refuses an unknown name, none beside a name, and a bar
   assert.throws(() => setConfigValue(DEFAULT_CONFIG, 'deliverables.other', 'x'), /Unknown key/);
 });
 
+test('deliverables.deck is ask by default, takes yes and no, and refuses anything else in one line', async () => {
+  assert.equal(DEFAULT_CONFIG.deliverables.deck, 'ask');
+  for (const v of ['yes', 'no', 'ask']) assert.equal(setConfigValue(DEFAULT_CONFIG, 'deliverables.deck', v).deliverables.deck, v);
+  for (const v of ['true', 'Yes', 'maybe', '']) {
+    assert.throws(() => setConfigValue(DEFAULT_CONFIG, 'deliverables.deck', v), { message: 'deliverables.deck must be ask, yes, no.' }, JSON.stringify(v));
+  }
+  const dir = tmp();
+  const env = { RECADE_CONFIG_DIR: dir };
+  const go = async (args) => {
+    const t = makeIO(dir, env);
+    const code = await run(args, t.io);
+    return { code, out: t.stdout(), err: t.stderr() };
+  };
+  assert.deepEqual(await go(['config', 'get', 'deliverables.deck']), { code: 0, out: 'ask\n', err: '' });
+  assert.equal((await go(['config', 'set', 'deliverables.deck', 'yes'])).code, 0);
+  assert.equal((await go(['config', 'get', 'deliverables.deck'])).out, 'yes\n');
+  const bad = await go(['config', 'set', 'deliverables.deck', 'maybe']);
+  assert.equal(bad.code, 2);
+  assert.equal(bad.err, 'deliverables.deck must be ask, yes, no.\n');
+  assert.equal(parse(readFileSync(join(dir, 'config.yaml'), 'utf8')).deliverables.deck, 'yes');
+  rmSync(dir, { recursive: true });
+});
+
 test('deliverables.pdf is off by default, and config set turns it on and off', async () => {
   const dir = tmp();
   const env = { RECADE_CONFIG_DIR: dir };
@@ -434,7 +457,7 @@ test('recade config set and get round-trip deliverables.extras, and the file kee
   assert.deepEqual(await go(['config', 'get', 'deliverables.extras']), { code: 0, out: '[]\n', err: '' });
   assert.equal((await go(['config', 'set', 'deliverables.extras', 'design,stack'])).code, 0);
   assert.equal((await go(['config', 'get', 'deliverables.extras'])).out, '- stack\n- design\n');
-  assert.deepEqual(parse(readFileSync(join(dir, 'config.yaml'), 'utf8')).deliverables, { extras: ['stack', 'design'], pdf: false });
+  assert.deepEqual(parse(readFileSync(join(dir, 'config.yaml'), 'utf8')).deliverables, { extras: ['stack', 'design'], pdf: false, deck: 'ask' });
   const bad = await go(['config', 'set', 'deliverables.extras', 'pdf']);
   assert.equal(bad.code, 2);
   assert.equal(bad.err, 'Unknown extra deliverable: pdf. Use stack, decisions, design, reviews, or none.\n');
