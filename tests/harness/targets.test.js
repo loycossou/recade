@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { parseWrites } from '../../src/harness/guard.js';
@@ -12,6 +12,7 @@ import { verify } from '../../src/harness/verify.js';
 import { readCreated } from '../../src/project/adopt.js';
 import { loadState, saveState } from '../../src/state.js';
 import { checkLink } from '../../src/workspace/layout.js';
+import { LOCAL_HOOK_MARK } from '../../src/harness/install.js';
 import { cli, git, makeWorkspace, perRepoStack, plugin } from './fixture-project.js';
 
 const REF = 'v1.0.0';
@@ -22,8 +23,11 @@ const harnessCommands = names(join(plugin, 'harness', 'commands')).map((f) => f.
 const installWs = (ws, extra = {}) => install(ws.dir, { pluginRoot: plugin, target: 'workspace', ref: REF, ...extra });
 const installCode = (ws, name, extra = {}) => install(ws.repo(name), { pluginRoot: plugin, target: 'code', workspace: ws.dir, ref: REF, ...extra });
 const errors = (r, check) => r.findings.filter((f) => f.severity === 'error' && (check === undefined || f.check === check));
+/** The git hooks folder of a checkout (shared by its worktrees). */
+const hooksDir = (root) => join(root, git(root, 'rev-parse', '--git-path', 'hooks').stdout.trim());
+const isExec = (file) => (statSync(file).mode & 0o111) !== 0;
 
-test('TARGETS: the workspace gets every command and every agent, a code repository only its pointer', () => {
+test('TARGETS: the workspace gets every command and every agent, a code repository none of them', () => {
   assert.deepEqual(TARGET_NAMES, ['workspace', 'code']);
   const ws = selectFor('workspace', { commands: harnessCommands, agents: harnessAgents });
   // One entry point: every command and every agent of the plugin goes to the workspace, so nothing is left out.
@@ -34,10 +38,9 @@ test('TARGETS: the workspace gets every command and every agent, a code reposito
   const code = selectFor('code', { commands: harnessCommands, agents: harnessAgents });
   assert.deepEqual(code.commands, []);
   assert.deepEqual(code.agents, []);
-  assert.deepEqual(code.pointers, ['slice']);
+  assert.deepEqual(code.pointers, [], 'a code repository holds no file of the harness, not even a pointer');
   assert.equal(code.protocol, false);
-  assert.deepEqual([...TARGETS.code.pointers], ['slice']);
-  for (const p of TARGETS.code.pointers) assert.ok(existsSync(join(plugin, 'harness', 'pointer', `${p}.md`)), p);
+  assert.deepEqual([...TARGETS.code.pointers], []);
 });
 
 test('a workspace install moves repos/ and worktrees/ of an older .gitignore to .git/info/exclude, and git still ignores them', async () => {
@@ -47,7 +50,9 @@ test('a workspace install moves repos/ and worktrees/ of an older .gitignore to 
   const r = installWs(ws);
   assert.deepEqual(read(ws.dir, '.gitignore').split('\n').filter((l) => ['repos/', 'worktrees/'].includes(l)), []);
   assert.ok(read(ws.dir, '.gitignore').split('\n').includes('artifacts/'), 'the other lines stay');
-  assert.match(read(ws.dir, '.git/info/exclude'), /^# git ls-files.*\nrepos\/\nworktrees\/\n$/, 'lines are only added');
+  const exclude = read(ws.dir, '.git/info/exclude');
+  assert.match(exclude, /^# git ls-files --others --exclude-from=\.git\/info\/exclude\n/, 'lines are only added: the first line stays');
+  for (const line of ['/repos/', '/worktrees/', '/.recade/']) assert.ok(exclude.split('\n').includes(line), line);
   assert.match(r.warnings.join('\n'), /Commit \.gitignore/);
   mkdirSync(join(ws.dir, 'worktrees', 'api', 'S-01'), { recursive: true });
   writeFileSync(join(ws.dir, 'worktrees', 'api', 'S-01', 'build.gradle.kts'), 'x\n');
@@ -55,88 +60,119 @@ test('a workspace install moves repos/ and worktrees/ of an older .gitignore to 
   assert.equal(git(ws.dir, 'check-ignore', 'worktrees/api/S-01/build.gradle.kts').stdout.trim(), 'worktrees/api/S-01/build.gradle.kts');
 });
 
-test('a workspace install writes every command, every agent, the guard, the hooks and workspace.yml, and ignores worktrees/', async () => {
+test('a workspace install writes every command and every agent, sets up the local git hooks, and writes no hook, guard or workflow in git', async () => {
   const ws = await makeWorkspace();
   const r = installWs(ws);
   assert.deepEqual(names(join(ws.dir, '.claude', 'commands')), harnessCommands.map((c) => `${c}.md`).sort());
   assert.ok(existsSync(join(ws.dir, '.claude', 'commands', 'slice.md')), '/slice is typed at the root of the workspace');
   assert.match(read(ws.dir, '.claude/commands/slice.md'), /sensitive_model/, 'the real command, not the pointer');
   assert.deepEqual(names(join(ws.dir, '.claude', 'agents')).map((f) => f.replace(/\.md$/, '')).sort(), harnessAgents);
-  for (const f of ['.claude/protocol.md', '.claude/settings.json', '.claude/hooks/recade-guard.mjs', '.githooks/pre-commit', '.githooks/commit-msg', '.github/workflows/workspace.yml', '.recade/plugin-root']) {
-    assert.ok(existsSync(join(ws.dir, f)), f);
+  for (const f of ['.claude/protocol.md', '.recade/plugin-root']) assert.ok(existsSync(join(ws.dir, f)), f);
+  // The guard is a hook of the plugin and the git hooks are local: nothing that runs only with Recade is committed.
+  for (const f of ['.claude/settings.json', '.claude/hooks/recade-guard.mjs', '.githooks', '.github/workflows/workspace.yml', '.github/workflows/ci.yml', '.github/dependabot.yml', '.recade/workspace']) {
+    assert.equal(existsSync(join(ws.dir, f)), false, f);
   }
-  for (const f of ['.github/workflows/ci.yml', '.github/workflows/conflicts.yml', '.github/workflows/second-opinion.yml', '.github/dependabot.yml', '.recade/workspace']) {
-    assert.equal(existsSync(join(ws.dir, f)), false, `${f} belongs to a code repository`);
+  assert.equal(read(ws.dir, '.recade/plugin-root'), `${plugin}\n`);
+  for (const name of ['pre-commit', 'commit-msg']) {
+    const hook = join(hooksDir(ws.dir), name);
+    assert.ok(existsSync(hook), name);
+    assert.ok(isExec(hook), `${name} is executable`);
+    assert.match(read(hook, ''), new RegExp(LOCAL_HOOK_MARK));
   }
-  assert.match(read(ws.dir, '.githooks/pre-commit'), /lint-style/);
-  assert.match(read(ws.dir, '.githooks/pre-commit'), /index check/);
-  assert.doesNotMatch(read(ws.dir, '.githooks/pre-commit'), /gate check/);
-  assert.equal(git(ws.dir, 'config', '--get', 'core.hooksPath').stdout.trim(), '.githooks');
+  assert.match(read(hooksDir(ws.dir), 'pre-commit'), /harness\/githooks\/pre-commit-workspace/, 'the workspace runs the hook of the documents');
+  assert.notEqual(git(ws.dir, 'config', '--get', 'core.hooksPath').status, 0, 'no core.hooksPath: the local hooks run');
+  assert.equal(r.hooksPath, true);
   assert.equal(r.written.every((w) => w.status === 'created'), true);
   const ignore = read(ws.dir, '.gitignore');
-  for (const line of ['artifacts/', 'tmp/', '.recade/', '.claude/settings.local.json']) assert.ok(ignore.split('\n').includes(line), line);
+  for (const line of ['artifacts/', 'tmp/', '.recade/']) assert.ok(ignore.split('\n').includes(line), line);
   // The code checkouts are kept out by .git/info/exclude, which only git reads: a tool run in a checkout does not skip it.
   const exclude = read(ws.dir, '.git/info/exclude').split('\n');
   for (const line of ['repos/', 'worktrees/']) {
-    assert.ok(exclude.includes(line), line);
+    assert.ok(exclude.includes(`/${line}`), `/${line}, anchored, so recade/repos/ stays tracked`);
     assert.equal(ignore.split('\n').includes(line), false, `${line} is not in .gitignore`);
   }
   assert.equal(installWs(ws).written.every((w) => w.status === 'unchanged'), true, 'a second install changes nothing');
-  // The install record holds the hash of each file it wrote.
+  // The install record holds the hash of each file it wrote, and the version.
   const record = JSON.parse(read(ws.dir, '.recade/installed.json'));
   assert.match(record.files['.claude/commands/slice.md'], /^[0-9a-f]{64}$/);
+  assert.equal(record.version, JSON.parse(readFileSync(join(plugin, 'package.json'), 'utf8')).version);
 });
 
-test('workspace.yml runs style, the ID index and the slice check, pinned to the ref, and nothing of the code', async () => {
+test('a workspace install takes out what an older install committed: the hooks, the launcher, workspace.yml and its rules in settings.json', async () => {
+  const ws = await makeWorkspace();
+  mkdirSync(join(ws.dir, '.githooks'), { recursive: true });
+  mkdirSync(join(ws.dir, '.claude', 'hooks'), { recursive: true });
+  mkdirSync(join(ws.dir, '.github', 'workflows'), { recursive: true });
+  writeFileSync(join(ws.dir, '.githooks', 'pre-commit'), '#!/bin/sh\n# Recade harness pre-commit for the workspace\n');
+  writeFileSync(join(ws.dir, '.githooks', 'commit-msg'), '#!/bin/sh\n# Recade harness commit-msg\n');
+  writeFileSync(join(ws.dir, '.claude', 'hooks', 'recade-guard.mjs'), '// Recade harness: the launcher of the guard\n');
+  writeFileSync(join(ws.dir, '.github', 'workflows', 'workspace.yml'), '# Generated by recade harness v1.5.3.\nname: Workspace\n');
+  writeFileSync(join(ws.dir, '.github', 'workflows', 'mine.yml'), 'name: Mine\n');
+  const template = JSON.parse(readFileSync(join(plugin, 'harness', 'settings.json'), 'utf8'));
+  writeFileSync(join(ws.dir, '.claude', 'settings.json'), JSON.stringify({ ...template, permissions: { deny: [...template.permissions.deny, 'Bash(rm -rf:*)'] } }, null, 2));
+  git(ws.dir, 'config', 'core.hooksPath', '.githooks');
+  const r = installWs(ws);
+  for (const f of ['.githooks', '.claude/hooks', '.github/workflows/workspace.yml']) assert.equal(existsSync(join(ws.dir, f)), false, f);
+  assert.ok(existsSync(join(ws.dir, '.github', 'workflows', 'mine.yml')), 'a workflow of the team stays');
+  const settings = JSON.parse(read(ws.dir, '.claude/settings.json'));
+  assert.deepEqual(settings, { permissions: { deny: ['Bash(rm -rf:*)'] } }, 'only the rule of the team is left');
+  assert.ok(r.written.some((w) => w.file === '.github/workflows/workspace.yml' && w.status === 'removed'));
+  assert.notEqual(git(ws.dir, 'config', '--get', 'core.hooksPath').status, 0, 'the old core.hooksPath is unset');
+  // With nothing of the team left, settings.json goes.
+  writeFileSync(join(ws.dir, '.claude', 'settings.json'), `${JSON.stringify(template, null, 2)}\n`);
+  installWs(ws);
+  assert.equal(existsSync(join(ws.dir, '.claude', 'settings.json')), false);
+});
+
+test('a team path added to the generic Writes list of an agent moves below the specialisation line at the next install', async () => {
   const ws = await makeWorkspace();
   installWs(ws);
-  const text = read(ws.dir, '.github/workflows/workspace.yml');
-  assert.equal(parseDocument(text).errors.length, 0);
-  assert.match(text, /^# Generated by recade harness/);
-  assert.match(text, /RECADE_REF: v1\.0\.0/);
-  assert.match(text, /lint-style \./);
-  assert.match(text, /index check \./);
-  assert.match(text, /slices check --project \./);
-  assert.doesNotMatch(text, /__RECADE_/);
-  assert.doesNotMatch(text, /quarantine|playwright|Typecheck|Unit tests|Dependency audit/i);
-  assert.match(text, /permissions:\s*\n\s+contents: read/);
+  const file = join(ws.dir, '.claude', 'agents', 'test-engineer.md');
+  writeFileSync(file, read(ws.dir, '.claude/agents/test-engineer.md').replace('- `tests/**`', '- `tests/**`\n- `config/team-fixtures/**`'));
+  const r = installWs(ws);
+  const [above, below] = readFileSync(file, 'utf8').split('<!-- Project specialisation goes below this line. Re-install keeps it. -->');
+  assert.doesNotMatch(above, /config\/team-fixtures/);
+  assert.match(below, /## Writes\n\n- `config\/team-fixtures\/\*\*`/);
+  assert.ok(parseWrites(readFileSync(file, 'utf8')).includes('config/team-fixtures/**'), 'the guard still allows it');
+  assert.match(r.warnings.join('\n'), /config\/team-fixtures\/\*\* was added to its generic Writes list/);
+  // A text Recade itself wrote is never read as the team's: a re-install moves nothing.
+  const again = installWs(ws);
+  assert.doesNotMatch(again.warnings.join('\n'), /generic Writes list/);
 });
 
-test('a code install writes the pointer, the guard, the link, the three workflows and the dependabot file, and no agent', async () => {
+test('a code install writes only the CI of the project, once, and sets up this machine: link, local hooks, exclusions', async () => {
   const ws = await makeWorkspace({ repos: ['api', 'web'] });
   const r = installCode(ws, 'api');
   const api = ws.repo('api');
-  // One pointer command, which sends a session opened here to the workspace. No agent and no protocol: they are in the workspace.
-  assert.deepEqual(names(join(api, '.claude', 'commands')), ['slice.md']);
-  assert.match(read(api, '.claude/commands/slice.md'), /start a new Claude Code session at `<home>`, the root of the workspace/);
-  assert.doesNotMatch(read(api, '.claude/commands/slice.md'), /sensitive_model|Agent/);
-  assert.equal(existsSync(join(api, '.claude', 'agents')), false);
-  assert.equal(existsSync(join(api, '.claude', 'protocol.md')), false);
-  for (const f of ['.claude/settings.json', '.claude/hooks/recade-guard.mjs', '.githooks/pre-commit', '.githooks/commit-msg', '.github/workflows/ci.yml', '.github/workflows/conflicts.yml', '.github/workflows/second-opinion.yml', '.github/dependabot.yml', '.recade/plugin-root', '.recade/workspace']) {
-    assert.ok(existsSync(join(api, f)), f);
+  for (const f of ['.claude', '.githooks', 'CLAUDE.md', '.github/workflows/conflicts.yml', '.github/workflows/second-opinion.yml', '.github/workflows/workspace.yml']) {
+    assert.equal(existsSync(join(api, f)), false, `${f} is not written in a code repository`);
   }
-  assert.equal(existsSync(join(api, '.github', 'workflows', 'workspace.yml')), false);
+  for (const f of ['.github/workflows/ci.yml', '.github/dependabot.yml', '.recade/plugin-root', '.recade/workspace']) assert.ok(existsSync(join(api, f)), f);
+  assert.deepEqual(r.written.map((w) => w.file).sort(), ['.github/dependabot.yml', '.github/workflows/ci.yml']);
   assert.equal(read(api, '.recade/workspace'), `${ws.dir}\n`, 'the link is written through linkRepo');
   assert.deepEqual(checkLink(api), { ok: true });
-  assert.equal(git(api, 'status', '--porcelain').stdout.includes('.recade'), false, 'the link never shows in git status');
-  assert.match(read(api, '.githooks/pre-commit'), /gate check/);
-  assert.match(read(api, '.githooks/pre-commit'), /lint-style/);
-  assert.doesNotMatch(read(api, '.githooks/pre-commit'), /index check/);
-  assert.equal(r.written.some((w) => w.file === '.recade/workspace'), false);
-  assert.equal(existsSync(join(ws.repo('web'), '.claude')), false, 'the other repository is untouched');
+  assert.deepEqual(git(api, 'status', '--porcelain').stdout.split('\n').filter(Boolean), ['?? .github/'], 'only the CI shows in git status');
+  assert.match(read(hooksDir(api), 'pre-commit'), /harness\/githooks\/pre-commit"?/, 'the local pre-commit runs the hook of the code');
+  assert.doesNotMatch(read(hooksDir(api), 'pre-commit'), /pre-commit-workspace/);
+  assert.ok(isExec(join(hooksDir(api), 'commit-msg')));
+  for (const line of ['/.recade/', '/.claude/settings.local.json', '/.claude/worktrees/']) assert.ok(read(api, '.git/info/exclude').split('\n').includes(line), line);
+  assert.equal(existsSync(join(ws.repo('web'), '.github')), false, 'the other repository is untouched');
+  // Written once: the CI belongs to the project from then on, and a later install never touches it.
+  writeFileSync(join(api, '.github', 'workflows', 'ci.yml'), `${read(api, '.github/workflows/ci.yml')}# the team's step\n`);
+  const again = installCode(ws, 'api');
+  assert.match(read(api, '.github/workflows/ci.yml'), /# the team's step\n$/);
+  assert.equal(again.written.find((w) => w.file === '.github/workflows/ci.yml').status, 'unchanged');
 });
 
-test('ci.yml of a code repository has no ID index step, the documents are not there; the workspace has it', async () => {
+test('ci.yml of a code repository is the CI of the project: build, tests and security, nothing that fetches or names Recade', async () => {
   const ws = await makeWorkspace();
   installCode(ws, 'api');
-  installWs(ws);
   const code = read(ws.repo('api'), '.github/workflows/ci.yml');
-  assert.doesNotMatch(code, /ID index/);
-  assert.doesNotMatch(code, /index check/);
-  assert.match(code, /lint-style/);
-  assert.match(code, /quarantine check/);
-  assert.match(read(ws.dir, '.github/workflows/workspace.yml'), /index check/);
-  for (const job of Object.values(parseDocument(code).toJS().jobs)) assert.doesNotMatch(String(job.name), /ID index/);
+  assert.equal(parseDocument(code).errors.length, 0);
+  assert.doesNotMatch(code, /recade/i);
+  assert.doesNotMatch(code, /__RECADE_|RECADE_REF|DEPLOY_KEY|index check|lint-style|quarantine check/);
+  assert.deepEqual(Object.keys(parseDocument(code).toJS().jobs), ['code', 'quality', 'e2e', 'security']);
+  assert.doesNotMatch(read(ws.repo('api'), '.github/dependabot.yml'), /recade/i);
 });
 
 test('each repository reads its own table of the sheet, and a single table serves a repository with none of its own', async () => {
@@ -212,22 +248,26 @@ test('create, link, install and verify work in a workspace path with spaces and 
   assert.equal(commit.status, 0, commit.stderr);
 });
 
-test('verify passes on both targets, and each target checks its own files', async () => {
+test('verify passes on both targets, and catches local hooks that are missing, not executable or bypassed, and hooks switched off', async () => {
   const ws = await makeWorkspace({ repos: ['api'] });
   installWs(ws);
   installCode(ws, 'api');
   // The second opinion in the reviewer's family is a warning, allowed by second_opinion.same_family: warn.
   const real = (r) => r.findings.filter((f) => !(f.severity === 'warn' && /same model family/.test(f.message)));
-  const w = await verify(ws.dir, { pluginRoot: plugin, target: 'workspace' });
-  assert.deepEqual(real(w), []);
-  const c = await verify(ws.repo('api'), { pluginRoot: plugin, target: 'code' });
-  assert.deepEqual(real(c), []);
-  rmSync(join(ws.dir, '.github', 'workflows', 'workspace.yml'));
-  assert.match(errors(await verify(ws.dir, { pluginRoot: plugin, target: 'workspace' }), 'layout')[0].message, /workspace\.yml is missing/);
-  rmSync(join(ws.repo('api'), '.claude', 'commands', 'slice.md'));
-  assert.match(errors(await verify(ws.repo('api'), { pluginRoot: plugin, target: 'code' }), 'layout')[0].message, /slice\.md is missing/);
-  // The workspace does not need the slice command nor a code repository workflow.
-  assert.deepEqual(errors(await verify(ws.dir, { pluginRoot: plugin, target: 'workspace' }), 'layout').filter((f) => /slice\.md|ci\.yml/.test(f.message)), []);
+  assert.deepEqual(real(await verify(ws.dir, { pluginRoot: plugin, target: 'workspace' })), []);
+  assert.deepEqual(real(await verify(ws.repo('api'), { pluginRoot: plugin, target: 'code' })), []);
+  const git_ = (root) => verify(root, { pluginRoot: plugin, target: root === ws.dir ? 'workspace' : 'code', only: ['git', 'settings'] });
+  rmSync(join(hooksDir(ws.dir), 'pre-commit'));
+  assert.match(errors(await git_(ws.dir), 'git')[0].message, /local git hook pre-commit is missing.*recade repo sync/);
+  chmodSync(join(hooksDir(ws.repo('api')), 'commit-msg'), 0o644);
+  assert.match(errors(await git_(ws.repo('api')), 'git')[0].message, /commit-msg is not executable/);
+  git(ws.repo('api'), 'config', 'core.hooksPath', '.githooks');
+  assert.ok(errors(await git_(ws.repo('api')), 'git').some((f) => /core\.hooksPath is \.githooks/.test(f.message)));
+  writeFileSync(join(ws.dir, '.claude', 'settings.local.json'), '{"disableAllHooks": true}\n');
+  assert.ok(errors(await git_(ws.dir), 'settings').some((f) => /disableAllHooks is true in \.claude\/settings\.local\.json/.test(f.message)));
+  // The workspace does not need a code workflow, and a code repository needs no command.
+  assert.deepEqual(errors(await verify(ws.dir, { pluginRoot: plugin, target: 'workspace', only: ['layout'] })), []);
+  assert.deepEqual(errors(await verify(ws.repo('api'), { pluginRoot: plugin, target: 'code', only: ['layout'] })), []);
 });
 
 test('verify of a code repository fails when its link is missing or points elsewhere, and names recade repo sync', async () => {
@@ -246,7 +286,8 @@ test('the CLI: install and verify infer the code target inside a code repository
   const ws = await makeWorkspace({ repos: ['api', 'web'] });
   const inside = await cli(ws.repo('api'), ['harness', 'install', '--ref', REF]);
   assert.equal(inside.code, 0, inside.stderr);
-  assert.ok(existsSync(join(ws.repo('api'), '.claude', 'commands', 'slice.md')));
+  assert.ok(existsSync(join(ws.repo('api'), '.github', 'workflows', 'ci.yml')));
+  assert.equal(existsSync(join(ws.repo('api'), '.claude')), false);
   assert.equal(existsSync(join(ws.dir, '.claude')), false, 'the workspace was not installed');
   const verified = await cli(ws.repo('api'), ['harness', 'verify']);
   assert.equal(verified.code, 0, verified.stdout + verified.stderr);
@@ -260,7 +301,7 @@ test('the CLI: install and verify infer the code target inside a code repository
   assert.match(read(ws.dir, '.claude/commands/slice.md'), /sensitive_model/, 'the workspace has the real /slice');
   const byName = await cli(ws.dir, ['harness', 'install', '--target', 'code', '--repo', 'web', '--ref', REF]);
   assert.equal(byName.code, 0, byName.stderr);
-  assert.ok(existsSync(join(ws.repo('web'), '.claude', 'commands', 'slice.md')));
+  assert.ok(existsSync(join(ws.repo('web'), '.github', 'workflows', 'ci.yml')));
   const viaProject = await cli(mkdtempSync(join(tmpdir(), 'recade-cwd-')), ['harness', 'verify', '--target', 'workspace', '--project', ws.dir]);
   assert.equal(viaProject.code, 0, viaProject.stdout + viaProject.stderr);
 });
@@ -292,7 +333,7 @@ test('with no --target at the root of a workspace, install, verify and claude-md
   const ws = await makeWorkspace({ repos: ['api'] });
   const first = await cli(ws.dir, ['harness', 'install', '--ref', REF]);
   assert.equal(first.code, 0, first.stderr);
-  assert.ok(existsSync(join(ws.dir, '.github', 'workflows', 'workspace.yml')), 'the workspace workflow is written');
+  assert.equal(existsSync(join(ws.dir, '.github', 'workflows', 'workspace.yml')), false, 'no workflow in the workspace: its checks run in the local git hooks');
   assert.equal(existsSync(join(ws.dir, '.github', 'workflows', 'ci.yml')), false, 'no CI of a code repository in the workspace');
   assert.ok(existsSync(join(ws.dir, '.claude', 'commands', 'slice.md')), '/slice is in the workspace');
   assert.ok(existsSync(join(ws.dir, '.claude', 'agents', 'implementer.md')), 'every agent is in the workspace');
@@ -308,14 +349,15 @@ test('with no --target at the root of a workspace, install, verify and claude-md
   assert.match(again.stdout, /0 created, 0 updated/);
 });
 
-test('recade gate check and harness set read and write the settings of the repository', async () => {
+test('recade gate check and harness set read and write the settings of the repository, kept in the workspace', async () => {
   const ws = await makeWorkspace({ repos: ['api'] });
   const api = ws.repo('api');
   installCode(ws, 'api');
   const set = await cli(api, ['harness', 'set', '--required-gates', 'lint,test', '--threshold-files', 'eslint.config.js,tsconfig.json']);
   assert.equal(set.code, 0, set.stderr);
   assert.deepEqual(readRepoSettings(api), { required_gates: ['lint', 'test'], threshold_files: ['eslint.config.js', 'tsconfig.json'] });
-  assert.match(read(api, '.claude/recade.yaml'), /^harness:\n {2}required_gates: \[lint, test\]\n {2}threshold_files: \[eslint\.config\.js, tsconfig\.json\]\n$/);
+  assert.match(read(ws.dir, 'recade/repos/api.yaml'), /^harness:\n {2}required_gates: \[lint, test\]\n {2}threshold_files: \[eslint\.config\.js, tsconfig\.json\]\n$/);
+  assert.equal(existsSync(join(api, '.claude', 'recade.yaml')), false, 'nothing is written in the code repository');
   assert.equal(loadState(ws.dir).harness, undefined, 'the gates of a repository are not in the state of the workspace');
   const check = await cli(api, ['gate', 'check']);
   assert.equal(check.code, 1);
@@ -326,33 +368,41 @@ test('recade gate check and harness set read and write the settings of the repos
   assert.deepEqual(readRepoSettings(api), { required_gates: ['lint', 'test'], threshold_files: ['eslint.config.js', 'tsconfig.json'] });
   const none = await cli(api, ['harness', 'set', '--required-gates', 'none']);
   assert.equal(none.code, 0);
-  assert.match((await cli(api, ['gate', 'check'])).stdout, /No required gates in \.claude\/recade\.yaml/);
+  assert.match((await cli(api, ['gate', 'check'])).stdout, /No required gates in .*recade\/repos\/api\.yaml/);
   const bad = await cli(api, ['harness', 'set', '--threshold-files', '../escape,/etc/passwd']);
   assert.equal(bad.code, 2);
   // A repository without its own settings file falls back to the project state, as before.
   const state = loadState(ws.dir);
   saveState(ws.dir, { ...state, harness: { ...state.harness, required_gates: ['fallback'] } });
-  rmSync(join(api, '.claude', 'recade.yaml'));
+  rmSync(join(ws.dir, 'recade', 'repos', 'api.yaml'));
   assert.match((await cli(api, ['gate', 'check'])).stdout, /^fallback: missing/);
 });
 
-test('readRepoSettings: absent, malformed and partial files', () => {
+test('readRepoSettings: absent, malformed and partial files, the workspace file first and the older file of the repository after', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'recade-settings-'));
   assert.deepEqual(readRepoSettings(dir), {});
   mkdirSync(join(dir, '.claude'));
   writeFileSync(join(dir, '.claude', 'recade.yaml'), 'harness:\n  required_gates: [a]\n');
-  assert.deepEqual(readRepoSettings(dir), { required_gates: ['a'] });
+  assert.deepEqual(readRepoSettings(dir), { required_gates: ['a'] }, 'an older install kept them in the repository');
   writeFileSync(join(dir, '.claude', 'recade.yaml'), 'harness: [not, a, map]\n');
   assert.equal(readRepoSettings(dir).error, true);
   writeFileSync(join(dir, '.claude', 'recade.yaml'), 'harness:\n  required_gates: nope\n');
   assert.equal(readRepoSettings(dir).error, true);
+  const ws = await makeWorkspace({ repos: ['api'] });
+  installCode(ws, 'api');
+  mkdirSync(join(ws.repo('api'), '.claude'), { recursive: true });
+  writeFileSync(join(ws.repo('api'), '.claude', 'recade.yaml'), 'harness:\n  required_gates: [old]\n');
+  assert.deepEqual(readRepoSettings(ws.repo('api')), { required_gates: ['old'] });
+  mkdirSync(join(ws.dir, 'recade', 'repos'), { recursive: true });
+  writeFileSync(join(ws.dir, 'recade', 'repos', 'api.yaml'), 'harness:\n  required_gates: [new]\n');
+  assert.deepEqual(readRepoSettings(ws.repo('api')), { required_gates: ['new'] }, 'the workspace file wins');
 });
 
-test('adopt: a code repository installed from an adopted workspace keeps the owner files, records its own and prefixes the job names', async () => {
+test('adopt: a code repository installed from an adopted workspace keeps every file of the owner, and Recade writes none in it', async () => {
   const ws = await makeWorkspace({ repos: ['api'], mode: 'adopt' });
   const api = ws.repo('api');
   const OWNER_CI = 'name: CI\non: [push]\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - run: make test\n';
-  const OWNER_SETTINGS = `${JSON.stringify({ permissions: { allow: ['Bash(make:*)'] }, hooks: { PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'echo team-hook' }] }] } }, null, 2)}\n`;
+  const OWNER_SETTINGS = `${JSON.stringify({ permissions: { allow: ['Bash(make:*)'] } }, null, 2)}\n`;
   mkdirSync(join(api, '.github', 'workflows'), { recursive: true });
   mkdirSync(join(api, '.claude'), { recursive: true });
   writeFileSync(join(api, '.github', 'workflows', 'ci.yml'), OWNER_CI);
@@ -362,26 +412,15 @@ test('adopt: a code repository installed from an adopted workspace keeps the own
   const r = installCode(ws, 'api');
   assert.equal(read(api, '.github/workflows/ci.yml'), OWNER_CI, 'the owner CI is kept');
   assert.equal(read(api, '.github/dependabot.yml'), 'version: 2\nupdates: []\n');
-  assert.ok(existsSync(join(api, '.github', 'workflows', 'recade.yml')));
-  assert.match(read(api, '.github/workflows/recade.yml'), /name: "Recade: /);
-  assert.equal(existsSync(join(api, '.github', 'workflows', 'workspace.yml')), false);
-  const created = readCreated(api);
-  for (const f of ['.claude/commands/slice.md', '.claude/hooks/recade-guard.mjs', '.github/workflows/recade.yml', '.githooks/pre-commit']) assert.ok(created.includes(f), f);
-  assert.equal(created.includes('.claude/agents/reviewer.md'), false, 'no agent in a code repository');
-  assert.equal(created.includes('.github/workflows/ci.yml'), false);
-  const settings = JSON.parse(read(api, '.claude/settings.json'));
-  assert.deepEqual(settings.permissions.allow, ['Bash(make:*)']);
-  assert.ok(settings.hooks.PreToolUse.some((e) => e.hooks.some((h) => h.command === 'echo team-hook')));
-  assert.ok(r.written.some((w) => w.file === '.claude/commands/slice.md' && w.status === 'created'));
-  assert.match(read(api, '.gitignore'), /^node_modules\/\n\.recade\/\n/);
-  // The owner edits a file Recade wrote: it is theirs now, and a re-install keeps it with a warning.
-  writeFileSync(join(api, '.github', 'workflows', 'recade.yml'), `${read(api, '.github/workflows/recade.yml')}# mine\n`);
-  const again = installCode(ws, 'api');
-  assert.equal(again.written.find((w) => w.file === '.github/workflows/recade.yml').status, 'kept');
-  assert.match(read(api, '.github/workflows/recade.yml'), /# mine\n$/);
-  // The workspace of an adopted project is Recade's own: nothing there is the owner's.
+  assert.equal(read(api, '.claude/settings.json'), OWNER_SETTINGS);
+  assert.equal(read(api, '.gitignore'), 'node_modules/\n', 'the .gitignore of the owner is not touched: the exclusions are local');
+  for (const f of ['.github/workflows/recade.yml', '.github/workflows/workspace.yml', '.githooks', '.claude/commands', '.claude/hooks']) assert.equal(existsSync(join(api, f)), false, f);
+  assert.deepEqual(r.written, []);
+  assert.match(r.notes.join('\n'), /Adopted repository: its own CI stays as it is, and Recade writes none/);
+  assert.deepEqual(readCreated(api), [], 'nothing of Recade to record in the repository');
+  // The workspace of an adopted project is Recade's own: nothing there is the owner's, and it holds no workflow either.
   installWs(ws);
-  assert.ok(existsSync(join(ws.dir, '.github', 'workflows', 'workspace.yml')));
+  assert.equal(existsSync(join(ws.dir, '.github', 'workflows', 'workspace.yml')), false);
   assert.equal(existsSync(join(ws.dir, '.recade', 'created.json')), false);
 });
 
@@ -411,14 +450,16 @@ test('a link to another workspace stops install, verify and set with the sync ad
   assert.equal(existsSync(join(other.dir, '.claude')), false, 'the other workspace was not touched either');
 });
 
-test('.claude/recade.yaml is a tracked file of the code repository: git does not ignore it, and it commits with the install', async () => {
+test('the settings of a code repository live in the workspace, committed there, and an older .claude/recade.yaml is carried over', async () => {
   const ws = await makeWorkspace({ repos: ['api'] });
   const api = ws.repo('api');
   installCode(ws, 'api');
+  mkdirSync(join(api, '.claude'), { recursive: true });
+  writeFileSync(join(api, '.claude', 'recade.yaml'), 'harness:\n  threshold_files: [eslint.config.js]\n');
   assert.equal((await cli(api, ['harness', 'set', '--required-gates', 'lint'])).code, 0);
-  assert.notEqual(git(api, 'check-ignore', '-q', '.claude/recade.yaml').status, 0, 'not ignored');
-  git(api, 'add', '.claude/recade.yaml');
-  assert.match(git(api, 'diff', '--cached', '--name-only').stdout, /^\.claude\/recade\.yaml$/m);
+  assert.deepEqual(readRepoSettings(api), { required_gates: ['lint'], threshold_files: ['eslint.config.js'] }, 'the older value is carried over');
+  assert.match(read(ws.dir, 'recade/repos/api.yaml'), /threshold_files: \[eslint\.config\.js\]/);
+  assert.notEqual(git(ws.dir, 'check-ignore', '-q', 'recade/repos/api.yaml').status, 0, 'a tracked file of the workspace');
 });
 
 test('verify of a code repository reads the workspace sheet and checks the confirmation tests row of its own table', async () => {
@@ -443,14 +484,14 @@ test('verify of a code repository reads the workspace sheet and checks the confi
   assert.deepEqual(errors(await verify(ws.repo('api'), { pluginRoot: plugin, target: 'code' }), 'ci'), []);
 });
 
-test('gate check inside a code repository with no required_gates of its own names .claude/recade.yaml in its message', async () => {
+test('gate check inside a code repository with no required_gates of its own names its settings file of the workspace', async () => {
   const ws = await makeWorkspace({ repos: ['api'] });
   const api = ws.repo('api');
   installCode(ws, 'api');
   const none = await cli(api, ['gate', 'check']);
   assert.equal(none.code, 0);
   assert.match(none.stdout, /No required gates/);
-  assert.match(none.stdout, /\.claude\/recade\.yaml/);
+  assert.match(none.stdout, /recade\/repos\/api\.yaml/);
   assert.match(none.stdout, /recade harness set --required-gates/);
   // Outside a code repository the message still names the project state, as before.
   const root = mkdtempSync(join(tmpdir(), 'recade-gate-'));
@@ -460,19 +501,9 @@ test('gate check inside a code repository with no required_gates of its own name
   assert.match((await cli(root, ['gate', 'check'])).stdout, /No required gates in recade\/state\.yaml/);
 });
 
-test('the CI workflows fetch the Recade tools with the deploy key when one is set, the host key of GitHub pinned', () => {
-  for (const name of ['ci.yml', 'workspace.yml']) {
-    const text = readFileSync(join(plugin, 'harness', 'ci', name), 'utf8');
-    const steps = text.split('- name: Fetch the Recade tools').slice(1);
-    assert.ok(steps.length >= 1, name);
-    for (const step of steps) {
-      assert.match(step, /DEPLOY_KEY: \$\{\{ secrets\.RECADE_DEPLOY_KEY \}\}/, name);
-      assert.match(step, /StrictHostKeyChecking=yes/, name);
-      assert.match(step, /github\.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl/, name);
-      assert.match(step, /url="https:\/\/github\.com\/\$\{REPOSITORY\}\.git"/, name);
-      assert.doesNotMatch(step, /accept-new|ssh-keyscan/, name);
-    }
-  }
+test('the CI template of a code repository fetches nothing of Recade: no tools, no ref, no deploy key', () => {
+  const text = readFileSync(join(plugin, 'harness', 'ci', 'ci.yml'), 'utf8');
+  assert.doesNotMatch(text, /Fetch the Recade tools|RECADE_REF|RECADE_REPOSITORY|RECADE_DEPLOY_KEY|RECADE_BIN/);
 });
 
 test('the pre-commit hook passes each staged path whole to the style check, a space included, and never sets IFS', () => {

@@ -269,12 +269,14 @@ test('refresh for the workspace: no build commands to fill, the code lives in th
   assert.match(block, /`slices\/STATUS\.md`/);
 });
 
-test('recade claude-md refresh inside a code repository writes the block of that repository from the workspace sheet', async () => {
+test('recade claude-md refresh inside a code repository writes nothing: the CLAUDE.md of a code repository is the project\'s own', async () => {
   const ws = await makeWorkspace({ repos: ['api'], stack: perRepoStack({ api: { Test: 'npm run test:api' } }) });
   const out = await cli(ws.repo('api'), ['claude-md', 'refresh', '--write']);
   assert.equal(out.code, 0, out.stderr);
-  const text = readFileSync(join(ws.repo('api'), 'CLAUDE.md'), 'utf8');
-  assert.match(text, /Test: `npm run test:api`/);
-  assert.doesNotMatch(text, /BIBLE\.md/);
+  assert.match(out.stdout, /is the project's own: Recade does not write it/);
+  assert.equal(existsSync(join(ws.repo('api'), 'CLAUDE.md')), false, 'no CLAUDE.md was written in the code repository');
+  writeFileSync(join(ws.repo('api'), 'CLAUDE.md'), '# Notes of the team\n');
+  assert.equal((await cli(ws.repo('api'), ['claude-md', 'refresh', '--target', 'code', '--write'])).code, 0);
+  assert.equal(readFileSync(join(ws.repo('api'), 'CLAUDE.md'), 'utf8'), '# Notes of the team\n', 'a CLAUDE.md of the team is left as it is');
   assert.equal(existsSync(join(ws.dir, 'CLAUDE.md')), false, 'the workspace file was not touched');
 });

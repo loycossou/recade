@@ -326,13 +326,13 @@ test('slices merge: refused on GitHub, on a dirty or switched checkout, and a co
 // The harness leaves out the GitHub-only files
 // ---------------------------------------------------------------------------------------------------------
 
-test('install (local): a code repository gets ci.yml but not the conflicts and second-opinion workflows nor dependabot.yml', () => {
+test('install (local): a code repository gets ci.yml but not dependabot.yml, which only GitHub reads', () => {
   const { ws, repos } = workspace({});
   const pluginRoot = new URL('../../', import.meta.url).pathname;
-  const r = install(repos.api, { pluginRoot, target: 'code', workspace: ws, ref: 'v1.0.0' });
+  const r = install(repos.api, { pluginRoot, target: 'code', workspace: ws });
   assert.ok(existsSync(join(repos.api, '.github', 'workflows', 'ci.yml')));
   for (const f of ['workflows/conflicts.yml', 'workflows/second-opinion.yml', 'dependabot.yml']) assert.equal(existsSync(join(repos.api, '.github', f)), false, f);
-  assert.deepEqual(r.notes, ['Local forge: conflicts.yml, second-opinion.yml, dependabot.yml not written (GitHub only).']);
+  assert.deepEqual(r.notes, ['Local forge: .github/dependabot.yml not written (GitHub only).']);
 });
 
 // ---------------------------------------------------------------------------------------------------------

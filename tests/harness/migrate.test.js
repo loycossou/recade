@@ -28,11 +28,19 @@ async function oldLayout() {
   rmSync(join(ws.dir, '.claude', 'agents', 'implementer.md'));
   writeFileSync(join(ws.dir, '.gitignore'), readFileSync(join(ws.dir, '.gitignore'), 'utf8').replace('worktrees/\n', ''));
   const exclude = join(ws.dir, '.git', 'info', 'exclude');
-  writeFileSync(exclude, readFileSync(exclude, 'utf8').replace('worktrees/\n', ''));
+  writeFileSync(exclude, readFileSync(exclude, 'utf8').replace('/worktrees/\n', ''));
   for (const name of ['api', 'web']) {
     const repo = ws.repo(name);
     install(repo, { pluginRoot: plugin, target: 'code', workspace: ws.dir, ref: REF });
-    rmSync(join(repo, '.recade', 'installed.json'));
+    rmSync(join(repo, '.recade', 'installed.json'), { force: true });
+    // What an older install wrote in a code repository, which an install of today no longer writes: the settings, the
+    // guard launcher and the git hooks.
+    mkdirSync(join(repo, '.claude', 'hooks'), { recursive: true });
+    mkdirSync(join(repo, '.claude', 'commands'), { recursive: true });
+    mkdirSync(join(repo, '.githooks'), { recursive: true });
+    writeFileSync(join(repo, '.claude', 'settings.json'), '{}\n');
+    writeFileSync(join(repo, '.claude', 'hooks', 'recade-guard.mjs'), '// Recade harness: the launcher of the guard.\n');
+    writeFileSync(join(repo, '.githooks', 'pre-commit'), '#!/bin/sh\n# Recade harness pre-commit\n');
     mkdirSync(join(repo, '.claude', 'agents'), { recursive: true });
     for (const a of md(join(plugin, 'harness', 'agents'))) writeFileSync(join(repo, '.claude', 'agents', a), old('agents', a.replace(/\.md$/, '')));
     for (const c of OLD_CODE_COMMANDS) writeFileSync(join(repo, '.claude', 'commands', `${c}.md`), old('commands', c));
@@ -89,7 +97,7 @@ test('migrate moves the clean worktrees, installs the root, removes the copies t
   // The workspace root holds every command and every agent, and keeps worktrees/ out of git by its exclude file.
   assert.deepEqual(md(join(ws.dir, '.claude', 'commands')), md(join(plugin, 'harness', 'commands')));
   assert.deepEqual(md(join(ws.dir, '.claude', 'agents')), md(join(plugin, 'harness', 'agents')));
-  assert.ok(readFileSync(join(ws.dir, '.git', 'info', 'exclude'), 'utf8').split('\n').includes('worktrees/'));
+  assert.ok(readFileSync(join(ws.dir, '.git', 'info', 'exclude'), 'utf8').split('\n').includes('/worktrees/'));
   assert.equal(readFileSync(join(ws.dir, '.gitignore'), 'utf8').split('\n').includes('worktrees/'), false);
   // The clean worktree moved, on its branch, and the workspace does not see it.
   const moved = join(ws.dir, 'worktrees', 'api', 'S-01');
@@ -107,8 +115,9 @@ test('migrate moves the clean worktrees, installs the root, removes the copies t
   assert.ok(readFileSync(join(ws.dir, '.claude', 'agents', 'domain-reviewer.md'), 'utf8').split(SPEC_LINE)[1].includes('- DG-01: no negative balance.'), 'the text of the team is in the copy of the workspace');
   assert.match(r.kept.find((k) => k.file.endsWith('reviewer.md') && !k.file.includes('domain')).reason, /differs from what Recade v/);
   assert.equal(existsSync(join(api, '.claude', 'protocol.md')), false);
-  assert.deepEqual(md(join(api, '.claude', 'commands')), ['slice.md']);
-  assert.match(readFileSync(join(api, '.claude', 'commands', 'slice.md'), 'utf8'), /recade-pointer/);
+  // A code repository gets no command any more: no pointer takes the place of the old /slice.
+  assert.deepEqual(md(join(api, '.claude', 'commands')), []);
+  assert.deepEqual(r.pointers, []);
   // web: everything was Recade's, the file known by the install record too.
   assert.equal(existsSync(join(web, '.claude', 'agents')), false);
   assert.ok(r.removed.some((x) => x.repo === 'web' && x.file === '.claude/agents/explorer.md'));

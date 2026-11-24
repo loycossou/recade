@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { handleHook, decide } from '../../src/harness/guard.js';
@@ -62,18 +62,17 @@ test('specialise works on a command of the workspace, and refuses a bad kind, a 
   }
 });
 
-test('recade harness specialise: from the workspace with --target workspace, the pointer of a code repository, and the usage errors', async () => {
+test('recade harness specialise: from the workspace with --target workspace, nothing in a code repository, and the usage errors', async () => {
   const ws = await withCode();
   const text = tmpFile(GRID);
   const ok = await cli(ws.dir, ['harness', 'specialise', 'agent', 'domain-reviewer', '--file', text, '--target', 'workspace', '--project', ws.dir]);
   assert.equal(ok.code, 0, ok.stderr);
   assert.match(ok.stdout, /^updated .*domain-reviewer\.md/s);
   assert.ok(readFileSync(join(ws.dir, '.claude', 'agents', 'domain-reviewer.md'), 'utf8').includes('DG-01'));
-  // A code repository has no agent, only the pointer command.
+  // A code repository holds no agent and no command of the harness: there is nothing to specialise there.
   assert.equal((await cli(ws.dir, ['harness', 'specialise', 'agent', 'domain-reviewer', '--file', text, '--target', 'code', '--repo', 'api'])).code, 1, 'no agent in a code repository');
-  const pointer = await cli(ws.repo('web'), ['harness', 'specialise', 'command', 'slice', '--file', text]);
-  assert.equal(pointer.code, 0, pointer.stderr);
-  assert.ok(readFileSync(join(ws.repo('web'), '.claude', 'commands', 'slice.md'), 'utf8').includes('DG-01'), 'inside a repository it is that repository');
+  assert.equal((await cli(ws.repo('web'), ['harness', 'specialise', 'command', 'slice', '--file', text])).code, 1, 'no command in a code repository');
+  assert.equal(existsSync(join(ws.repo('web'), '.claude', 'commands', 'slice.md')), false, 'nothing was written in the code repository');
   const wsCmd = await cli(ws.dir, ['harness', 'specialise', 'command', 'status', '--file', text, '--target', 'workspace']);
   assert.equal(wsCmd.code, 0, wsCmd.stderr);
   assert.equal((await cli(ws.dir, ['harness', 'specialise', 'agent', 'domain-reviewer', '--file', join(ws.dir, 'nope.md'), '--target', 'workspace'])).code, 1, 'a missing text file');

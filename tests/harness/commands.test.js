@@ -84,7 +84,7 @@ test('every command has a Step 0 that finds the plugin root from RECADE_PLUGIN_R
 });
 
 test('the CLI is called through the plugin root, and only with commands that exist', () => {
-  const known = ['version', 'help', 'state', 'slices', 'lint-style', 'provisional', 'decision', 'gate', 'claude-md', 'parallel', 'conflicts', 'cost', 'harness', 'merge-order', 'retro', 'quarantine', 'release-notes', 'workspace', 'guard', 'repo'];
+  const known = ['version', 'help', 'state', 'slices', 'lint-style', 'provisional', 'decision', 'gate', 'claude-md', 'parallel', 'conflicts', 'cost', 'harness', 'merge-order', 'retro', 'quarantine', 'release-notes', 'workspace', 'guard', 'repo', 'rebase', 'session'];
   for (const [name, src] of all) {
     for (const m of src.matchAll(/`recade ([a-z-]+)[^`]*`/g)) {
       if (m[1] === '<sub>') continue;
@@ -274,7 +274,8 @@ test('/slice-check ends by refreshing CLAUDE.md and writes it only after a yes',
   assert.ok(s.indexOf('recade claude-md refresh --target workspace') > 0 && s.indexOf('recade claude-md refresh --target workspace') < ask);
   assert.ok(s.indexOf('again with `--write`') > ask);
   assert.match(s, /recade claude-md refresh --target workspace/);
-  assert.match(s, /recade claude-md refresh --target code --repo '<repo>'/);
+  assert.doesNotMatch(s, /recade claude-md refresh --target code/, 'the CLAUDE.md of a code repository is the project\'s own');
+  assert.match(s, /The `CLAUDE\.md` of a code repository is the project's own: Recade does not refresh it\./);
   assert.match(s, /Only after `Yes, write it`/);
   assert.match(src, /implements nothing and changes no status/);
 });
@@ -385,13 +386,17 @@ test('/design runs every mode from the workspace, and only the screenshots of a 
   assert.doesNotMatch(design, /and stop\. `direction` and `system`/);
 });
 
-test('/recade:harness runs the required gates before each commit and keeps the worktrees out of git add', () => {
+test('/recade:harness runs the required gates before each commit, commits only the new CI in a code repository, and keeps the rest on this machine', () => {
   const harness = readFileSync(join(repo, 'commands', 'harness.md'), 'utf8');
   const seven = step(harness, 'Commit, then required gates');
   assert.match(seven, /Before every commit of this command/);
-  assert.match(seven, /`git -C '<repo>' add \.claude\/recade\.yaml`, then run each one/);
-  assert.match(seven, /\.claude\/worktrees\//);
-  assert.match(step(harness, 'Install'), /\.claude\/hooks\/recade-guard\.mjs/);
+  assert.match(seven, /`git -C '<repo>' add \.github\/workflows\/ci\.yml \.github\/dependabot\.yml`/);
+  assert.match(seven, /recade\/repos\/<name>\.yaml/);
+  assert.doesNotMatch(seven, /\.claude\/recade\.yaml/);
+  const install = step(harness, 'Install');
+  assert.doesNotMatch(install, /\.claude\/hooks\/recade-guard\.mjs` (?!.*older)/);
+  assert.match(install, /\.git\/info\/exclude/);
+  assert.match(install, /only when they do not exist yet/);
 });
 
 test('/recade:harness lists the sources with Glob, not with a node one-liner', () => {
@@ -696,4 +701,21 @@ test('/design direction offers the real-app references of the owner design serve
   const agent = readFileSync(join(agentsDir, 'ui-designer.md'), 'utf8');
   assert.ok(agent.includes('design/references.md') && /never loaded/.test(agent));
   assert.equal(/^## Writes[\s\S]*?^## /m.exec(agent)[0].includes('references.md'), false, 'the command writes references.md, not the agent');
+});
+
+test('/exit pushes the workspace, then ends the session through recade session end, and runs nothing after it', () => {
+  const src = text('exit');
+  const push = src.indexOf('recade workspace push');
+  const end = src.indexOf('recade session end');
+  assert.ok(push > 0 && end > push, 'the push comes first');
+  assert.match(src, /Run nothing after it\./);
+  assert.match(src, /^allowed-tools: Bash\(node:\*\), Bash\(npm ci:\*\), Read$/m);
+});
+
+test('/slice settles a rebase conflict on leftovers of an older Recade with recade rebase leftovers before it aborts', () => {
+  const src = text('slice');
+  const at = src.indexOf("recade rebase leftovers --dir '<worktree>'");
+  assert.ok(at > 0);
+  assert.ok(src.indexOf('rebase --continue', at) > at);
+  assert.ok(src.indexOf('rebase --abort', at) > at, 'any other conflict still aborts');
 });

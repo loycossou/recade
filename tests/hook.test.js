@@ -151,14 +151,85 @@ test('recade hook session-start prints the reminder, then nothing once started',
   }
 });
 
-test('hooks.json runs bin/recade-hook.js on SessionStart with matcher startup', () => {
+test('hooks.json runs bin/recade-hook.js on SessionStart with matcher startup, with time for the harness sync', () => {
   const hooks = JSON.parse(readFileSync(join(repo, 'hooks', 'hooks.json'), 'utf8'));
   const entries = hooks.hooks.SessionStart;
   assert.equal(entries.length, 1);
   assert.equal(entries[0].matcher, 'startup');
   assert.deepEqual(entries[0].hooks, [
-    { type: 'command', command: 'node "${CLAUDE_PLUGIN_ROOT}/bin/recade-hook.js"' },
+    { type: 'command', command: 'node "${CLAUDE_PLUGIN_ROOT}/bin/recade-hook.js"', timeout: 120 },
   ]);
+});
+
+test('hooks.json runs the guard of the plugin before Write, Edit, MultiEdit, NotebookEdit and Bash', () => {
+  const hooks = JSON.parse(readFileSync(join(repo, 'hooks', 'hooks.json'), 'utf8'));
+  assert.deepEqual(hooks.hooks.PreToolUse, [{ matcher: 'Write|Edit|MultiEdit|NotebookEdit|Bash', hooks: [{ type: 'command', command: 'node "${CLAUDE_PLUGIN_ROOT}/bin/recade-guard.js"' }] }]);
+  assert.deepEqual(Object.keys(hooks.hooks).sort(), ['PreToolUse', 'SessionStart', 'Stop']);
+});
+
+test('bin/recade-guard.js imports only node: builtins and src/hookscope.js before it knows it is in a Recade project', () => {
+  const src = readFileSync(join(repo, 'bin', 'recade-guard.js'), 'utf8');
+  const specs = [...src.matchAll(/^import\b[^\n]*?from\s+['"]([^'"]+)['"]/gm)].map((m) => m[1]);
+  for (const spec of specs) assert.ok(spec.startsWith('node:') || spec === '../src/hookscope.js', `unexpected import ${spec}`);
+  const scope = readFileSync(join(repo, 'src', 'hookscope.js'), 'utf8');
+  for (const m of scope.matchAll(/from\s+['"]([^'"]+)['"]/g)) assert.ok(m[1].startsWith('node:'), `hookscope.js imports ${m[1]}`);
+});
+
+test('recadeProject finds a Recade project by recade/state.yaml or a linked code repository, and nothing elsewhere', async () => {
+  const { recadeProject } = await import('../src/hookscope.js');
+  const files = new Set(['/w/recade/state.yaml', '/c/.recade/workspace']);
+  const exists = (f) => files.has(f);
+  assert.deepEqual(recadeProject('/w/worktrees/api/S-01/src', { exists }), { root: '/w', kind: 'project' });
+  assert.deepEqual(recadeProject('/w', { exists }), { root: '/w', kind: 'project' });
+  assert.deepEqual(recadeProject('/c/src/deep', { exists }), { root: '/c', kind: 'code' });
+  assert.equal(recadeProject('/elsewhere/x', { exists }), null);
+  assert.equal(recadeProject('', { exists }), null);
+  assert.equal(recadeProject(undefined, { exists }), null);
+});
+
+test('workspaceAt answers only for a state that says kind: workspace, from the folder or below it', async () => {
+  const { workspaceAt } = await import('../src/stophook.js');
+  const texts = { '/w/recade/state.yaml': 'version: 1\nkind: workspace\n', '/p/recade/state.yaml': 'version: 1\nmode: scratch\n', '/q/recade/state.yaml': "kind: 'workspace'\n" };
+  const fs = { exists: (f) => f in texts, read: (f) => texts[f] };
+  assert.equal(workspaceAt('/w/slices', fs), '/w');
+  assert.equal(workspaceAt('/q', fs), '/q');
+  assert.equal(workspaceAt('/p/src', fs), null, 'a project in one folder is not a workspace');
+  assert.equal(workspaceAt('/none', fs), null);
+  const broken = { exists: () => true, read: () => { throw new Error('unreadable'); } };
+  assert.equal(workspaceAt('/w', broken), null);
+});
+
+test('the SessionStart hook in a workspace runs the harness sync and adds its report to the welcome, or shows it alone', () => {
+  const base = mkdtempSync(join(tmpdir(), 'recade-start-'));
+  try {
+    const ws = join(base, 'ws');
+    mkdirSync(join(ws, 'recade'), { recursive: true });
+    mkdirSync(join(ws, '.recade'), { recursive: true });
+    writeFileSync(join(ws, 'recade', 'state.yaml'), 'version: 1\nkind: workspace\n');
+    const version = JSON.parse(readFileSync(join(repo, 'package.json'), 'utf8')).version;
+    writeFileSync(join(ws, '.recade', 'installed.json'), JSON.stringify({ version, files: {} }));
+    // Not a git checkout: the sync cannot install the local git hooks there, and its report says so.
+    const start = (configText) => {
+      const cfg = join(base, `cfg-${configText === null ? 'none' : 'set'}`);
+      mkdirSync(cfg, { recursive: true });
+      if (configText !== null) writeFileSync(join(cfg, 'config.yaml'), configText);
+      return spawnSync(process.execPath, [hookBin], { input: JSON.stringify({ cwd: ws, hook_event_name: 'SessionStart' }), encoding: 'utf8', env: { PATH: process.env.PATH, HOME: base, RECADE_CONFIG_DIR: cfg } });
+    };
+    const started = start('started: true\n');
+    assert.equal(started.status, 0, started.stderr);
+    const out = JSON.parse(started.stdout);
+    assert.match(out.systemMessage, /^Recade: The git hooks folder was not found/);
+    assert.equal(out.hookSpecificOutput.hookEventName, 'SessionStart');
+    assert.match(out.hookSpecificOutput.additionalContext, /^Recade, at the start of this session:\n/);
+    const fresh = JSON.parse(start(null).stdout);
+    assert.equal(fresh.systemMessage.split('\n')[0], MESSAGE, 'the welcome stays first');
+    assert.match(fresh.systemMessage.split('\n')[1], /^Recade: /);
+    // Outside a workspace the hook prints the welcome or nothing, as before.
+    const outside = spawnSync(process.execPath, [hookBin], { input: JSON.stringify({ cwd: base }), encoding: 'utf8', env: { PATH: process.env.PATH, HOME: base, RECADE_CONFIG_DIR: join(base, 'cfg-set') } });
+    assert.equal(outside.stdout, '');
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
 });
 
 test('hooks.json pushes the workspace at the end of each turn, through bin/recade-hook.js --stop', () => {
@@ -212,4 +283,126 @@ test('the Stop hook pushes the commits a step left in a workspace with auto-push
   assert.equal(failed.status, 0);
   assert.match(JSON.parse(failed.stdout).systemMessage, /^Recade: workspace push failed/);
   rmSync(base, { recursive: true, force: true });
+});
+
+/* ---------- /exit: the session process ---------- */
+
+test('isClaude knows the Claude Code CLI by its command line', async () => {
+  const { isClaude } = await import('../src/session.js');
+  for (const args of ['claude', 'claude --resume abc --remote-control x', '/home/u/.local/bin/claude -p hi', 'node /usr/lib/node_modules/@anthropic-ai/claude-code/cli.js']) assert.equal(isClaude(args), true, args);
+  for (const args of ['bash', 'node /p/bin/recade.js session end', 'claude-rc-loop demo', 'vim claude.md', 'tmux -L rc-x']) assert.equal(isClaude(args), false, args);
+});
+
+test('sessionProcess walks up the parents to the Claude Code process, and stops at the top or after a missing row', async () => {
+  const { sessionProcess, endSession } = await import('../src/session.js');
+  const table = { 40: { ppid: 30, args: 'node /p/bin/recade.js session end' }, 30: { ppid: 20, args: '/bin/bash -c x' }, 20: { ppid: 10, args: 'claude --resume s' }, 10: { ppid: 1, args: 'tmux' } };
+  const ps = (pid) => table[pid] ?? null;
+  assert.equal(sessionProcess(40, { ps }), 20);
+  assert.equal(sessionProcess(30, { ps }), 20);
+  assert.equal(sessionProcess(10, { ps }), null, 'no Claude Code above');
+  assert.equal(sessionProcess(99, { ps }), null, 'a process ps does not know');
+  const loop = { 5: { ppid: 6, args: 'sh' }, 6: { ppid: 5, args: 'sh' } };
+  assert.equal(sessionProcess(5, { ps: (p) => loop[p] ?? null }), null, 'a cycle ends');
+  const scheduled = [];
+  assert.equal(endSession({ ps: () => null, schedule: (pid) => scheduled.push(pid) }), null);
+  assert.deepEqual(scheduled, [], 'nothing is stopped when no session is found');
+});
+
+test('recade session end and recade rebase leftovers refuse other forms, and session end says when no session is found', async () => {
+  const io = (extra = {}) => {
+    const out = [];
+    const err = [];
+    return { io: { cwd: repo, env: {}, stdout: { write: (s) => out.push(s) }, stderr: { write: (s) => err.push(s) }, ...extra }, out, err };
+  };
+  for (const args of [['session'], ['session', 'end', 'now'], ['session', 'start'], ['rebase'], ['rebase', 'abort'], ['rebase', 'leftovers', 'extra'], ['rebase', 'leftovers', '--nope']]) {
+    const t = io();
+    assert.equal(await run(args, t.io), 2, args.join(' '));
+    assert.match(t.err.join(''), /^Usage: recade (session end|rebase leftovers)/, args.join(' '));
+  }
+  const none = io({ endSession: () => null });
+  assert.equal(await run(['session', 'end'], none.io), 1);
+  assert.match(none.err.join(''), /No Claude Code session was found/);
+  const found = io({ endSession: () => 4242 });
+  assert.equal(await run(['session', 'end'], found.io), 0);
+  assert.match(found.out.join(''), /The session stops in a moment\./);
+});
+
+/* ---------- rebase: leftovers of an older Recade ---------- */
+
+function rebaseRepo() {
+  const mail = ['t', 'example.invalid'].join('@');
+  const dir = mkdtempSync(join(tmpdir(), 'recade-rebase-'));
+  const git = (...a) => spawnSync('git', ['-C', dir, '-c', 'user.name=t', '-c', `user.email=${mail}`, '-c', 'commit.gpgsign=false', '-c', 'core.hooksPath=/dev/null', ...a], { encoding: 'utf8' });
+  git('init', '-q', '-b', 'main');
+  mkdirSync(join(dir, '.claude'), { recursive: true });
+  mkdirSync(join(dir, '.githooks'), { recursive: true });
+  mkdirSync(join(dir, 'src'), { recursive: true });
+  writeFileSync(join(dir, '.claude', 'settings.json'), '{"a":1}\n');
+  writeFileSync(join(dir, '.githooks', 'pre-commit'), 'one\n');
+  writeFileSync(join(dir, 'src', 'a.js'), 'one\n');
+  git('add', '-A');
+  git('commit', '-q', '-m', 'chore: start');
+  return { dir, git };
+}
+
+test('resolveLeftovers settles a rebase whose conflicts are only leftovers: kept as on the base branch, or removed with it', async () => {
+  const { resolveLeftovers } = await import('../src/rebase.js');
+  const { dir, git } = rebaseRepo();
+  assert.equal(resolveLeftovers(dir).state, 'none', 'no rebase in progress');
+  git('checkout', '-q', '-b', 'slice/s-01-x');
+  writeFileSync(join(dir, '.claude', 'settings.json'), '{"a":2}\n');
+  writeFileSync(join(dir, '.githooks', 'pre-commit'), 'slice\n');
+  writeFileSync(join(dir, 'src', 'b.js'), 'work\n');
+  git('add', '-A');
+  git('commit', '-q', '-m', 'feat: work');
+  git('checkout', '-q', 'main');
+  writeFileSync(join(dir, '.claude', 'settings.json'), '{"a":3}\n');
+  git('rm', '-q', '.githooks/pre-commit');
+  git('add', '-A');
+  git('commit', '-q', '-m', 'chore: clean');
+  git('checkout', '-q', 'slice/s-01-x');
+  assert.notEqual(git('rebase', 'main').status, 0, 'the rebase stops on the conflicts');
+  const r = resolveLeftovers(dir);
+  assert.equal(r.state, 'resolved', r.message);
+  assert.deepEqual(r.resolved.sort(), ['.claude/settings.json', '.githooks/pre-commit']);
+  assert.equal(git('-c', 'core.editor=true', 'rebase', '--continue').status, 0);
+  assert.equal(readFileSync(join(dir, '.claude', 'settings.json'), 'utf8'), '{"a":3}\n', 'the version of the base branch');
+  assert.equal(git('ls-files', '.githooks').stdout, '', 'removed as on the base branch');
+  assert.equal(readFileSync(join(dir, 'src', 'b.js'), 'utf8'), 'work\n', 'the work of the slice stays');
+  assert.equal(resolveLeftovers(dir).state, 'none');
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('resolveLeftovers refuses when any other file conflicts, and changes nothing', async () => {
+  const { resolveLeftovers } = await import('../src/rebase.js');
+  const { dir, git } = rebaseRepo();
+  git('checkout', '-q', '-b', 'slice/s-02-y');
+  writeFileSync(join(dir, '.claude', 'settings.json'), '{"a":2}\n');
+  writeFileSync(join(dir, 'src', 'a.js'), 'slice\n');
+  git('add', '-A');
+  git('commit', '-q', '-m', 'feat: y');
+  git('checkout', '-q', 'main');
+  writeFileSync(join(dir, '.claude', 'settings.json'), '{"a":3}\n');
+  writeFileSync(join(dir, 'src', 'a.js'), 'main\n');
+  git('add', '-A');
+  git('commit', '-q', '-m', 'feat: main');
+  git('checkout', '-q', 'slice/s-02-y');
+  assert.notEqual(git('rebase', 'main').status, 0);
+  const before = git('diff', '--name-only', '--diff-filter=U').stdout;
+  const r = resolveLeftovers(dir);
+  assert.equal(r.state, 'others');
+  assert.deepEqual(r.others, ['src/a.js']);
+  assert.equal(git('diff', '--name-only', '--diff-filter=U').stdout, before, 'nothing was resolved');
+  const t = { out: [], err: [] };
+  const code = await run(['rebase', 'leftovers', '--dir', dir], { cwd: repo, env: {}, stdout: { write: (s) => t.out.push(s) }, stderr: { write: (s) => t.err.push(s) } });
+  assert.equal(code, 1);
+  assert.match(t.err.join(''), /src\/a\.js/);
+  git('rebase', '--abort');
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('LEFTOVER names only the files an older Recade kept in a code repository', async () => {
+  const { LEFTOVER } = await import('../src/rebase.js');
+  for (const f of ['.claude/settings.json', '.claude/hooks/recade-guard.mjs', '.githooks/pre-commit', '.github/workflows/conflicts.yml', '.github/workflows/second-opinion.yml', '.github/workflows/recade.yml']) assert.ok(LEFTOVER.test(f), f);
+  for (const f of ['.github/workflows/ci.yml', '.github/dependabot.yml', 'CLAUDE.md', 'src/.claude/x', 'tests/a.test.js']) assert.equal(LEFTOVER.test(f), false, f);
 });

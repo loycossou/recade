@@ -22,7 +22,10 @@ import { expandHome } from './paths.js';
 import { listFiles } from './files.js';
 import { sessionStartOutput } from './hook.js';
 import { createProject } from './project/scaffold.js';
-import { SYNC_ADVICE } from './workspace/layout.js';
+import { SYNC_ADVICE, linkRepo } from './workspace/layout.js';
+import { CLEAN_BRANCH, CLEAN_TITLE, applyClean, cleanPlan } from './workspace/clean.js';
+import { endSession } from './session.js';
+import { resolveLeftovers } from './rebase.js';
 import { REPO_NAME } from './project/touches.js';
 import { addRepo, listRepos, checkRepos, syncRepos, stripCredentials, VISIBILITIES } from './workspace/repos.js';
 import { commitWorkspace, checkWorkspace, pushPending, CommitError, defaultExec as commitExec } from './workspace/commit.js';
@@ -52,9 +55,9 @@ import { mergeOrder } from './harness/merge.js';
 import { findTranscripts, readCost, readTranscriptUsage, recordCost, retro, RetroInputError } from './harness/cost.js';
 import { addQuarantine, removeQuarantine, listQuarantine, checkQuarantine, QuarantineInputError } from './harness/quarantine.js';
 import { releaseNotes, prependChangelog, ReleaseNotesInputError } from './harness/releasenotes.js';
-import { install, formatInstall, isAdopt, InstallError } from './harness/install.js';
+import { install, formatInstall, isAdopt, InstallError, pluginVersion, setupLocal, INSTALL_RECORD } from './harness/install.js';
 import { specialise, SpecialiseError } from './harness/specialise.js';
-import { TARGET_NAMES, REPO_SETTINGS, readRepoSettings, writeRepoSettings } from './harness/targets.js';
+import { TARGET_NAMES, REPO_SETTINGS, readRepoSettings, repoSettingsFile, repoSettingsRel, writeRepoSettings } from './harness/targets.js';
 import { verify, formatVerify } from './harness/verify.js';
 import { loadCaseSets, setPaths, runCases, defaultRun } from './harness/cases.js';
 import { protect } from './harness/protect.js';
@@ -472,6 +475,7 @@ export const commands = {
       list: { flags: ['--json'], values: [] },
       check: { flags: ['--json'], values: [] },
       sync: { flags: [], values: [] },
+      clean: { flags: ['--apply'], values: [] },
     };
     const usage = () => {
       io.stderr.write(`${REPO_USAGE}\n`);
@@ -479,7 +483,7 @@ export const commands = {
     };
     if (!Object.hasOwn(forms, sub)) return usage();
     const parsed = parseOptions(rest, forms[sub]);
-    if (parsed.error || parsed.positional.length !== (sub === 'add' ? 1 : 0)) return usage();
+    if (parsed.error || parsed.positional.length !== (sub === 'add' || sub === 'clean' ? 1 : 0)) return usage();
     if (sub === 'add') {
       const clone = parsed.values['--clone'];
       const visibility = parsed.values['--visibility'];
@@ -489,6 +493,32 @@ export const commands = {
     if (found === null) {
       io.stderr.write(`recade: no workspace found from ${io.cwd}. Run this in a workspace, or in a code repository linked to one (${SYNC_ADVICE}).\n`);
       return 1;
+    }
+    if (sub === 'clean') {
+      const name = parsed.positional[0];
+      const entry = listRepos(found.dir).find((e) => e.name === name);
+      const dir = join(found.dir, 'repos', String(name));
+      if (entry === undefined || !existsSync(join(dir, '.git'))) {
+        io.stderr.write(`${name} is not a code repository of this workspace with a folder in repos/. Run: recade repo list\n`);
+        return 1;
+      }
+      const plan = cleanPlan(dir);
+      if (!parsed.flags.has('--apply')) {
+        if (plan.remove.length === 0 && plan.rewrite.length === 0) {
+          io.stdout.write(`${name}: nothing to clean, the repository holds no file of Recade.\n`);
+          return 0;
+        }
+        io.stdout.write(`Dry run: nothing was changed. On a branch ${CLEAN_BRANCH} of ${name}, from origin, the clean would:\n`);
+        for (const f of plan.remove) io.stdout.write(`remove   ${f}\n`);
+        for (const r of plan.rewrite) io.stdout.write(`rewrite  ${r.file}\n`);
+        for (const m of plan.mentions) io.stdout.write(`still names Recade, to edit in the pull request: ${m}\n`);
+        io.stdout.write(`Then commit "${CLEAN_TITLE}", push the branch and open one pull request, for the owner to merge. Run again with --apply.\n`);
+        return 0;
+      }
+      const base = typeof entry.default_branch === 'string' && entry.default_branch !== '' ? entry.default_branch : 'main';
+      const done = applyClean(dir, join(found.dir, 'worktrees', String(name), 'cleanup'), { base });
+      (done.ok ? io.stdout : io.stderr).write(`${name}: ${done.message}\n`);
+      return done.ok ? 0 : 1;
     }
     const exec = io.exec ?? defaultExec;
     const json = parsed.flags.has('--json');
@@ -902,6 +932,29 @@ export const commands = {
     const pluginRoot = fileURLToPath(new URL('../', import.meta.url));
     return casesCommand(parsed, io, { pluginRoot, sets: only.length === 0 ? ['plugin', 'harness'] : only, tagged: true, command: 'recade cases' });
   },
+  async rebase(args, io) {
+    const parsed = parseOptions(args.slice(1), { flags: [], values: ['--dir'] });
+    if (args[0] !== 'leftovers' || parsed.error || parsed.positional.length > 0) {
+      io.stderr.write('Usage: recade rebase leftovers [--dir <worktree>] (settles a rebase conflict that holds only files of an older Recade)\n');
+      return 2;
+    }
+    const r = resolveLeftovers(resolve(io.cwd, parsed.values['--dir'] ?? '.'));
+    (r.state === 'others' ? io.stderr : io.stdout).write(`${r.message}\n`);
+    return r.state === 'others' ? 1 : 0;
+  },
+  async session(args, io) {
+    if (args.length !== 1 || args[0] !== 'end') {
+      io.stderr.write('Usage: recade session end (run by /exit: stops this Claude Code session a moment after it returns)\n');
+      return 2;
+    }
+    const pid = (io.endSession ?? endSession)();
+    if (pid === null) {
+      io.stderr.write('No Claude Code session was found above this command, so nothing was stopped. Close the session from the app.\n');
+      return 1;
+    }
+    io.stdout.write('The session stops in a moment.\n');
+    return 0;
+  },
   async harness(args, io) {
     const [sub, ...rest] = args;
     const pluginRoot = fileURLToPath(new URL('../', import.meta.url));
@@ -911,6 +964,7 @@ export const commands = {
     };
     if (sub === 'models') return harnessModels(rest, io, usage);
     if (sub === 'migrate') return harnessMigrate(rest, io, { pluginRoot, usage });
+    if (sub === 'sync') return harnessSync(rest, io, { pluginRoot, usage });
     if (!['install', 'verify', 'cases', 'protect', 'set', 'specialise'].includes(sub)) return usage();
     const parsed = parseOptions(rest, {
       flags: sub === 'install' ? ['--force'] : sub === 'cases' ? ['--run'] : sub === 'protect' ? ['--apply'] : [],
@@ -977,7 +1031,7 @@ export const commands = {
       // The link is checked before anything is written: a wrong one stops the command (exit 1, recade repo sync).
       const found = workspaceOf(io.cwd);
       try {
-        const step = await endStep(io, root, ['recade/state.yaml'], 'chore(recade): harness settings set', () => {
+        const step = await endStep(io, root, ['recade/state.yaml', 'recade/repos'], 'chore(recade): harness settings set', () => {
           const repoDir = found?.via === 'link' ? mainRepoOf(io.cwd) : null;
           const state = loadState(root);
           let shown;
@@ -991,7 +1045,7 @@ export const commands = {
           }
           if (wip !== undefined) saveState(root, state);
           else if (repoDir === null) saveState(root, state);
-          io.stdout.write(`harness.required_gates: ${(shown.required_gates ?? []).join(', ') || 'none'}${repoDir === null ? '' : ` (${REPO_SETTINGS})`}\nharness.threshold_files: ${(shown.threshold_files ?? []).join(', ') || 'none'}\nharness.wip_limit: ${state.harness?.wip_limit ?? `not set (default ${DEFAULT_MAX})`}\n`);
+          io.stdout.write(`harness.required_gates: ${(shown.required_gates ?? []).join(', ') || 'none'}${repoDir === null ? '' : ` (${repoSettingsFile(repoDir) ?? REPO_SETTINGS})`}\nharness.threshold_files: ${(shown.threshold_files ?? []).join(', ') || 'none'}\nharness.wip_limit: ${state.harness?.wip_limit ?? `not set (default ${DEFAULT_MAX})`}\n`);
         });
         if (step.exit !== undefined) return step.exit;
       } catch (err) {
@@ -1067,7 +1121,7 @@ export const commands = {
         let source = 'recade/state.yaml';
         if (own.required_gates !== undefined) {
           names = own.required_gates;
-          source = REPO_SETTINGS;
+          source = repoSettingsFile(repo) ?? REPO_SETTINGS;
         } else {
           const root = projectRoot(io.cwd);
           let state = null;
@@ -1088,7 +1142,7 @@ export const commands = {
         if (names.length === 0) {
           // Inside a code repository the gates are the repository's own: say where they are set, not the state of the workspace.
           if (source === 'recade/state.yaml' && workspaceOf(io.cwd)?.via === 'link') {
-            io.stdout.write(`No required gates in ${REPO_SETTINGS} (harness.required_gates). Set them with: recade harness set --required-gates <a,b>\n`);
+            io.stdout.write(`No required gates in ${repoSettingsFile(repo) ?? REPO_SETTINGS} (harness.required_gates). Set them with: recade harness set --required-gates <a,b>\n`);
           } else io.stdout.write(`No required gates in ${source} (harness.required_gates).\n`);
           return 0;
         }
@@ -1444,6 +1498,10 @@ export const commands = {
       return 1;
     }
     const root = place.root;
+    if (place.target === 'code') {
+      io.stdout.write('The CLAUDE.md of a code repository is the project\'s own: Recade does not write it. The commands and conventions of the repository are in the stack document of the workspace.\n');
+      return 0;
+    }
     let result;
     try {
       if (place.target === 'code') result = refreshClaudeMd(root, { stack: findStack(place.workspace)?.text ?? null, target: 'code', repo: basename(root) });
@@ -2087,12 +2145,147 @@ const HARNESS_USAGE = 'Usage: recade harness models [--check] [--dir <agents fol
   + ' | set [--required-gates <a,b>] [--threshold-files <a,b>] [--wip-limit <1-9>]'
   + ' | specialise <agent|command> <name> --file <path> [--target workspace|code] [--repo <name>]'
   + ' | migrate [--dry-run] (from the workspace: the old layout to the one entry point)'
+  + ' | sync (from the workspace: update its harness to this plugin, set up this machine, and say what others pushed)'
   + ' (add --project <dir> to work on a project from another folder)';
 
 /**
  * `recade harness migrate [--dry-run]`: move a workspace of the old layout to the one entry point (src/harness/migrate.js).
  * Run from the workspace. Exit 1 when something was refused or failed, so the owner reads the lines.
  */
+/**
+ * `recade harness sync`, run by the SessionStart hook of the plugin in a workspace. It never fails a session: every
+ * problem is a line of its report, and the exit code is 0.
+ * - The harness of the workspace follows the plugin: when the install record names another version, the workspace is
+ *   installed again and the change is committed (`chore(harness): update to Recade v<x>`). Uncommitted changes of the
+ *   owner in those files stop it, with a line that says so.
+ * - This machine is set up: the plugin folder, the local git hooks and the exclusions, in the workspace and in each
+ *   code repository, and the link of each repository to the workspace.
+ * - What others pushed: each repository is fetched, and the new commits of its default branch by someone else, and
+ *   its open pull requests that are not a slice, are listed.
+ */
+async function harnessSync(rest, io, { pluginRoot, usage }) {
+  const parsed = parseOptions(rest, { flags: ['--no-fetch'], values: [] });
+  if (parsed.error || parsed.positional.length > 0) return usage();
+  const found = workspaceOf(io.cwd);
+  if (found === null) return 0;
+  const ws = found.dir;
+  if (!existsSync(join(ws, INSTALL_RECORD))) return 0;
+  const exec = io.run ?? runCommand;
+  const lines = [];
+  const version = pluginVersion(pluginRoot);
+  let recorded = null;
+  try {
+    recorded = JSON.parse(readFileSync(join(ws, INSTALL_RECORD), 'utf8'))?.version ?? null;
+  } catch { /* read as unknown */ }
+  if (recorded !== version) {
+    try {
+      const paths = ['.claude', '.githooks', '.github', '.gitignore'];
+      const changed = (r) => r.written.filter((w) => w.status !== 'unchanged' && w.status !== 'kept').map((w) => w.file);
+      const step = await endStep(io, ws, paths, (r) => (changed(r).length === 0 && !readGit(ws, ['status', '--porcelain', '--', '.gitignore']) ? null : `chore(harness): update to Recade v${version}`), () => install(ws, { pluginRoot, target: 'workspace', exec, secondOpinion: projectSecondOpinion(join(ws, '.claude', 'agents'), io) }), {
+        around: true,
+        stage: (r) => [...changed(r), ...(existsSync(join(ws, '.gitignore')) ? ['.gitignore'] : [])],
+      });
+      if (step.exit !== undefined) lines.push(`The harness of the workspace was not updated to v${version}: the workspace has changes of its own in .claude, .githooks or .github. Commit them, then open a new session.`);
+      else {
+        lines.push(`The harness of the workspace follows Recade v${version} now${recorded === null ? '' : ` (it was v${recorded})`}.`);
+        for (const w of step.value?.warnings ?? []) if (!/^No doctrine/.test(w)) lines.push(w);
+      }
+    } catch (err) {
+      lines.push(`The harness of the workspace was not updated: ${oneLine(err)}`);
+    }
+  } else {
+    try {
+      for (const w of setupLocal(ws, { pluginRoot, target: 'workspace', exec }).warnings) lines.push(w);
+    } catch (err) {
+      lines.push(`This machine was not set up for the workspace: ${oneLine(err)}`);
+    }
+  }
+  const repos = listRepos(ws).map((e) => String(e.name)).filter((n) => /^[a-z0-9][a-z0-9-]*$/.test(n) && existsSync(join(ws, 'repos', n, '.git')));
+  for (const name of repos) {
+    const dir = join(ws, 'repos', name);
+    try {
+      for (const w of setupLocal(dir, { pluginRoot, target: 'code', exec, adopt: isAdopt(ws) }).warnings) lines.push(`${name}: ${w}`);
+      linkRepo(ws, dir);
+    } catch (err) {
+      lines.push(`${name}: this machine was not set up: ${oneLine(err)}`);
+    }
+  }
+  // The settings of a code repository an older install kept in it (`.claude/recade.yaml`) move to the workspace, so the
+  // clean of the repository loses nothing.
+  const carried = repos.filter((n) => existsSync(join(ws, 'repos', n, REPO_SETTINGS)) && !existsSync(join(ws, repoSettingsRel(n))));
+  if (carried.length > 0) {
+    try {
+      const step = await endStep(io, ws, ['recade/repos'], 'chore(recade): settings of the code repositories kept in the workspace', () => {
+        for (const n of carried) {
+          mkdirSync(join(ws, 'recade', 'repos'), { recursive: true });
+          writeFileSync(join(ws, repoSettingsRel(n)), readFileSync(join(ws, 'repos', n, REPO_SETTINGS), 'utf8'));
+        }
+      });
+      if (step.exit === undefined) lines.push(`The settings of ${carried.join(', ')} (required gates, thresholds) are now kept in the workspace, in recade/repos/.`);
+    } catch (err) {
+      lines.push(`The settings of ${carried.join(', ')} were not moved to the workspace: ${oneLine(err)}`);
+    }
+  }
+  if (!parsed.flags.has('--no-fetch')) lines.push(...othersWork(ws, repos));
+  if (lines.length > 0) io.stdout.write(`${lines.join('\n')}\n`);
+  return 0;
+}
+
+/** The output of a git command in `dir`, trimmed, or '' when it fails. */
+function readGit(dir, args, timeout = 20_000) {
+  const r = spawnSync('git', ['-C', dir, ...args], { encoding: 'utf8', timeout });
+  return r.status === 0 ? String(r.stdout ?? '').trim() : '';
+}
+
+/**
+ * What others pushed since the last session on this machine: for the workspace and each code repository, the new
+ * commits of the default branch on origin by another author, and the open pull requests that are not slices. The last
+ * commit seen is kept per machine in `.recade/seen.json`. The first run only records it.
+ */
+function othersWork(ws, repos) {
+  const lines = [];
+  const seenFile = join(ws, '.recade', 'seen.json');
+  let seen = {};
+  try {
+    seen = JSON.parse(readFileSync(seenFile, 'utf8')) ?? {};
+  } catch { /* first run */ }
+  const me = readGit(ws, ['config', 'user.email']);
+  for (const [label, dir] of [['workspace', ws], ...repos.map((n) => [n, join(ws, 'repos', n)])]) {
+    if (readGit(dir, ['remote', 'get-url', 'origin']) === '') continue;
+    readGit(dir, ['fetch', '--quiet', 'origin'], 30_000);
+    const branch = (readGit(dir, ['symbolic-ref', '--short', 'refs/remotes/origin/HEAD']) || 'origin/main').replace(/^origin\//, '');
+    const head = readGit(dir, ['rev-parse', '--verify', '-q', `refs/remotes/origin/${branch}`]);
+    if (head === '') continue;
+    const last = seen[label];
+    seen[label] = head;
+    if (typeof last !== 'string' || last === head) continue;
+    const log = readGit(dir, ['log', '--no-merges', '--format=%h%x09%ae%x09%an%x09%s', `${last}..${head}`]).split('\n').filter(Boolean)
+      .map((l) => l.split('\t')).filter(([, email]) => email !== me);
+    if (log.length > 0) {
+      lines.push(`${label}: ${log.length} new commit${log.length === 1 ? '' : 's'} by others on ${branch}:`);
+      for (const [sha, , author, subject] of log.slice(0, 5)) lines.push(`  ${sha} ${author}: ${subject}`);
+      if (log.length > 5) lines.push(`  and ${log.length - 5} more.`);
+    }
+  }
+  for (const name of repos) {
+    const r = spawnSync('gh', ['pr', 'list', '--state', 'open', '--limit', '50', '--json', 'number,title,headRefName,author'], { cwd: join(ws, 'repos', name), encoding: 'utf8', timeout: 20_000 });
+    if (r.status !== 0) continue;
+    let prs = [];
+    try {
+      prs = JSON.parse(r.stdout).filter((p) => !String(p.headRefName).startsWith('slice/'));
+    } catch { /* unreadable: nothing to say */ }
+    if (prs.length > 0) {
+      lines.push(`${name}: ${prs.length} open pull request${prs.length === 1 ? '' : 's'} that ${prs.length === 1 ? 'is' : 'are'} not a slice:`);
+      for (const p of prs.slice(0, 5)) lines.push(`  #${p.number} ${p.author?.login ?? ''}: ${p.title}`);
+    }
+  }
+  try {
+    mkdirSync(join(ws, '.recade'), { recursive: true });
+    writeFileSync(seenFile, `${JSON.stringify(seen, null, 2)}\n`);
+  } catch { /* the next session lists again */ }
+  return lines;
+}
+
 async function harnessMigrate(rest, io, { pluginRoot, usage }) {
   const parsed = parseOptions(rest, { flags: ['--dry-run'], values: ['--ref'] });
   if (parsed.error || parsed.positional.length > 0) return usage();
@@ -2797,7 +2990,7 @@ function parseWorkspaceCommit(rest) {
   if (message.trim() === '' || message.length > 200 || /[\0\r\n]/.test(message)) return null;
   return { paths: [...new Set(paths.map((p) => p.replace(/\/+$/, '')))], message: message.trim() };
 }
-const REPO_USAGE = 'Usage: recade repo add <name> (--new | --clone <url or path>) [--role <text>] [--visibility private|public|internal] | list [--json] | check [--json] | sync';
+const REPO_USAGE = 'Usage: recade repo add <name> (--new | --clone <url or path>) [--role <text>] [--visibility private|public|internal] | list [--json] | check [--json] | sync | clean <name> [--apply]';
 const NEW_USAGE = 'Usage: recade new <name> [--parent <dir>] [--from <dir>] [--json]';
 const PROVISIONAL_USAGE =
   'Usage: recade provisional open --what <text> --why <text> --assumption <text> --owner <text> [--due YYYY-MM-DD]'

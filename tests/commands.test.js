@@ -587,27 +587,26 @@ test('adopt.md step 5.2 writes the PLAN of the remaining work, which slices chec
   }
 });
 
-test('adopt.md step 6 stages the files of .recade/created.json that git tracks, never the gitignored .recade/ folder', () => {
+test('adopt.md step 6 commits nothing in an adopted code repository, and keeps its settings in the workspace', () => {
   const text = read('adopt.md');
   const step = text.slice(text.indexOf('## Step 6.'));
-  const point = step.slice(step.indexOf('6. The files to commit'), step.indexOf('7. The gate'));
-  assert.ok(point.includes('.recade/created.json') && point.includes('gitignored') && point.includes('not `.recade/`'), 'the staging point says .recade/ is not staged');
-  assert.ok(point.includes('never use `git add -A`'));
+  const point = step.slice(step.indexOf('6. Nothing is committed'), step.indexOf('7. The gate'));
+  assert.ok(point.includes('the install wrote nothing there'));
+  assert.ok(point.includes('`recade/repos/<name>.yaml`'));
 });
 
-test('adopt.md step 6 fits the harness beside the project: nothing of the owner edited, recade.yml, merge, gate only on the yes', () => {
+test('adopt.md step 6 leaves the project its own files: no CI, no hook, no CLAUDE.md from Recade, gate only on the yes', () => {
   const text = read('adopt.md');
   const step = text.slice(text.indexOf('## Step 6.'));
-  for (const part of ['recade state can-start 5', 'commands/harness.md', 'Never edit a file Recade did not create', 'byte for byte', '.github/workflows/recade.yml',
-    'only when the project has none', 'Never use `--force`', 'docs/STACK.md', 'recade adopt write', 'merged, not replaced',
-    'recade claude-md refresh', 'between the two Recade markers', '.recade/created.json', 'core.hooksPath', 'recade harness verify', 'never use `git add -A`',
-    'recade state pass G5', 'Approve (G5)']) {
+  for (const part of ['recade state can-start 5', 'commands/harness.md', 'docs/STACK.md', 'recade adopt write', 'the install writes nothing in it',
+    "`CLAUDE.md` of a code repository is the owner's", '`.git/info/exclude`', 'core.hooksPath', 'recade harness verify', 'recade state pass G5', 'Approve (G5)']) {
     assert.ok(step.includes(part), part);
   }
   assert.ok(step.indexOf('Approve (G5)') < step.indexOf('recade state pass G5'));
   assert.equal(text.includes('Not built yet in this version'), false, 'the placeholder of Task 3 is gone');
   assert.equal(step.includes(String.fromCharCode(0x2014)), false);
   assert.equal(step.includes('existing: true'), false, 'the stack in place is always docs/STACK.md of the workspace');
+  for (const gone of ['.github/workflows/recade.yml', 'merged, not replaced', 'between the two Recade markers']) assert.equal(step.includes(gone), false, gone);
 });
 
 test('adopt.md step 4 scans, dispatches the inventory analyst, asks the gate and passes it only on the yes', () => {
@@ -682,12 +681,12 @@ test('adopt.md Step 3 asks the parent folder and the repositories, then runs rec
   assert.equal(rule.includes('Recade writes only under `recade/`, `docs/`'), false);
 });
 
-test('adopt.md Step 4 and Step 5 commit the workspace documents by name, and stage nothing in a code repository except its harness files', () => {
+test('adopt.md Step 4 and Step 5 commit the workspace documents by name, and stage nothing in a code repository', () => {
   const text = read('adopt.md');
   assert.ok(text.includes("git -C '<dir>' add"));
   assert.ok(text.includes('Every Recade command that writes the state'));
   const step6 = text.slice(text.indexOf('## Step 6.'));
-  for (const part of ["`recade harness install --target workspace --project '<dir>'`", "`recade harness install --target code --repo '<name>' --project '<dir>'`", 'the workspace is Recade\'s own', 'never applies the own-files policy to the workspace', "git -C '<dir>/repos/<name>'"]) {
+  for (const part of ["`recade harness install --target workspace --project '<dir>'`", "`recade harness install --target code --repo '<name>' --project '<dir>'`", 'the workspace is Recade\'s own', 'Nothing is committed in an adopted code repository']) {
     assert.ok(step6.includes(part), part);
   }
 });
@@ -716,7 +715,7 @@ test('new.md creates the workspace: asks where, says what it holds, and when the
 
 test('resume.md checks the code repositories, relinks them only on the owner yes, and never hands repo sync or repo add to an agent', () => {
   const step1 = stepSection('resume.md', 1);
-  for (const part of ['recade repo check', 'recade repo sync', 'recade workspace root', 'Relink the code repositories now?', '`Yes, run recade repo sync`', '`Not now`', 'link missing', 'link points elsewhere', 'no harness', '/recade:harness',
+  for (const part of ['recade repo check', 'recade repo sync', 'recade workspace root', 'Relink the code repositories now?', '`Yes, run recade repo sync`', '`Not now`', 'link missing', 'link points elsewhere', 'git hooks off', '/recade:harness',
     'Run it from the workspace folder', 'skipped', 'Never give `recade repo sync` or `recade repo add` to an agent']) {
     assert.ok(step1.includes(part), part);
   }
@@ -816,12 +815,13 @@ test('slices.md reads the registry, asks for prefixed touches, and Step 6 asks o
 test('harness.md installs the workspace target and each code repository, asks the threshold files, protects the workspace loosely, and sends agent file edits to the owner', () => {
   const text = read('harness.md');
   const step = (n) => stepSection('harness.md', n);
-  for (const part of ['Recade command may push the workspace after a commit', 'recade workspace auto-push']) assert.ok(text.includes(part), part);
+  for (const part of ['pushed once, at the end of each turn', 'recade workspace auto-push', 'Nothing in it names Recade', 'a hook of the plugin itself']) assert.ok(text.includes(part), part);
   const one = step(1);
   for (const part of ['recade repo list --json', 'recade repo check', 'no code repository', '`/recade:docs`', "recade harness migrate --dry-run --project '<dir>'", "recade harness migrate --project '<dir>'", '`old layout`']) assert.ok(one.includes(part), part);
   const two = step(2);
   for (const part of ["recade harness install --target workspace --project '<dir>'", "recade harness install --target code --repo '<name>' --project '<dir>'", 'one repository at a time', 'Threshold file candidates', 'Protect these files as thresholds?',
-    "recade harness set --threshold-files '<a,b>' --project '<dir>/repos/<name>'", '`.claude/recade.yaml`', 'Nothing is added unless the owner lists it', 'the table of that repository', "the workspace is Recade's own"]) {
+    "recade harness set --threshold-files '<a,b>' --project '<dir>/repos/<name>'", '`recade/repos/<name>.yaml`', 'Nothing is added unless the owner lists it', 'the table of that repository', 'only when they do not exist yet',
+    "recade repo clean '<name>' --project '<dir>'", '`--apply`', 'It never touches `main`']) {
     assert.ok(two.includes(part), part);
   }
   const four = step(4);
@@ -836,13 +836,14 @@ test('harness.md installs the workspace target and each code repository, asks th
   assert.ok(four.indexOf('Write') < four.indexOf('recade harness specialise agent'));
   const five = step(5);
   assert.equal(five.includes("--dir '<dir>/repos/<name>/.claude/agents'"), false, 'a code repository holds no agent');
-  for (const part of ["recade harness models --check --dir '<dir>/.claude/agents'", "recade claude-md refresh --target workspace --write --project '<dir>'", "recade claude-md refresh --target code --repo '<name>' --write --project '<dir>'"]) {
+  for (const part of ["recade harness models --check --dir '<dir>/.claude/agents'", "recade claude-md refresh --target workspace --write --project '<dir>'", 'Recade does not write it']) {
     assert.ok(five.includes(part), part);
   }
+  assert.equal(five.includes('--target code --repo'), false, 'the CLAUDE.md of a code repository is the project\'s');
   const six = step(6);
   for (const part of ["recade harness verify --target workspace --project '<dir>'", "recade harness verify --target code --repo '<name>' --project '<dir>'"]) assert.ok(six.includes(part), part);
   const seven = step(7);
-  for (const part of ["git -C '<dir>/repos/<name>'", "recade harness set --required-gates '<a,b>' --project '<dir>/repos/<name>'", 'its own stamp']) assert.ok(seven.includes(part), part);
+  for (const part of ["git -C '<repo>' add .github/workflows/ci.yml .github/dependabot.yml", 'The message names no tool', "recade harness set --required-gates '<a,b>' --project '<dir>/repos/<name>'", 'its own stamp']) assert.ok(seven.includes(part), part);
   const eight = step(8);
   for (const part of ['no pull request and no check is required on the workspace', 'no force push, no deletion, linear history', "recade harness protect --project '<dir>/repos/<name>'", 'strict', 'one repository at a time']) assert.ok(eight.includes(part), part);
   assert.equal(text.includes('existing: true'), false);

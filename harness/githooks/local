@@ -1,0 +1,24 @@
+#!/bin/sh
+# Recade local hook __HOOK__, installed on this machine only (never committed). It runs the hook of the Recade plugin,
+# harness/githooks/__TEMPLATE__, so an update of the plugin updates it. Without the plugin on this machine it lets the
+# commit through: the repository never depends on Recade.
+set -u
+
+if [ -z "${RECADE_PLUGIN_ROOT:-}" ]; then
+  top=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+  common=$(git rev-parse --git-common-dir 2>/dev/null || true)
+  main=""
+  if [ -n "$common" ]; then main=$(cd "$common/.." 2>/dev/null && pwd || true); fi
+  for dir in "$top" "$main"; do
+    if [ -n "$dir" ] && [ -f "$dir/.recade/plugin-root" ]; then
+      RECADE_PLUGIN_ROOT=$(sed -n '1p' "$dir/.recade/plugin-root")
+      break
+    fi
+  done
+fi
+hook="${RECADE_PLUGIN_ROOT:-}/harness/githooks/__TEMPLATE__"
+if [ -z "${RECADE_PLUGIN_ROOT:-}" ] || [ ! -f "$hook" ]; then
+  exit 0
+fi
+export RECADE_PLUGIN_ROOT
+exec sh "$hook" "$@"

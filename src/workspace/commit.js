@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { closeSync, linkSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeSync } from 'node:fs';
+import { closeSync, existsSync, linkSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { join } from 'node:path';
 import { loadState } from '../state.js';
@@ -321,7 +321,13 @@ export async function commitWorkspace(ws, paths, message, { exec = defaultExec, 
         targets = scope;
         throw new CommitError(`Files to commit outside this step: ${checkPaths(stage(value)).join(', ')}.`);
       }
-      const add = await run(exec, ['git', 'add', '-A', '--', ...targets], ws);
+      // A path of the step that does not exist and that git does not track (a folder no step wrote yet) has nothing to add.
+      const present = [];
+      for (const t of targets) {
+        if (existsSync(join(ws, t)) || (await run(exec, ['git', 'ls-files', '--', t], ws)).stdout.trim() !== '') present.push(t);
+      }
+      if (present.length === 0) return { committed: false, sha: null, value };
+      const add = await run(exec, ['git', 'add', '-A', '--', ...present], ws);
       if (add.code !== 0) throw new CommitError(`git add failed: ${errorLine(add.stderr) || `exit ${add.code}`}`);
       const staged = await run(exec, ['git', 'diff', '--cached', '--quiet'], ws);
       if (staged.code === 0) return { committed: false, sha: null, value };

@@ -11,7 +11,6 @@ import { fingerprint, knownTexts } from './history.js';
 import { withModelLine } from './models.js';
 import { specialise } from './specialise.js';
 import { defaultExec } from './stamps.js';
-import { POINTER_COMMANDS } from './targets.js';
 
 /**
  * `recade harness migrate`: bring a workspace of the old layout to the one entry point (docs/design.md, section 10.4).
@@ -258,21 +257,7 @@ export function migrate(ws, { pluginRoot, dryRun = false, exec = defaultExec, re
         recordChanged = true;
       }
     }
-    // The pointer takes the place of the old /slice once that one is removed (or was never there). The team's copy stays.
-    for (const name of POINTER_COMMANDS) {
-      const file = `.claude/commands/${name}.md`;
-      const gone = !existsSync(join(dir, file)) || out.removed.some((r) => r.repo === repo && r.file === file);
-      // Only a repository whose harness was installed gets the pointer: the install writes it in the others.
-      if (!gone || !existsSync(join(dir, LAUNCHER))) continue;
-      out.pointers.push({ repo, file, status: dryRun ? 'would write' : 'written' });
-      if (dryRun) continue;
-      const pointer = `${genericOf(readFileSync(join(pluginRoot, 'harness', 'pointer', `${name}.md`), 'utf8'), version)}\n${SPEC_LINE}\n`;
-      if (adopt) writeOwnFile(dir, file, pointer, { keepEdits: true });
-      else {
-        mkdirSync(join(dir, '.claude', 'commands'), { recursive: true });
-        writeFileSync(join(dir, file), pointer);
-      }
-    }
+    // A code repository gets no command any more (1.6.0): no pointer takes the place of the old /slice.
     if (recordChanged && existsSync(join(dir, INSTALL_RECORD))) {
       writeFileSync(join(dir, INSTALL_RECORD), `${JSON.stringify({ version, files: record }, null, 2)}\n`);
     }

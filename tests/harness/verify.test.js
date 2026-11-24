@@ -9,6 +9,8 @@ import { STACK, cli, fakePlugin, git, makeProject, plugin } from './fixture-proj
 const read = (root, f) => readFileSync(join(root, f), 'utf8');
 const write = (root, f, text) => writeFileSync(join(root, f), text);
 const errors = (r, check) => r.findings.filter((f) => f.severity === 'error' && (check === undefined || f.check === check));
+/** The git hooks folder of a checkout, where the local hooks are. */
+const hooksDir = (root) => join(root, git(root, 'rev-parse', '--git-path', 'hooks').stdout.trim());
 const installed = (opts) => {
   const root = makeProject(opts);
   install(root, { pluginRoot: plugin });
@@ -97,71 +99,50 @@ test('a guard that refuses everything is caught too, because the harness would b
   assert.deepEqual(msgs, ['a harmless command: the guard refused a harmless call.']);
 });
 
-test('a settings file whose hook points nowhere is a bypass the real hook command exposes', async () => {
-  for (const [command, expected] of [['true', /gh pr merge: the hook could not be run/], ['node "/nowhere/harness/hooks/guard.mjs"', /gh pr merge: the guard did not refuse it/]]) {
-    const root = installed();
-    const s = JSON.parse(read(root, '.claude/settings.json'));
-    s.hooks.PreToolUse[0].hooks[0].command = command;
-    write(root, '.claude/settings.json', JSON.stringify(s));
-    const msgs = errors(await verify(root, { pluginRoot: plugin, only: ['guard'] }), 'guard').map((f) => f.message);
-    assert.ok(msgs.some((m) => expected.test(m)), command);
-  }
-});
-
-test('settings: a deny rule removed, a committed plugin folder, a stale plugin-root, a missing hook', async () => {
+test('the guard probes run the hook of the plugin, as Claude Code runs it: a plugin with no guard script is a bypass and is caught', async () => {
   const root = installed();
-  const s = JSON.parse(read(root, '.claude/settings.json'));
-  s.permissions.deny = s.permissions.deny.filter((r) => !r.includes('gh pr merge'));
-  s.env = { RECADE_PLUGIN_ROOT: '/nowhere/recade' };
-  delete s.hooks;
-  write(root, '.claude/settings.json', JSON.stringify(s));
-  write(root, '.recade/plugin-root', '/nowhere/recade\n');
-  const msgs = errors(await verify(root, { pluginRoot: plugin, only: ['settings'] }), 'settings').map((f) => f.message).join('\n');
-  assert.match(msgs, /The deny rule Bash\(gh pr merge:\*\) is missing/);
-  assert.match(msgs, /sets env\.RECADE_PLUGIN_ROOT/);
-  assert.match(msgs, /\.recade\/plugin-root points to \/nowhere\/recade/);
-  assert.match(msgs, /No PreToolUse hook runs the guard launcher/);
+  const broken = fakePlugin('1.0.0');
+  const msgs = errors(await verify(root, { pluginRoot: broken, only: ['guard'] }), 'guard').map((f) => f.message);
+  assert.ok(msgs.some((m) => /gh pr merge: the guard did not refuse it/.test(m)), msgs.join('\n'));
 });
 
-test('settings: the old hook form, an edited hook command and an edited launcher are caught', async () => {
-  const root = installed();
-  const s = JSON.parse(read(root, '.claude/settings.json'));
-  s.hooks.PreToolUse[0].hooks[0].command = 'node "$RECADE_PLUGIN_ROOT/harness/hooks/guard.mjs"';
-  write(root, '.claude/settings.json', JSON.stringify(s));
-  let msgs = errors(await verify(root, { pluginRoot: plugin, only: ['settings'] }), 'settings').map((f) => f.message).join('\n');
-  assert.match(msgs, /the old form that fails open/);
-  s.hooks.PreToolUse[0].hooks[0].command = 'node "$CLAUDE_PROJECT_DIR/.claude/hooks/recade-guard.mjs"';
-  write(root, '.claude/settings.json', JSON.stringify(s));
-  write(root, '.claude/hooks/recade-guard.mjs', '// Recade harness\n');
-  msgs = errors(await verify(root, { pluginRoot: plugin, only: ['settings'] }), 'settings').map((f) => f.message).join('\n');
-  assert.match(msgs, /command differs from the Recade one/);
-  assert.match(msgs, /recade-guard\.mjs differs from the Recade launcher/);
-});
-
-test('the guard probes go through the launcher: a stale plugin-root refuses the harmless call, a missing launcher blocks', async () => {
+test('settings: a stale plugin-root, a plugin with no guard hook, and the launcher of an older Recade are caught', async () => {
   const root = installed();
   write(root, '.recade/plugin-root', '/nowhere/recade\n');
-  let msgs = errors(await verify(root, { pluginRoot: plugin, only: ['guard'] }), 'guard').map((f) => f.message).join('\n');
-  assert.doesNotMatch(msgs, /gh pr merge: the guard did not refuse it/);
+  write(root, '.claude/settings.json', JSON.stringify({ hooks: { PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'node "$CLAUDE_PROJECT_DIR/.claude/hooks/recade-guard.mjs"' }] }] } }));
+  const r = await verify(root, { pluginRoot: plugin, only: ['settings'] });
+  assert.match(errors(r, 'settings').map((f) => f.message).join('\n'), /\.recade\/plugin-root points to \/nowhere\/recade/);
+  assert.ok(r.findings.some((f) => f.severity === 'warn' && /\.claude\/settings\.json still runs the guard launcher of an older Recade/.test(f.message)));
+  const bare = fakePlugin('1.0.0');
   write(root, '.recade/plugin-root', `${plugin}\n`);
-  rmSync(join(root, '.claude', 'hooks', 'recade-guard.mjs'));
-  msgs = errors(await verify(root, { pluginRoot: plugin, only: ['guard'] }), 'guard').map((f) => f.message).join('\n');
-  assert.doesNotMatch(msgs, /gh pr merge: the guard did not refuse it/);
+  assert.match(errors(await verify(root, { pluginRoot: bare, only: ['settings'] }), 'settings').map((f) => f.message).join('\n'), /The plugin has no PreToolUse hook that runs bin\/recade-guard\.js/);
 });
 
-test('git hooks switched off (core.hooksPath unset) are caught', async () => {
+test('the guard is the hook of the plugin: a stale plugin-root of the project does not open it', async () => {
   const root = installed();
+  write(root, '.recade/plugin-root', '/nowhere/recade\n');
+  assert.deepEqual(errors(await verify(root, { pluginRoot: plugin, only: ['guard'] }), 'guard'), []);
+});
+
+test('local git hooks that are missing, or bypassed by a core.hooksPath, are caught', async () => {
+  const root = installed();
+  git(root, 'config', 'core.hooksPath', '.githooks');
+  let e = errors(await verify(root, { pluginRoot: plugin, only: ['git'] }), 'git');
+  assert.ok(e.some((f) => /core\.hooksPath is \.githooks, so the local git hooks of Recade do not run/.test(f.message)), JSON.stringify(e));
   git(root, 'config', '--unset', 'core.hooksPath');
-  const e = errors(await verify(root, { pluginRoot: plugin, only: ['git'] }), 'git');
+  rmSync(join(hooksDir(root), 'commit-msg'));
+  e = errors(await verify(root, { pluginRoot: plugin, only: ['git'] }), 'git');
   assert.equal(e.length, 1);
-  assert.match(e[0].message, /core\.hooksPath is not \.githooks/);
+  assert.match(e[0].message, /The local git hook commit-msg is missing\. Run: recade repo sync/);
 });
 
-test('a pre-commit that accepts an em dash and a commit-msg that accepts one are caught', async () => {
+test('a plugin whose pre-commit and commit-msg accept an em dash is caught', async () => {
   const root = installed();
-  write(root, '.githooks/pre-commit', '#!/bin/sh\nexit 0\n');
-  write(root, '.githooks/commit-msg', '#!/bin/sh\nexit 0\n');
-  const msgs = errors(await verify(root, { pluginRoot: plugin, only: ['pre-commit'] }), 'pre-commit').map((f) => f.message);
+  const lax = fakePlugin('1.0.0', (dir) => {
+    writeFileSync(join(dir, 'harness', 'githooks', 'pre-commit'), '#!/bin/sh\nexit 0\n');
+    writeFileSync(join(dir, 'harness', 'githooks', 'commit-msg'), '#!/bin/sh\nexit 0\n');
+  });
+  const msgs = errors(await verify(root, { pluginRoot: lax, only: ['pre-commit'] }), 'pre-commit').map((f) => f.message);
   assert.deepEqual(msgs, [
     'pre-commit accepts a file with an em dash.',
     'pre-commit lets a commit through when a required gate has no green stamp.',
@@ -169,17 +150,20 @@ test('a pre-commit that accepts an em dash and a commit-msg that accepts one are
   ]);
 });
 
-test('a pre-commit that refuses everything is caught: the refusal of the em dash would prove nothing', async () => {
+test('a plugin whose pre-commit refuses everything is caught: the refusal of the em dash would prove nothing', async () => {
   const root = installed();
-  write(root, '.githooks/pre-commit', '#!/bin/sh\necho no >&2\nexit 1\n');
-  const msgs = errors(await verify(root, { pluginRoot: plugin, only: ['pre-commit'] }), 'pre-commit').map((f) => f.message);
+  const strict = fakePlugin('1.0.0', (dir) => writeFileSync(join(dir, 'harness', 'githooks', 'pre-commit'), '#!/bin/sh\necho no >&2\nexit 1\n'));
+  const msgs = errors(await verify(root, { pluginRoot: strict, only: ['pre-commit'] }), 'pre-commit').map((f) => f.message);
   assert.ok(msgs.some((m) => m.startsWith('pre-commit refuses a clean file')));
 });
 
 test('a placeholder left in an installed file is caught', async () => {
   const root = installed();
-  write(root, '.githooks/commit-msg', `${read(root, '.githooks/commit-msg')}\n# __RECADE_PLUGIN_ROOT__\n`);
-  assert.ok(errors(await verify(root, { pluginRoot: plugin, only: ['layout'] }), 'layout').some((f) => /commit-msg still holds a placeholder/.test(f.message)));
+  write(root, '.claude/commands/status.md', `${read(root, '.claude/commands/status.md')}\n__RECADE_PLUGIN_ROOT__\n`);
+  write(root, '.github/workflows/ci.yml', `${read(root, '.github/workflows/ci.yml')}# __RECADE_TEST__\n`);
+  const msgs = errors(await verify(root, { pluginRoot: plugin, only: ['layout'] }), 'layout').map((f) => f.message).join('\n');
+  assert.match(msgs, /status\.md still holds a placeholder/);
+  assert.match(msgs, /ci\.yml still holds a placeholder/);
 });
 
 test('an em dash written in a specialisation is caught by the style check', async () => {
@@ -188,16 +172,13 @@ test('an em dash written in a specialisation is caught by the style check', asyn
   assert.ok(errors(await verify(root, { pluginRoot: plugin, only: ['style'] }), 'style').length >= 1);
 });
 
-test('CI: a workflow on main, an unfilled row and invalid YAML are caught', async () => {
+test('CI: an unfilled row is a warning that names it, and invalid YAML is an error', async () => {
   const stack = STACK.split('\n').filter((l) => !/^\| SAST \|/.test(l)).join('\n');
   const root = installed({ stack });
-  const conflicts = read(root, '.github/workflows/conflicts.yml');
-  write(root, '.github/workflows/conflicts.yml', conflicts.replace(/RECADE_REF: \S+/, 'RECADE_REF: main'));
   write(root, '.github/dependabot.yml', 'version: 2\nupdates: [\n');
-  const msgs = errors(await verify(root, { pluginRoot: plugin, only: ['ci'] }), 'ci').map((f) => f.message).join('\n');
-  assert.match(msgs, /conflicts\.yml fetches the Recade tools at main/);
-  assert.match(msgs, /the row SAST of the harness technical sheet is not filled/);
-  assert.match(msgs, /dependabot\.yml is not valid YAML/);
+  const r = await verify(root, { pluginRoot: plugin, only: ['ci'] });
+  assert.ok(r.findings.some((f) => f.severity === 'warn' && /ci\.yml: no command is set for SAST, so CI fails on it/.test(f.message)), JSON.stringify(r.findings));
+  assert.match(errors(r, 'ci').map((f) => f.message).join('\n'), /dependabot\.yml is not valid YAML/);
 });
 
 test('a sensitive lane with "Confirmation tests: not applicable" is flagged, a standard lane is not', async () => {
@@ -224,49 +205,42 @@ test('frontMatter reads strict YAML and the lenient form Claude Code accepts', a
   assert.equal(frontMatter('no front matter'), null);
 });
 
-test('a git hook that is not executable is caught, because git skips it in silence', async () => {
+test('a local git hook that is not executable is caught, because git skips it in silence', async () => {
   const root = installed();
-  chmodSync(join(root, '.githooks', 'pre-commit'), 0o644);
-  chmodSync(join(root, '.githooks', 'commit-msg'), 0o644);
+  chmodSync(join(hooksDir(root), 'pre-commit'), 0o644);
+  chmodSync(join(hooksDir(root), 'commit-msg'), 0o644);
   const msgs = errors(await verify(root, { pluginRoot: plugin, only: ['git'] }), 'git').map((f) => f.message);
   assert.equal(msgs.filter((m) => /is not executable/.test(m)).length, 2);
 });
 
-test('a git hook edited away from the Recade text is caught, for example one with the gate check removed', async () => {
+test('a local git hook edited away from the Recade text is an error, and a hook of the owner is a warning', async () => {
   const root = installed();
-  write(root, '.githooks/pre-commit', read(root, '.githooks/pre-commit').replace(/node "\$RECADE_PLUGIN_ROOT\/bin\/recade\.js" gate check[\s\S]*$/, ''));
-  const msgs = errors(await verify(root, { pluginRoot: plugin, only: ['git', 'pre-commit'] })).map((f) => f.message).join('\n');
-  assert.match(msgs, /\.githooks\/pre-commit differs from the Recade hook/);
-  assert.match(msgs, /pre-commit lets a commit through when a required gate has no green stamp/);
+  const hook = join(hooksDir(root), 'pre-commit');
+  writeFileSync(hook, `${readFileSync(hook, 'utf8')}# edited\n`);
+  assert.match(errors(await verify(root, { pluginRoot: plugin, only: ['git'] }), 'git').map((f) => f.message).join('\n'), /The local git hook pre-commit differs from the Recade one/);
+  writeFileSync(hook, '#!/bin/sh\nexec npx lint-staged\n');
+  const r = await verify(root, { pluginRoot: plugin, only: ['git'] });
+  assert.deepEqual(errors(r, 'git'), []);
+  assert.ok(r.findings.some((f) => f.severity === 'warn' && /The git hook pre-commit is your own/.test(f.message)));
 });
 
-test('disableAllHooks in the shared or the local settings is caught', async () => {
+test('disableAllHooks in the shared or the local settings is caught: it turns the hooks of the plugin off too', async () => {
   const shared = installed();
-  const s = JSON.parse(read(shared, '.claude/settings.json'));
-  s.disableAllHooks = true;
-  write(shared, '.claude/settings.json', JSON.stringify(s));
+  write(shared, '.claude/settings.json', JSON.stringify({ disableAllHooks: true }));
   assert.ok(errors(await verify(shared, { pluginRoot: plugin, only: ['settings'] }), 'settings').some((f) => /disableAllHooks is true in \.claude\/settings\.json/.test(f.message)));
   const local = installed();
   write(local, '.claude/settings.local.json', JSON.stringify({ disableAllHooks: true }));
   assert.ok(errors(await verify(local, { pluginRoot: plugin, only: ['settings'] }), 'settings').some((f) => /disableAllHooks is true in \.claude\/settings\.local\.json/.test(f.message)));
 });
 
-test('a local settings file that allows a denied command or moves the plugin folder is caught', async () => {
+test('a local settings file with rules of its own is fine, one that runs the launcher of an older Recade is a warning, one that does not parse an error', async () => {
   const root = installed();
-  write(root, '.claude/settings.local.json', JSON.stringify({
-    env: { RECADE_PLUGIN_ROOT: '/elsewhere' },
-    permissions: { allow: ['Bash(gh pr merge:*)', 'Bash(git push origin main)', 'Bash(npm test:*)'] },
-    hooks: { PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'echo ok' }] }] },
-  }));
-  const r = await verify(root, { pluginRoot: plugin, only: ['settings'] });
-  const msgs = errors(r, 'settings').map((f) => f.message).join('\n');
-  assert.match(msgs, /changes env\.RECADE_PLUGIN_ROOT/);
-  assert.match(msgs, /allows Bash\(gh pr merge:\*\)/);
-  assert.match(msgs, /allows Bash\(git push origin main\)/);
-  assert.doesNotMatch(msgs, /npm test/);
-  assert.ok(r.findings.some((f) => f.severity === 'warn' && /adds PreToolUse hooks/.test(f.message)));
   write(root, '.claude/settings.local.json', JSON.stringify({ permissions: { allow: ['Bash(npm test:*)'] } }));
   assert.deepEqual((await verify(root, { pluginRoot: plugin, only: ['settings'] })).findings, []);
+  write(root, '.claude/settings.local.json', JSON.stringify({ hooks: { PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'node .claude/hooks/recade-guard.mjs' }] }] } }));
+  assert.ok((await verify(root, { pluginRoot: plugin, only: ['settings'] })).findings.some((f) => f.severity === 'warn' && /settings\.local\.json still runs the guard launcher/.test(f.message)));
+  write(root, '.claude/settings.local.json', '{ nope');
+  assert.match(errors(await verify(root, { pluginRoot: plugin, only: ['settings'] }), 'settings')[0].message, /settings\.local\.json does not parse/);
 });
 
 test('a plugin folder with a dollar sequence is written as it is, not as a replacement pattern', () => {

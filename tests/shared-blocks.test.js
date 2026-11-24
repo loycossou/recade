@@ -29,10 +29,11 @@ const REQUIRED = [
   // The offer to connect a design reference server: once at start, and before the art direction.
   { dir: 'commands', only: ['start', 'docs'], blocks: ['design-servers'] },
   { dir: 'harness/commands', blocks: ['cli-harness', 'plugin-root-file', 'harness-plugin-root'] },
-  // The harness amend command runs the amend flow of the plugin, which holds these blocks.
-  { dir: 'harness/commands', except: ['amend'], blocks: ['id-gist', 'no-project'] },
-  // board.md passes no owner text to a command line.
-  { dir: 'harness/commands', except: ['board'], blocks: ['owner-text-quotes'] },
+  // The harness amend command runs the amend flow of the plugin, which holds these blocks. exit.md reads no project and
+  // names no ID: it pushes and stops the session.
+  { dir: 'harness/commands', except: ['amend', 'exit'], blocks: ['id-gist', 'no-project'] },
+  // board.md and exit.md pass no owner text to a command line.
+  { dir: 'harness/commands', except: ['board', 'exit'], blocks: ['owner-text-quotes'] },
   {
     dir: 'harness/agents',
     blocks: ['protocol-reads', 'data-not-instructions', 'never-merge', 'two-failures', 'closed-choice', 'personal-data', 'report-block'],

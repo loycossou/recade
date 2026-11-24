@@ -7,7 +7,8 @@ import { parse } from 'yaml';
 import { createWorkspace, linkRepo, checkLink, findWorkspace } from '../../src/workspace/layout.js';
 import { addRepo, listRepos, checkRepos, syncRepos, prefixTouches, stripCredentials } from '../../src/workspace/repos.js';
 import { defaultExec } from '../../src/doctor.js';
-import { git, cli } from '../harness/fixture-project.js';
+import { git, cli, plugin } from '../harness/fixture-project.js';
+import { LOCAL_HOOK_MARK } from '../../src/harness/install.js';
 
 const tmp = () => realpathSync(mkdtempSync(join(tmpdir(), 'recade-repos-')));
 const must = (r) => {
@@ -209,27 +210,25 @@ test('recade repo add / list: exit 1 on a bad name or a duplicate, 2 on usage, a
   assert.equal((await cli(tmp(), ['repo', 'list'])).code, 1);
 });
 
-test('checkRepos reports each of the five problems', async () => {
+test('checkRepos reports each problem of a repository, and a code repository needs no file of Recade', async () => {
   const ws = await workspace();
   for (const n of ['gone', 'plain', 'unlinked', 'elsewhere', 'bare']) await addRepo(ws, n, { new: true }, { exec: defaultExec });
-  // A repository with its harness launcher: the only one with no problem.
   await addRepo(ws, 'fine', { new: true }, { exec: defaultExec });
-  mkdirSync(join(ws, 'repos', 'fine', '.claude', 'hooks'), { recursive: true });
-  writeFileSync(join(ws, 'repos', 'fine', '.claude', 'hooks', 'recade-guard.mjs'), '// launcher\n');
   rmSync(join(ws, 'repos', 'gone'), { recursive: true, force: true });
   rmSync(join(ws, 'repos', 'plain', '.git'), { recursive: true, force: true });
   rmSync(join(ws, 'repos', 'unlinked', '.recade'), { recursive: true, force: true });
   const other = await workspace();
   linkRepo(other, join(ws, 'repos', 'elsewhere'));
-  // `bare` keeps a good link and has no harness.
+  // `bare` keeps a good link: a code repository holds nothing of Recade, so it has no problem.
   const found = checkRepos(ws).findings;
   const of = (repo) => found.filter((f) => f.repo === repo).map((f) => f.problem);
   assert.deepEqual(of('gone'), ['missing']);
   assert.deepEqual(of('plain'), ['not a git repository']);
-  assert.deepEqual(of('unlinked'), ['link missing', 'no harness']);
-  assert.deepEqual(of('elsewhere'), ['link points elsewhere', 'no harness']);
-  assert.deepEqual(of('bare'), ['no harness']);
+  assert.deepEqual(of('unlinked'), ['link missing']);
+  assert.deepEqual(of('elsewhere'), ['link points elsewhere']);
+  assert.deepEqual(of('bare'), []);
   assert.deepEqual(of('fine'), []);
+  assert.equal(found.some((f) => f.problem === 'no harness'), false);
   const cmd = await cli(ws, ['repo', 'check']);
   assert.equal(cmd.code, 1);
   assert.match(cmd.stdout, /gone: missing/);
@@ -600,40 +599,45 @@ test('final A, I2: repo list never prints a token that an older registry still h
   }
 });
 
-test('final B #2, #3: repo sync writes the plugin root of the workspace and turns the Recade git hooks on, like install', async () => {
+test('final B #2, #3: repo sync writes the plugin root and the local git hooks of this machine, once the harness is installed', async () => {
   const ws = await workspace();
-  const pluginRoot = tmp();
-  const hook = '#!/bin/sh\n# Recade harness pre-commit: test\nexit 0\n';
   const { dir: apiDir } = sourceWithOrigin('api-src');
   await addRepo(ws, 'api', { clone: apiDir }, { exec: defaultExec });
   await addRepo(ws, 'own', { new: true }, { exec: defaultExec });
-  for (const d of [ws, join(ws, 'repos', 'api')]) {
-    mkdirSync(join(d, '.githooks'), { recursive: true });
-    writeFileSync(join(d, '.githooks', 'pre-commit'), hook);
-  }
-  mkdirSync(join(ws, 'repos', 'own', '.githooks'), { recursive: true });
-  writeFileSync(join(ws, 'repos', 'own', '.githooks', 'pre-commit'), '#!/bin/sh\n# the owner hook\n');
-  // Before: check names the code repository whose Recade hooks are off.
-  assert.ok(checkRepos(ws).findings.some((f) => f.repo === 'api' && f.problem === 'git hooks off'), JSON.stringify(checkRepos(ws).findings));
-  assert.ok(!checkRepos(ws).findings.some((f) => f.repo === 'own' && f.problem === 'git hooks off'));
-  await syncRepos(ws, { exec: defaultExec, pluginRoot });
-  assert.equal(readFileSync(join(ws, '.recade', 'plugin-root'), 'utf8'), `${pluginRoot}\n`);
-  const hooksPath = (d) => git(d, 'config', '--get', 'core.hooksPath').stdout.trim();
-  assert.equal(hooksPath(join(ws, 'repos', 'api')), '.githooks');
-  assert.equal(hooksPath(ws), '.githooks');
-  assert.equal(hooksPath(join(ws, 'repos', 'own')), '', 'an owner hook folder is not turned on silently');
+  const hookOf = (d) => {
+    const path = join(d, git(d, 'rev-parse', '--git-path', 'hooks').stdout.trim(), 'pre-commit');
+    return existsSync(path) ? readFileSync(path, 'utf8') : '';
+  };
+  // Before the harness is installed, nothing is set up and nothing is reported.
+  await syncRepos(ws, { exec: defaultExec, pluginRoot: plugin });
+  assert.doesNotMatch(hookOf(join(ws, 'repos', 'api')), new RegExp(LOCAL_HOOK_MARK));
   assert.ok(!checkRepos(ws).findings.some((f) => f.problem === 'git hooks off'));
-  // A hooks folder the owner set is left as it is.
-  must(git(join(ws, 'repos', 'api'), 'config', 'core.hooksPath', 'my-hooks'));
-  await syncRepos(ws, { exec: defaultExec, pluginRoot });
-  assert.equal(hooksPath(join(ws, 'repos', 'api')), 'my-hooks');
+  // Installed: check names the checkouts with no local hook (a fresh clone, another machine).
+  mkdirSync(join(ws, '.recade'), { recursive: true });
+  writeFileSync(join(ws, '.recade', 'installed.json'), '{"version":"1.6.0","files":{}}\n');
+  const off = checkRepos(ws).findings.filter((f) => f.problem === 'git hooks off').map((f) => f.repo).sort();
+  assert.deepEqual(off, ['api', 'own', 'workspace']);
+  // An older install turned .githooks on: sync unsets it. A hooks folder the owner set stays, with a reason.
+  must(git(join(ws, 'repos', 'api'), 'config', 'core.hooksPath', '.githooks'));
+  must(git(join(ws, 'repos', 'own'), 'config', 'core.hooksPath', 'my-hooks'));
+  const r = await syncRepos(ws, { exec: defaultExec, pluginRoot: plugin });
+  assert.equal(readFileSync(join(ws, '.recade', 'plugin-root'), 'utf8'), `${plugin}\n`);
+  assert.equal(readFileSync(join(ws, 'repos', 'api', '.recade', 'plugin-root'), 'utf8'), `${plugin}\n`);
+  const hooksPath = (d) => git(d, 'config', '--get', 'core.hooksPath').stdout.trim();
+  assert.equal(hooksPath(join(ws, 'repos', 'api')), '');
+  assert.equal(hooksPath(join(ws, 'repos', 'own')), 'my-hooks', 'an owner hook folder is never replaced');
+  assert.ok(r.skipped.some((x) => x.repo === 'own' && /my-hooks/.test(x.reason)), JSON.stringify(r.skipped));
+  for (const d of [ws, join(ws, 'repos', 'api')]) assert.match(hookOf(d), new RegExp(LOCAL_HOOK_MARK));
+  assert.deepEqual(r.hooked.sort(), ['api', 'workspace']);
+  assert.deepEqual(checkRepos(ws).findings.filter((f) => f.problem === 'git hooks off').map((f) => f.repo), ['own']);
+  // Nothing of it is in git: the code repository stays clean.
+  assert.equal(git(join(ws, 'repos', 'api'), 'status', '--porcelain').stdout, '');
 });
-
 test('final B #3: recade repo check exits 1 and names a repository whose git hooks are off', async () => {
   const ws = await workspace();
   await addRepo(ws, 'api', { new: true }, { exec: defaultExec });
-  mkdirSync(join(ws, 'repos', 'api', '.githooks'), { recursive: true });
-  writeFileSync(join(ws, 'repos', 'api', '.githooks', 'pre-commit'), '#!/bin/sh\n# Recade harness pre-commit\n');
+  mkdirSync(join(ws, '.recade'), { recursive: true });
+  writeFileSync(join(ws, '.recade', 'installed.json'), '{"version":"1.6.0","files":{}}\n');
   const r = await cli(ws, ['repo', 'check']);
   assert.equal(r.code, 1);
   assert.match(r.stdout, /api: git hooks off/);

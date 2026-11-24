@@ -1,12 +1,13 @@
 import { createHash } from 'node:crypto';
-import { appendFileSync, chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { frontMatterLength } from '../frontmatter-lines.js';
 import { ownFile, readCreated, writeOwnFile } from '../project/adopt.js';
 import { REPO_NAME } from '../project/touches.js';
 import { loadState } from '../state.js';
-import { checkLink, findWorkspace, keepLocal, linkRepo } from '../workspace/layout.js';
+import { checkLink, excludeFile, findWorkspace, keepLocal, linkRepo } from '../workspace/layout.js';
 import { findStack } from './claudemd.js';
+import { fingerprint, knownTexts } from './history.js';
 import { fillCi, fillDependabot } from './ci.js';
 import { defaultExec } from './stamps.js';
 import { withModelLine } from './models.js';
@@ -202,7 +203,7 @@ export function genericOf(template, version) {
  * The file text for a template over what the project has now.
  * @returns {{text: string, status: 'created'|'updated'|'unchanged'|'kept', diff: string}}
  */
-export function mergeMarkdown(generic, existing) {
+export function mergeMarkdown(generic, existing, { known } = {}) {
   const fresh = `${generic}\n${SPEC_LINE}\n`;
   if (existing === null) return { text: fresh, status: 'created', diff: '' };
   const spot = findSpecLine(existing);
@@ -212,10 +213,34 @@ export function mergeMarkdown(generic, existing) {
     return { text: existing, status: 'kept', diff: lineDiff(existing, generic) };
   }
   const oldGeneric = existing.slice(0, spot.start);
-  const below = existing.slice(spot.end);
+  let below = existing.slice(spot.end);
+  // A path the team added to the generic Writes list would be lost: it moves to a Writes section below the line.
+  // Only when that generic text is not one Recade ever wrote: a path an older template had and a newer one dropped stays dropped.
+  const edited = known === undefined || !known.has(fingerprint(oldGeneric));
+  const moved = !edited ? [] : writesBullets(oldGeneric).filter((line) => !writesBullets(generic).includes(line) && !writesBullets(below).includes(line));
+  if (moved.length > 0) {
+    const at = /^##\s+Writes[ \t]*$/m.exec(below);
+    if (at === null) below = `${below.replace(/\n*$/, '\n')}\n## Writes\n\n${moved.join('\n')}\n`;
+    else {
+      const head = below.slice(0, at.index + at[0].length);
+      below = `${head}\n\n${moved.join('\n')}${below.slice(at.index + at[0].length).replace(/^\n+/, '\n')}`;
+    }
+  }
   const text = `${generic}\n${SPEC_LINE}${below === '' ? '\n' : below}`;
   if (text === existing) return { text, status: 'unchanged', diff: '' };
-  return { text, status: 'updated', diff: oldGeneric === `${generic}\n` ? '' : lineDiff(oldGeneric, `${generic}\n`) };
+  return { text, status: 'updated', diff: oldGeneric === `${generic}\n` ? '' : lineDiff(oldGeneric, `${generic}\n`), moved: moved.map((l) => /`([^`]+)`/.exec(l)?.[1] ?? l) };
+}
+
+/** The bullet lines of the `## Writes` section of a text, as written (`- \`path\``). */
+function writesBullets(text) {
+  const lines = String(text).split('\n');
+  const out = [];
+  let inside = false;
+  for (const line of lines) {
+    if (/^##\s/.test(line)) inside = /^##\s+Writes\s*$/.test(line);
+    else if (inside && /^\s*[-*]\s+`[^`]+`/.test(line)) out.push(line.trim());
+  }
+  return out;
 }
 
 /**
@@ -309,6 +334,53 @@ export function mergeSettings(existingText, template) {
   return `${JSON.stringify(out, null, 2)}\n`;
 }
 
+/**
+ * The settings of a workspace with what an older install put there taken out: the guard hook and the session-start hook
+ * of the launcher, the deny rules of the template, and an `env.RECADE_PLUGIN_ROOT`. The project's own keys, rules and
+ * hooks stay. Null when nothing is left, so the file can go.
+ * @param {string} text
+ * @param {object} template harness/settings.json of the plugin
+ * @returns {string|null}
+ */
+export function cleanSettings(text, template) {
+  let current;
+  try {
+    current = JSON.parse(text);
+  } catch (err) {
+    throw new InstallError(`.claude/settings.json is not valid JSON (${err.message}). Fix it, then install again.`);
+  }
+  if (current === null || typeof current !== 'object' || Array.isArray(current)) return text;
+  const out = { ...current };
+  if (out.env !== undefined) {
+    const env = { ...out.env };
+    delete env.RECADE_PLUGIN_ROOT;
+    if (Object.keys(env).length > 0) out.env = env;
+    else delete out.env;
+  }
+  if (out.permissions !== undefined) {
+    const perms = { ...out.permissions };
+    const ours = new Set(template.permissions?.deny ?? []);
+    if (Array.isArray(perms.deny)) {
+      perms.deny = perms.deny.filter((r) => !ours.has(r));
+      if (perms.deny.length === 0) delete perms.deny;
+    }
+    if (Object.keys(perms).length > 0) out.permissions = perms;
+    else delete out.permissions;
+  }
+  if (out.hooks !== undefined) {
+    const hooks = {};
+    for (const [event, entries] of Object.entries(out.hooks)) {
+      const kept = Array.isArray(entries) ? withoutGuard(entries) : entries;
+      if (!Array.isArray(kept) || kept.length > 0) hooks[event] = kept;
+    }
+    if (Object.keys(hooks).length > 0) out.hooks = hooks;
+    else delete out.hooks;
+  }
+  if (Object.keys(out).length === 0) return null;
+  const next = `${JSON.stringify(out, null, 2)}\n`;
+  return JSON.stringify(out) === JSON.stringify(current) ? text : next;
+}
+
 /* ---------- the install ---------- */
 
 const realOf = (path) => {
@@ -370,17 +442,14 @@ export function install(root, { pluginRoot: given, target, workspace, team = 'te
   const warnings = [];
   /** What the install left out on purpose, one line each (the GitHub-only files on the local forge). */
   const notes = [];
-  const resolved = ref === undefined ? resolveRef(pluginRoot, version, exec) : { ref, assumed: false };
-  if (!REF_OK.test(resolved.ref)) throw new InstallError(`The tools ref must be a tag such as v1.2.3 or a full commit SHA, not ${JSON.stringify(resolved.ref)}.`);
-  if (resolved.assumed) warnings.push(`No tag or commit found for the plugin folder: the CI will fetch the tag ${resolved.ref}. Publish that tag, or install again with --ref <tag or commit>.`);
-  const unpublished = /^[0-9a-f]{40}$/.test(resolved.ref) ? publishedSha(pluginRoot, resolved.ref, exec) : null;
-  if (unpublished) warnings.push(unpublished);
+  /** The stack rows the CI needs and the sheet does not fill. */
+  const missing = [];
+  void ref;
   const harness = join(pluginRoot, 'harness');
   const stackFound = stack === undefined ? findStack(home) : null;
   const sheet = stack === undefined ? (stackFound?.text ?? null) : stack;
   const stackName = target === 'code' ? `the stack document of the workspace, table of ${place.repo}` : (stackFound?.file ?? 'docs/STACK.md');
-  // Adopted repository: the harness lands beside the project's own files. Whatever Recade did not create is kept.
-  // The workspace is Recade's own, whatever the mode; a code repository is adopted when its workspace is.
+  // Adopted repository: whatever Recade did not create is the owner's and is kept. The workspace is Recade's own.
   const adopt = target === 'workspace' ? false : isAdopt(home);
   const mine = adopt ? new Set(readCreated(root)) : null;
   const exists = (file) => {
@@ -391,13 +460,9 @@ export function install(root, { pluginRoot: given, target, workspace, team = 'te
       return false;
     }
   };
-  const wf = workflowFiles(adopt);
 
-  /** @type {{file: string, text: string, kind: 'md'|'whole'|'hook', mode?: number, diff?: string, status?: string}[]} */
+  /** @type {{file: string, text: string, kind: 'md'|'whole'|'remove', status?: string, diff?: string, note?: string}[]} */
   const plan = [];
-  const refused = [];
-
-  /** In an adopted repository: a file that exists and that Recade did not create is the owner's, and stays as it is. */
   const theirs = (file) => adopt && exists(file) && !mine.has(file);
   const keep = (file, why) => plan.push({ file, text: '', kind: 'md', status: 'kept', note: why });
 
@@ -405,177 +470,108 @@ export function install(root, { pluginRoot: given, target, workspace, team = 'te
     const generic = genericOf(templateText, version);
     const path = join(root, file);
     if (theirs(file)) return keep(file, `${file} is yours and was not written by Recade, so it was left as it is.`);
-    const merged = mergeMarkdown(generic, existsSync(path) ? read(path) : null);
-    plan.push({ file, text: merged.text, kind: 'md', status: merged.status, diff: merged.diff });
+    const merged = mergeMarkdown(generic, existsSync(path) ? read(path) : null, { known });
+    plan.push({ file, text: merged.text, kind: 'md', status: merged.status, diff: merged.diff, ...(merged.moved?.length > 0 ? { moved: merged.moved } : {}) });
   };
-  const whole = (file, text, { foreign }) => {
+  /** Written once: a file that exists belongs to the project from then on and is never touched again. */
+  const once = (file, text) => {
+    if (exists(file)) return plan.push({ file, text: '', kind: 'whole', status: 'unchanged' });
+    plan.push({ file, text, kind: 'whole', status: 'created' });
+  };
+  /** A file of an older install that a repository no longer holds: removed when it is still Recade's. */
+  const drop = (file, ours) => {
     const path = join(root, file);
-    if (theirs(file) && (!existsSync(path) || read(path) !== text)) return keep(file, `${file} is yours and was not written by Recade, so it was left as it is.`);
-    // A file Recade wrote that the owner edited since (its hash is no longer the recorded one) is theirs now.
-    if (adopt && exists(file) && mine.has(file) && !ownFile(root, file) && read(path) !== text) return keep(file, `${file} was written by Recade and edited since, so it was left as it is. Move your change out, or delete the file, then install again.`);
-    const now = existsSync(path) ? read(path) : null;
-    if (now !== null && now !== text && !foreign(now) && !force) {
-      refused.push(`${file} exists and was not written by Recade. Move it aside or install with --force.`);
-      return;
-    }
-    plan.push({ file, text, kind: 'whole', status: now === null ? 'created' : now === text ? 'unchanged' : 'updated' });
+    if (!existsSync(path)) return;
+    // In an adopted project a file is removed only when Recade created it and nobody edited it since.
+    if (adopt && (!mine.has(file) || !ownFile(root, file))) return;
+    if (ours(read(path))) plan.push({ file, text: '', kind: 'remove', status: 'removed' });
   };
 
+  const known = knownTexts(pluginRoot);
   const stem = (f) => f.replace(/\.md$/, '');
   const chosen = selectFor(target, {
     agents: list(join(harness, 'agents'), '.md').map(stem),
     commands: list(join(harness, 'commands'), '.md').map(stem),
   });
-  // The owner's second-opinion choice (`models.second_opinion`): `fable` puts the copy on Fable 5.2, another family than the reviewer.
   const agentText = (a) => (a === 'second-opinion' && secondOpinion === 'fable' ? withModelLine(read(join(harness, 'agents', `${a}.md`)), SECOND_OPINION_MODELS.fable) : read(join(harness, 'agents', `${a}.md`)));
   for (const a of chosen.agents) md(`.claude/agents/${a}.md`, agentText(a));
   for (const c of chosen.commands) md(`.claude/commands/${c}.md`, read(join(harness, 'commands', `${c}.md`)));
-  // A code repository gets no agent and no copy of a command: one pointer tells a session opened there to work from the workspace.
-  for (const c of chosen.pointers) md(`.claude/commands/${c}.md`, read(join(harness, 'pointer', `${c}.md`)));
   if (chosen.protocol) md('.claude/protocol.md', read(join(harness, 'protocol.md')));
 
-  const settingsPath = join(root, '.claude', 'settings.json');
-  const settings = mergeSettings(existsSync(settingsPath) ? read(settingsPath) : null, JSON.parse(read(join(harness, 'settings.json'))));
-  // The settings of an adopted project are merged, never replaced: the owner's own rules and hooks stay.
-  plan.push({ file: '.claude/settings.json', text: settings, kind: 'whole', status: !existsSync(settingsPath) ? 'created' : read(settingsPath) === settings ? 'unchanged' : 'updated' });
-
-  whole(LAUNCHER, read(join(harness, 'hooks', 'launcher.mjs')), { foreign: (t) => t.includes('Recade harness') });
-
-  for (const f of ['pre-commit', 'commit-msg']) {
-    whole(`.githooks/${f}`, read(join(harness, 'githooks', f === 'pre-commit' ? preCommitTemplate(target) : f)), { foreign: (t) => t.includes('Recade harness') });
-    const last = plan[plan.length - 1];
-    if (last?.file === `.githooks/${f}` && last.status !== 'kept') last.mode = 0o755;
-  }
-
-  const generated = (text) => `${GENERATED} v${version}. Regenerated at every install: edit ${stackName} or the plugin template, not this file.\n${text}`;
+  // A code repository is the project's: an install writes only its CI, once, and never touches it again. The rest of
+  // the harness lives on this machine (below) and in the plugin. Files of an older install are removed by a pull request
+  // (`recade repo clean`), never here, since a code repository changes only through review.
   const ours = (t) => t.startsWith(GENERATED);
-  // The name of a workflow is what GitHub shows next to its checks: Recade's must not look like the owner's CI.
-  const named = (text, name) => (adopt ? prefixJobNames(text, name) : text);
-  let ci = { missing: [] };
-  if (target === 'workspace') {
-    // The CI of the documents: style, ID index, slice sheets. No code, so no stack row, no dependabot file.
-    whole(WORKSPACE_WORKFLOW, generated(pinRef(read(join(harness, 'ci', 'workspace.yml')), resolved.ref, 'workspace.yml')), { foreign: ours });
-  } else {
-    ci = fillCi(read(join(harness, 'ci', 'ci.yml')), sheet, stackName, place.repo ?? undefined);
-    whole(wf.ci, generated(pinRef(named(ci.text, 'Recade CI'), resolved.ref, 'ci.yml')), { foreign: ours });
-    if (isLocalForge(home)) {
-      // No pull request on the local forge: the conflicts check and the second opinion run from /merge-order and
-      // /second-opinion on this machine, and dependency updates need GitHub.
-      notes.push(`Local forge: ${GITHUB_ONLY(wf).map((f) => f.split('/').pop()).join(', ')} not written (GitHub only).`);
-    } else {
-    whole(wf.conflicts, generated(pinRef(named(read(join(harness, 'ci', 'conflicts.yml')), 'Recade slice conflicts'), resolved.ref, 'conflicts.yml')), { foreign: ours });
-    whole(wf.secondOpinion, generated(named(read(join(harness, 'ci', 'second-opinion.yml')), 'Recade second opinion')), { foreign: ours });
-    try {
-      const dependabot = '.github/dependabot.yml';
-      // The owner's own dependency updates are never touched: this file is written only when there is none.
-      if (theirs(dependabot)) keep(dependabot, `${dependabot} is yours, so it was left as it is.`);
-      else whole(dependabot, generated(fillDependabot(read(join(harness, 'dependabot.yml')), sheet, stackName, place.repo ?? undefined).text), { foreign: ours });
-    } catch (err) {
-      warnings.push(`.github/dependabot.yml was not written: ${err.message}`);
-    }
+  if (target !== 'workspace') {
+    if (adopt) notes.push('Adopted repository: its own CI stays as it is, and Recade writes none.');
+    else {
+      const ci = fillCi(read(join(harness, 'ci', 'ci.yml')), sheet, stackName, place.repo ?? undefined);
+      missing.push(...ci.missing);
+      once('.github/workflows/ci.yml', ci.text.endsWith('\n') ? ci.text : `${ci.text}\n`);
+      if (isLocalForge(home)) notes.push('Local forge: .github/dependabot.yml not written (GitHub only).');
+      else {
+        try {
+          once('.github/dependabot.yml', fillDependabot(read(join(harness, 'dependabot.yml')), sheet, stackName, place.repo ?? undefined).text);
+        } catch (err) {
+          warnings.push(`.github/dependabot.yml was not written: ${err.message}`);
+        }
+      }
     }
   }
-  if (ci.missing.length > 0) {
-    warnings.push(`The harness technical sheet of ${stackName} has no value for ${ci.missing.join(', ')}. ${wf.ci.split('/').pop()} fails on those steps until the rows are filled (write "not applicable" for a row that does not apply), then install again.`);
+  if (target !== 'code') {
+    // The workspace holds nothing that runs without Recade: the guard is a hook of the plugin, the git hooks are local.
+    drop(LAUNCHER, (t) => t.includes('Recade harness'));
+    for (const f of ['pre-commit', 'commit-msg']) drop(`.githooks/${f}`, (t) => t.includes('Recade harness'));
+    drop(WORKSPACE_WORKFLOW, ours);
+    const settingsPath = join(root, '.claude', 'settings.json');
+    if (existsSync(settingsPath)) {
+      const cleaned = cleanSettings(read(settingsPath), JSON.parse(read(join(harness, 'settings.json'))));
+      if (cleaned === null) plan.push({ file: '.claude/settings.json', text: '', kind: 'remove', status: 'removed' });
+      else if (cleaned !== read(settingsPath)) plan.push({ file: '.claude/settings.json', text: cleaned, kind: 'whole', status: 'updated' });
+    }
   }
-  if (refused.length > 0) throw new InstallError(refused.join('\n'));
+  if (missing.length > 0) {
+    warnings.push(`The stack document (${stackName}) has no value for ${missing.join(', ')}. Those steps of .github/workflows/ci.yml fail and say so until a command is written there.`);
+  }
 
   // Doctrines the agents read and the project does not have yet: a note, the agents work without them.
   const wanted = new Set();
   for (const a of chosen.agents) for (const m of read(join(harness, 'agents', `${a}.md`)).matchAll(/\bteam\/([a-z][a-z0-9-]*)\.md/g)) wanted.add(m[1]);
   const lacking = [...wanted].filter((d) => !existsSync(join(home, team, `${d}.md`))).sort();
-  if (lacking.length > 0) warnings.push(`No doctrine in ${target === 'code' ? 'the workspace folder ' : ''}${team}/ for ${lacking.join(', ')}: the agents that read them work without.`);
+  if (lacking.length > 0) warnings.push(`No doctrine in ${team}/ for ${lacking.join(', ')}: the agents that read them work without.`);
 
-  // Write. In an adopted repository every file Recade creates goes through the own-files policy, which records it with its
-  // hash in .recade/created.json; the settings of the owner are merged in place and not recorded, they stay the owner's.
   const written = [];
   const diffs = [];
-  const settingsFile = '.claude/settings.json';
   for (const p of plan) {
     const path = join(root, p.file);
-    if (p.status !== 'unchanged' && p.status !== 'kept') {
-      if (adopt && !(p.file === settingsFile && existsSync(path) && !mine.has(p.file))) {
-        // Only the Markdown files (the team's text below the line is merged in) and the merged settings may be rewritten
-        // over an edited record. A whole-file kind was checked above: an edited one is kept, never overwritten.
-        writeOwnFile(root, p.file, p.text, { keepEdits: p.kind === 'md' || p.file === settingsFile });
-      } else {
+    if (p.kind === 'remove') rmSync(path, { force: true });
+    else if (p.status !== 'unchanged' && p.status !== 'kept') {
+      // The settings of an adopted project are the owner's: only the entries of an older install are taken out, in place.
+      if (adopt && p.file !== '.claude/settings.json') writeOwnFile(root, p.file, p.text, { keepEdits: p.kind === 'md' });
+      else {
         mkdirSync(dirname(path), { recursive: true });
         writeFileSync(path, p.text);
       }
     }
-    if (p.mode !== undefined && existsSync(path)) chmodSync(path, p.mode);
     written.push({ file: p.file, status: p.status });
     if (p.diff) diffs.push({ file: p.file, diff: p.diff });
+    if (p.moved) warnings.push(`${p.file}: ${p.moved.join(', ')} ${p.moved.length === 1 ? 'was' : 'were'} added to its generic Writes list, which an update rewrites, so ${p.moved.length === 1 ? 'it was' : 'they were'} moved to a Writes section below the specialisation line, where it stays.`);
     if (p.status === 'kept') warnings.push(p.note ?? `${p.file} has no specialisation line, so it was left as it is. Add the line ${SPEC_LINE} at the end of your own text, then install again.`);
   }
+  for (const dir of ['.githooks', '.claude/hooks']) {
+    try {
+      if (existsSync(join(root, dir)) && readdirSync(join(root, dir)).length === 0 && target !== 'code') rmSync(join(root, dir), { recursive: true });
+    } catch { /* left as it is */ }
+  }
 
-  // Per machine and kept out of git (`.recade/` is ignored): never recorded in created.json, adopted or not.
-  mkdirSync(join(root, '.recade'), { recursive: true });
-  writeFileSync(join(root, '.recade', 'plugin-root'), `${pluginRoot}\n`);
-  // The install record: the hash of each harness file as this install left it. `recade harness migrate` removes an old
-  // copy only when it is still exactly what Recade wrote.
-  recordInstall(root, version, plan.filter((p) => p.status !== 'kept').map((p) => p.file));
-  // Kept out of git: the stamps and the plugin folder of this machine, the worktrees of the slices, the local settings.
-  // Only lines are added: the .gitignore of the project is never rewritten.
-  const ignorePath = join(root, '.gitignore');
-  const before = existsSync(ignorePath) ? read(ignorePath) : '';
-  let ignore = before;
-  const lines = ignore.split(/\r?\n/).map((l) => l.trim());
-  // The slice worktrees live under worktrees/ of the workspace, kept out of git by its .git/info/exclude (keepLocal,
-  // below), not by its .gitignore. A code repository keeps .claude/worktrees/ ignored: Claude Code makes its own there.
-  const ignored = target === 'workspace'
-    ? [['.recade/', '.recade'], ['.claude/settings.local.json', '.claude/', '.claude']]
-    : [['.recade/', '.recade'], ['.claude/worktrees/', '.claude/worktrees', '.claude/', '.claude'], ['.claude/settings.local.json', '.claude/', '.claude']];
-  for (const [line, ...same] of ignored) {
-    if ([line, ...same].some((l) => lines.includes(l))) continue;
-    ignore = `${ignore}${ignore === '' || ignore.endsWith('\n') ? '' : '\n'}${line}\n`;
-    lines.push(line);
-  }
-  if (ignore !== before) {
-    if (adopt && existsSync(ignorePath)) {
-      if (mine.has('.gitignore')) writeOwnFile(root, '.gitignore', ignore, { keepEdits: true });
-      else appendFileSync(ignorePath, ignore.slice(before.length));
-    } else if (adopt) writeOwnFile(root, '.gitignore', ignore);
-    else writeFileSync(ignorePath, ignore);
-  }
-  // The code repositories and the slice worktrees: out of the git of the workspace through .git/info/exclude, which only
-  // git reads. A .gitignore line would hide every checkout from the tools that honour the ignore files above them.
+  const local = setupLocal(root, { pluginRoot, target, adopt, exec });
+  warnings.push(...local.warnings);
+  recordInstall(root, version, plan.filter((p) => p.kind === 'md' && p.status !== 'kept').map((p) => p.file));
   if (target === 'workspace') {
     const kept = keepLocal(root, { drop: true });
     if (kept?.dropped.length > 0) warnings.push(`repos/ and worktrees/ are now kept out of git by .git/info/exclude, so their lines left .gitignore (${kept.dropped.join(', ')}). Commit .gitignore.`);
   }
-  // An adopted repository may run its own git hooks: a hooks folder set in the git config, a hook in .git/hooks, or its own
-  // .githooks/. That is the owner's to change (adopt.md asks, and a DEC records the answer), never silently replaced.
-  const current = adopt ? exec(['git', 'config', '--get', 'core.hooksPath'], { cwd: root }) : null;
-  const configured = current !== null && current.code === 0 ? current.stdout.trim() : '';
-  const gitHooks = adopt ? exec(['git', 'rev-parse', '--git-path', 'hooks'], { cwd: root }) : null;
-  const hookDir = gitHooks !== null && gitHooks.code === 0 ? resolve(root, gitHooks.stdout.trim()) : null;
-  const liveHooks = hookDir === null || !existsSync(hookDir) ? [] : readdirSync(hookDir).filter((f) => {
-    if (f.endsWith('.sample')) return false;
-    try {
-      return (statSync(join(hookDir, f)).mode & 0o111) !== 0;
-    } catch {
-      return false;
-    }
-  });
-  const keptHooks = plan.filter((p) => p.file.startsWith('.githooks/') && p.status === 'kept').map((p) => p.file);
-  let hooks;
-  if (configured !== '' && configured !== '.githooks') {
-    hooks = { code: 1, stderr: '' };
-    warnings.push(`core.hooksPath is ${configured}, set by you, so it was left as it is and the Recade git hooks in .githooks/ do not run. To use them: git config core.hooksPath .githooks`);
-  } else if (adopt && configured === '' && (liveHooks.length > 0 || keptHooks.length > 0)) {
-    hooks = { code: 1, stderr: '' };
-    const which = [...liveHooks.map((h) => `.git/hooks/${h}`), ...keptHooks].join(', ');
-    warnings.push(`You have git hooks of your own (${which}), so core.hooksPath was not set and the Recade git hooks in .githooks/ do not run. To use them instead: git config core.hooksPath .githooks`);
-  } else {
-    hooks = exec(['git', 'config', 'core.hooksPath', '.githooks'], { cwd: root });
-    if (hooks.code !== 0) warnings.push(`core.hooksPath was not set (${hooks.stderr.trim() || 'not a git repository?'}). Run: git config core.hooksPath .githooks`);
-  }
-
-  // A code repository learns where its workspace is. The file is per machine and git never sees it.
   if (target === 'code') {
-    const old = legacyCopies(root);
-    if (old.length > 0) warnings.push(`This repository still holds the harness of the old layout (${old.slice(0, 3).join(', ')}${old.length > 3 ? ` and ${old.length - 3} more` : ''}). Every command and agent now lives in the workspace. Run: recade harness migrate --dry-run, from the workspace.`);
     try {
       linkRepo(place.workspace, root);
     } catch (err) {
@@ -583,9 +579,96 @@ export function install(root, { pluginRoot: given, target, workspace, team = 'te
     }
     const link = checkLink(root);
     if (!link.ok) warnings.push(`The link to the workspace is not good (${link.reason}). Run: recade repo sync`);
+    const old = recadeFilesIn(root);
+    if (old.length > 0) warnings.push(`This repository still holds files of an older Recade (${old.slice(0, 3).join(', ')}${old.length > 3 ? ` and ${old.length - 3} more` : ''}). Run: recade repo clean ${place.repo}, which removes them through a pull request.`);
   }
 
-  return { written, diffs, warnings, notes, missing: ci.missing, ref: resolved.ref, version, hooksPath: hooks.code === 0, target, thresholdCandidates: target === 'code' ? thresholdCandidates(root) : [] };
+  return { written, diffs, warnings, notes, missing, version, hooksPath: local.hooks, target, thresholdCandidates: target === 'code' ? thresholdCandidates(root) : [] };
+}
+
+/* ---------- this machine: plugin folder, git hooks, exclusions ---------- */
+
+/** The mark of a local git hook Recade wrote. */
+export const LOCAL_HOOK_MARK = 'Recade local hook';
+
+/**
+ * What a repository needs on this machine, and never in git: the plugin folder (`.recade/plugin-root`), the local git
+ * hooks in the git hooks folder (shared by every worktree), and the exclusions of `.git/info/exclude`. An older
+ * `core.hooksPath=.githooks` is unset, so the hooks of the plugin run instead of the committed copies. The owner's own
+ * hooks (a `core.hooksPath` of theirs, or a hook of theirs in the folder) are never replaced: a warning says so.
+ * @returns {{hooks: boolean, warnings: string[]}}
+ */
+export function setupLocal(root, { pluginRoot, target, adopt = false, exec = defaultExec }) {
+  const warnings = [];
+  mkdirSync(join(root, '.recade'), { recursive: true });
+  writeFileSync(join(root, '.recade', 'plugin-root'), `${pluginRoot}\n`);
+  excludeLines(root, target === 'workspace' ? ['/.recade/'] : ['/.recade/', '/.claude/settings.local.json', '/.claude/worktrees/']);
+  const current = exec(['git', 'config', '--get', 'core.hooksPath'], { cwd: root });
+  const configured = current.code === 0 ? current.stdout.trim() : '';
+  if (configured === '.githooks') exec(['git', 'config', '--unset', 'core.hooksPath'], { cwd: root });
+  else if (configured !== '') {
+    warnings.push(`core.hooksPath is ${configured}, set by you, so it was left as it is and the Recade git hooks do not run. To use them: git config --unset core.hooksPath, then recade repo sync.`);
+    return { hooks: false, warnings };
+  }
+  const gitPath = exec(['git', 'rev-parse', '--git-path', 'hooks'], { cwd: root });
+  if (gitPath.code !== 0) {
+    warnings.push(`The git hooks folder was not found (${gitPath.stderr.trim() || 'not a git repository?'}), so the Recade git hooks are not installed.`);
+    return { hooks: false, warnings };
+  }
+  const dir = resolve(root, gitPath.stdout.trim());
+  mkdirSync(dir, { recursive: true });
+  const stub = read(join(pluginRoot, 'harness', 'githooks', 'local'));
+  let all = true;
+  for (const name of ['pre-commit', 'commit-msg']) {
+    const template = name === 'pre-commit' ? preCommitTemplate(target) : name;
+    const text = stub.replaceAll('__HOOK__', name).replaceAll('__TEMPLATE__', template);
+    const file = join(dir, name);
+    const now = existsSync(file) ? read(file) : null;
+    if (now !== null && now !== text && !now.includes(LOCAL_HOOK_MARK)) {
+      warnings.push(`${name} is a git hook of yours (${file}), so it was left as it is and the Recade ${name} does not run.${adopt ? ' Your choice is recorded as a DEC.' : ''}`);
+      all = false;
+      continue;
+    }
+    if (now !== text) writeFileSync(file, text);
+    chmodSync(file, 0o755);
+  }
+  return { hooks: all, warnings };
+}
+
+/** Add lines to the `info/exclude` file of the git of `root` (a worktree follows its main repository). */
+export function excludeLines(root, lines) {
+  const file = excludeFile(root);
+  if (file === null) return;
+  const before = existsSync(file) ? read(file) : '';
+  const have = before.split(/\r?\n/);
+  const add = lines.filter((l) => !have.includes(l));
+  if (add.length === 0) return;
+  mkdirSync(dirname(file), { recursive: true });
+  appendFileSync(file, `${before === '' || before.endsWith('\n') ? '' : '\n'}${add.join('\n')}\n`);
+}
+
+/** The files of an older Recade a code repository still holds, as paths. Its CI stays: it is the project's. */
+export function recadeFilesIn(root) {
+  const out = [];
+  const walk = (rel) => {
+    const abs = join(root, rel);
+    if (!existsSync(abs)) return;
+    if (statSync(abs).isDirectory()) for (const f of readdirSync(abs)) walk(`${rel}/${f}`);
+    else out.push(rel);
+  };
+  for (const f of ['.claude/settings.json', LAUNCHER, '.claude/recade.yaml']) if (existsSync(join(root, f))) out.push(f);
+  walk('.claude/commands');
+  walk('.claude/agents');
+  if (existsSync(join(root, '.claude', 'protocol.md'))) out.push('.claude/protocol.md');
+  for (const f of ['pre-commit', 'commit-msg']) {
+    const path = join(root, '.githooks', f);
+    if (existsSync(path) && read(path).includes('Recade harness')) out.push(`.githooks/${f}`);
+  }
+  for (const f of ['conflicts.yml', 'second-opinion.yml', 'recade.yml', 'recade-conflicts.yml', 'recade-second-opinion.yml']) {
+    const path = join(root, '.github', 'workflows', f);
+    if (existsSync(path) && read(path).startsWith(GENERATED)) out.push(`.github/workflows/${f}`);
+  }
+  return [...new Set(out)];
 }
 
 /** The install record of a folder: per machine, in `.recade/` (ignored by git). */
@@ -643,7 +726,7 @@ export function legacyCopies(root) {
 
 /** The text the CLI prints for an install result. */
 export function formatInstall(result) {
-  const lines = [`Harness v${result.version} installed (CI tools pinned to ${result.ref}).`];
+  const lines = [`Harness v${result.version} installed.`];
   const count = (s) => result.written.filter((w) => w.status === s).length;
   lines.push(`${count('created')} created, ${count('updated')} updated, ${count('unchanged')} unchanged, ${count('kept')} kept.`);
   for (const w of result.written.filter((x) => x.status === 'created' || x.status === 'updated' || x.status === 'kept')) lines.push(`${w.status.padEnd(8)} ${w.file}`);

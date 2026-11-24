@@ -59,6 +59,7 @@ const HARNESS_PATHS = [
   [['.recade']],
   [['.githooks']],
   [['recade'], ['state.yaml']],
+  [['recade'], ['repos']],
   [['.claude'], ['recade.yaml']],
 ];
 
@@ -78,6 +79,82 @@ function namesAgentFiles(tokens) {
     return false;
   });
 }
+
+/** The interpreters whose code or script can write any file. The Recade CLI is not one of them here: it guards itself. */
+const INTERPRETERS = new Set(['node', 'nodejs', 'deno', 'bun', 'python', 'python3', 'ruby', 'perl', 'php', 'awk', 'gawk', 'mawk', 'lua', 'Rscript', 'osascript']);
+/** Commands that change every file they are given. */
+const CHANGES_ALL = new Set(['rm', 'rmdir', 'unlink', 'shred', 'tee', 'mkdir', 'touch', 'truncate', 'chmod', 'chown', 'chgrp', 'mv', 'setfacl', 'chattr']);
+/** Commands that write their last argument (or the folder of `-t`). */
+const WRITES_DEST = new Set(['cp', 'install', 'ln', 'rsync', 'scp']);
+
+/** Is `tokens[i]` the Recade CLI (`recade`, or `node <...>/bin/recade.js`)? */
+const isRecadeCli = (tokens, i) => basename(tokens[i] ?? '') === 'recade'
+  || (INTERPRETERS.has(basename(tokens[i] ?? '')) && /(^|\/)bin\/recade\.js["']?$/.test(tokens[i + 1] ?? ''));
+
+/** The words of a piece of code (`node -e`, `awk '...'`), split on what cannot be part of a path. */
+const codeWords = (text) => String(text).split(/[\s"'`();,{}=+]+/).filter(Boolean);
+
+/**
+ * Does a command write a path that `hit` names? Only a write target counts: a redirect, `tee`, `rm`, `mv`, `cp` and the
+ * other copies (their destination), `mkdir`, `touch`, `chmod`, `sed -i` and `perl -i`, `dd of=`, `find -delete` or
+ * `-exec`, a `git checkout`, `restore`, `apply`, `rm`, `mv` or `stash` of it, and code (`node -e`, `python -c`, an `awk`
+ * program, a script given the path) that names it. Reading one (`cat`, `sed -n`, `grep`, `git diff`, a pipe, a
+ * redirect elsewhere) is not a write. Files fed through a pipe to `xargs` or a `read` loop count when the command names
+ * them anywhere, since the guard cannot see where they go.
+ */
+export function writesTo(command, hit) {
+  const words = (list) => list.some((w) => typeof w === 'string' && hit(w.replace(/^["']|["']$/g, '')));
+  for (const m of command.matchAll(/>\|[ \t]*("[^"]*"|'[^']*'|[^\s;&|<>()]+)/g)) if (words([m[1]])) return true;
+  const segments = tokenize(command);
+  const named = segments.some((tokens) => words(tokens) || tokens.some((t) => words(codeWords(t))));
+  if (!named) return false;
+  if (/\bxargs\b|\bparallel\b|\bwhile\s+(IFS=\S*\s+)?read\b/.test(command)) return true;
+  // A variable set to a protected path, in a command that writes: the write target may be that variable.
+  if (MUTATING.test(command) && segments.some((tokens) => tokens.some((t) => /^[A-Za-z_][A-Za-z0-9_]*=/.test(t) && words([t.replace(/^[^=]*=/, '')])))) return true;
+  for (const tokens of segments) {
+    for (let i = 0; i < tokens.length; i++) {
+      const t = tokens[i];
+      const name = basename(t);
+      const rest = tokens.slice(i + 1);
+      const redirect = /^(\d*|&)>>?\|?(.*)$/.exec(t);
+      if (redirect) {
+        const target = redirect[2] !== '' ? redirect[2] : tokens[i + 1];
+        if (typeof target === 'string' && !target.startsWith('&') && words([target])) return true;
+        continue;
+      }
+      if (/^of=/.test(t) && words([t.slice(3)])) return true;
+      if (!atCommand(tokens, i)) continue;
+      if (CHANGES_ALL.has(name) && words(positionals(rest))) return true;
+      if (WRITES_DEST.has(name)) {
+        const at = rest.findIndex((a) => a === '-t' || a.startsWith('--target-directory'));
+        const dest = at >= 0 ? (rest[at].includes('=') ? rest[at].split('=')[1] : rest[at + 1]) : positionals(rest).at(-1);
+        if (words([dest])) return true;
+      }
+      if (['sed', 'perl', 'ruby'].includes(name)) {
+        const inPlace = rest.some((a) => /^-[a-zA-Z]*i/.test(a) || a.startsWith('--in-place'));
+        if (inPlace && words(rest)) return true;
+        // A sed script may write with `w file`; perl and ruby code may write anything it names.
+        if (rest.some((a) => (name !== 'sed' || /(^|[;}\s\d/])w\s/.test(a)) && words(codeWords(a)))) return true;
+      }
+      if (name === 'find' && rest.some((a) => /^-(delete|exec|execdir|ok|okdir|fprint0?|fprintf|fls)$/.test(a)) && words(rest)) return true;
+      if (name === 'git') {
+        const sub = rest.find((a) => !a.startsWith('-'));
+        if (['checkout', 'restore', 'apply', 'rm', 'mv', 'stash', 'reset', 'clean'].includes(sub) && words(rest)) return true;
+      }
+      if (INTERPRETERS.has(name) && !isRecadeCli(tokens, i) && rest.some((a) => words([a]) || words(codeWords(a)))) return true;
+      if (name === 'patch' && words(rest)) return true;
+    }
+  }
+  return false;
+}
+
+/** A word that names a harness file the shell may not write: `.claude/hooks`, the settings, `.recade`, `.githooks`, `.git/hooks`, the state. */
+const harnessWord = (word) => namesHarness(word) || /(^|\/)\.git\/hooks(\/|$)/.test(collapse(word)) || /(^|\/)(\.claude|recade)\/?$/.test(collapse(word));
+/** A word that names the agents or the commands of the harness, or a file in them, through `//`, `/./` or a glob. */
+const agentWord = (word) => {
+  const parts = collapse(word).split('/');
+  return parts.some((p, i) => i + 1 < parts.length && segmentMatches(p, '.claude') && ['agents', 'commands'].some((n) => segmentMatches(parts[i + 1], n)));
+};
 
 /** A path segment git reads as `.git`: any case, with trailing dots or spaces (case-insensitive file systems strip them). */
 const GIT_SEGMENT = /(^|\/)\.git[. ]*(\/|$)/i;
@@ -553,8 +630,8 @@ function checkSegment(tokens, ctx, depth) {
     else if (name === 'git') reason = checkGit(rest, ctx);
     else if (name === 'gh') reason = checkGh(rest);
     else if (name === 'rm' && positionals(rest).some((p) => isTestPath(p) && tracked(ctx, p))) reason = TEST_RM;
-    else if ((name === 'cd' || name === 'pushd') && atCommand(tokens, i) && positionals(rest).some(entersHarness)) {
-      reason = 'Entering .claude, .recade, .githooks or recade/ from the shell is refused: a path there could not be checked.';
+    else if ((name === 'cd' || name === 'pushd') && atCommand(tokens, i) && positionals(rest).some(entersHarness) && MUTATING.test(ctx.raw ?? '')) {
+      reason = 'Entering .claude, .recade, .githooks or recade/ from the shell in a command that also writes is refused: a path there could not be checked. To only read, it goes through; to change a harness file, a human or the Recade CLI does it.';
     }
     else if (name === 'eval' && atCommand(tokens, i)) {
       const text = rest.join(' ');
@@ -625,22 +702,17 @@ export function checkBash(command, deny = {}) {
         return `${f} holds a threshold. Editing it through the shell is refused. A human changes thresholds.`;
       }
     }
-    const harness = (c) => FIXED_SHELL.some((re) => re.test(c) || re.test(collapse(c))) || tokenize(c).some((tokens) => tokens.some(namesHarness));
-    if (harness(command)) {
-      // The usual case is no change at all: a command that reads .recade/plugin-root to find the plugin and writes a file
-      // of its own. It stays refused (the guard does not tell a read from a write in one command), with the way out.
-      const readsRoot = /\$\(\s*(?:cat|head(?:\s+-n?\s*1|\s+-1)?)\s+["']?[^)"'\s]*\.recade\/plugin-root["']?\s*\)/g;
-      if (readsRoot.test(command) && !harness(command.replace(readsRoot, 'PLUGIN'))) {
-        return 'This command reads .recade/plugin-root and writes a file in the same command, and the guard does not tell that read from a change of the harness. Read the plugin folder in a command of its own, then write its path itself in the next command.';
-      }
-      return 'The stamps, the hooks, the settings and the project state are not changed through the shell. A human does that. The guard reads the whole command line, so a command that only reads these files is refused too when it also writes, redirects or runs sed, node or python: read them with the Read tool.';
-    }
     if (writesGitFolder(command)) {
       return 'A file or folder named .git is not written through the shell: git would read the folder around it as another checkout. Only git itself writes there.';
     }
-    if (tokenize(command).some(namesAgentFiles)) {
-      return 'The agents and the commands of the harness (.claude/agents, .claude/commands) are not changed through the shell. `recade harness install` or a human does that. The guard reads the whole command line, so a command that only reads these files is refused too when it also writes, redirects or runs sed, node or python: read them with the Read tool.';
-    }
+  }
+  // Only a write to a harness file is refused: a command that reads one (cat, sed -n, grep, git diff, a pipe, a
+  // redirect to another file) goes through.
+  if (writesTo(command, harnessWord)) {
+    return 'The stamps, the hooks, the settings and the project state are not changed through the shell. A human does that. Reading them goes through; this command writes one of them.';
+  }
+  if (writesTo(command, agentWord)) {
+    return 'The agents and the commands of the harness (.claude/agents, .claude/commands) are not changed through the shell. `recade harness install` or a human does that. Reading them goes through; this command writes one of them.';
   }
   return null;
 }

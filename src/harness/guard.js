@@ -4,6 +4,7 @@ import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { REPO_NAME, WORKSPACE_PREFIX, parseTouch, registryNames, reposOf } from '../project/touches.js';
 import { PROTECTED_BRANCHES, checkBash, checkRefWrites, checkRestrictedShell, tokenize } from './shellscan.js';
+import { repoSettingsFile } from './reposettings.js';
 
 export { PROTECTED_BRANCHES, checkBash, checkRefWrites, tokenize };
 
@@ -216,6 +217,7 @@ export function protectedWrite(abs, rel, tool, input) {
   if (rel === '.claude/recade.yaml') return `.claude/recade.yaml holds the harness settings of this repository (required gates, thresholds). ${human}`;
   if (rel === '.git/info/exclude') return null;
   if (rel === '.githooks' || rel.startsWith('.githooks/') || rel === '.git' || rel.startsWith('.git/')) return `${rel} is a git hook or git internals. ${human}`;
+  if (rel === 'recade/repos' || /^recade\/repos\//.test(rel)) return `${rel} holds the harness settings of a code repository (required gates, thresholds). ${human}`;
   if (rel === 'recade/state.yaml') {
     if (tool === 'Write') return `recade/state.yaml is changed with \`recade state\`, never rewritten whole. ${human}`;
     if (/harness|required_gates|threshold_files/.test(writtenText(input))) return `The harness keys of recade/state.yaml (required gates, thresholds) are not edited by an agent. ${human}`;
@@ -396,7 +398,7 @@ export function readThresholdFiles(text) {
 function thresholdsOf(root, files = [join('recade', 'state.yaml')]) {
   const out = { files: [], error: false };
   for (const name of files) {
-    const file = join(root, name);
+    const file = isAbsolute(name) ? name : join(root, name);
     if (!existsSync(file)) continue;
     try {
       const read = readThresholdFiles(readFileSync(file, 'utf8'));
@@ -409,8 +411,8 @@ function thresholdsOf(root, files = [join('recade', 'state.yaml')]) {
   return out;
 }
 
-/** Where the threshold files of a folder of a workspace are listed: the project state, and the settings of a code repository. */
-const WORKSPACE_THRESHOLDS = [join('recade', 'state.yaml'), join('.claude', 'recade.yaml')];
+/** Where the threshold files of a folder of a workspace are listed: the project state, and the settings of a code repository (in the workspace, or in the repository for an older install). */
+const workspaceThresholds = (root) => [join('recade', 'state.yaml'), join('.claude', 'recade.yaml'), ...(repoSettingsFile(root) === null ? [] : [repoSettingsFile(root)])];
 
 /**
  * Handle one PreToolUse hook call. Returns the text to print: the deny decision as JSON, or '' to allow.
@@ -755,6 +757,9 @@ const MAIN_SESSION_ONLY = [
   [['repo', 'sync'], '`recade repo sync` and `recade repo add` rewrite the links of the code repositories: only the main session runs them.'],
   [['repo', 'add'], '`recade repo sync` and `recade repo add` rewrite the links of the code repositories: only the main session runs them.'],
   [['workspace', 'commit'], '`recade workspace commit` commits files of the workspace: only the main session runs it.'],
+  [['repo', 'clean'], '`recade repo clean` pushes a branch and opens a pull request in a code repository: only the main session runs it, after the owner\'s yes.'],
+  [['harness', 'sync'], '`recade harness sync` installs the harness and sets up this machine: only the session start runs it, never an agent.'],
+  [['session', 'end'], '`recade session end` ends the session: only the main session runs it, through /exit.'],
   [['workspace', 'auto-push'], '`recade workspace auto-push` records the owner\'s consent to push the workspace: only the main session runs it.'],
   [['workspace', 'push'], '`recade workspace push` pushes the workspace: only the main session and the Stop hook run it, never an agent.'],
   [['harness', 'specialise'], '`recade harness specialise` writes the agent and command files of the harness: only the main session runs it.'],
@@ -1084,7 +1089,7 @@ async function handleWorkspaceHook({ kind, dir, cwdGiven = true, tool, input, ag
       const why = allow.unresolved.length > 0 ? ` ${allow.unresolved.join('. ')}.` : '';
       return `${who} works in ${session.name}: ${where.name} is not a repository of this slice (${slice}), so ${toProjectPath(where.root, target) ?? toProjectPath(ws, target) ?? target} in ${where.name} is refused.${why}`;
     }
-    const thresholds = thresholdsOf(where.root, WORKSPACE_THRESHOLDS);
+    const thresholds = thresholdsOf(where.root, workspaceThresholds(where.root));
     const decision = decide({
       agentType, tool: judged, input: { ...judgedInput, file_path: target }, allow: allow && { globs: allow.globs, unresolved: allow.unresolved },
       deny: { thresholdFiles: thresholds.files, thresholdError: thresholds.error }, root: where.root,
@@ -1105,7 +1110,7 @@ async function handleWorkspaceHook({ kind, dir, cwdGiven = true, tool, input, ag
   const start = cwdGiven ? dir : session.root;
   const startTop = start === session.root ? null : run(start, ['rev-parse', '--show-toplevel']);
   const currentBranch = startTop === null ? sessionBranch : branchOf(start);
-  const thresholds = thresholdsOf(session.root, WORKSPACE_THRESHOLDS);
+  const thresholds = thresholdsOf(session.root, workspaceThresholds(session.root));
   const isTracked = (path) => run(start, ['ls-files', '--error-unmatch', '--', path]) !== null;
   let reason = checkBash(command, { thresholdFiles: thresholds.files, currentBranch, isTracked, branchAt: branchAtFrom(start) });
   if (reason === null && agentType !== null) {

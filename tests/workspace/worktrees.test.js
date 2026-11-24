@@ -67,7 +67,7 @@ test('openSlice: a no-code slice opens nothing, a branch without a worktree is a
   writeFileSync(join(ws.dir, '.gitignore'), 'repos/\n');
   sheet(ws, 'S-07', 'refunds', { touches: ['api:src/refunds/**'] });
   assert.deepEqual(openSlice(ws.dir, 'S-07', { exec }).errors, []);
-  assert.deepEqual(readFileSync(exclude, 'utf8').split('\n').filter(Boolean), ['repos/', 'worktrees/']);
+  assert.deepEqual(readFileSync(exclude, 'utf8').split('\n').filter(Boolean), ['/repos/', '/worktrees/']);
   assert.equal(readFileSync(join(ws.dir, '.gitignore'), 'utf8'), 'repos/\n', 'the tracked .gitignore is left as it is');
   // A workspace with no git at all cannot keep them out: the slice does not open.
   const bare = await workspace();

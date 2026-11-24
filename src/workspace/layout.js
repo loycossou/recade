@@ -61,11 +61,21 @@ export const holds = (text, entry) => String(text ?? '').split(/\r?\n/).map((l) 
 export function keepLocal(ws, { drop = false } = {}) {
   const file = excludeFile(ws);
   if (file === null) return null;
-  const before = existsSync(file) ? readFileSync(file, 'utf8') : '';
+  // Anchored to the root (`/repos/`): a bare `repos/` would also hide `recade/repos/`, the settings of the code
+  // repositories. An older bare line is rewritten anchored.
+  let before = existsSync(file) ? readFileSync(file, 'utf8') : '';
+  const anchored = before.split('\n').map((l) => {
+    const hit = LOCAL_ONLY.find((e) => [e, e.replace(/\/$/, '')].includes(l.trim()));
+    return hit === undefined ? l : `/${hit}`;
+  }).join('\n');
+  if (anchored !== before) {
+    writeFileSync(file, anchored);
+    before = anchored;
+  }
   const excluded = LOCAL_ONLY.filter((e) => !holds(before, e));
   if (excluded.length > 0) {
     mkdirSync(dirname(file), { recursive: true });
-    appendFileSync(file, `${before === '' || before.endsWith('\n') ? '' : '\n'}${excluded.join('\n')}\n`);
+    appendFileSync(file, `${before === '' || before.endsWith('\n') ? '' : '\n'}${excluded.map((e) => `/${e}`).join('\n')}\n`);
   }
   const dropped = [];
   const ignorePath = join(ws, '.gitignore');

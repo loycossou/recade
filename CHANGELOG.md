@@ -2,6 +2,37 @@
 
 This file is curated by hand for each release. At tag time, `recade release-notes <from>..<to> --version <v> --write` produces the raw list from the conventional commits, and this section is then edited from it.
 
+## 1.6.0 (2026-11-24)
+
+### A code repository is the project's, and nothing in it depends on Recade
+
+- An install writes only `.github/workflows/ci.yml` and `.github/dependabot.yml` in a code repository, once, when they do not exist yet; from then on they are the project's. No `.claude/`, no `.githooks/`, no Recade workflow, no line of `CLAUDE.md` or `.gitignore`. An adopted repository gets nothing at all. A clone works the same with or without Recade.
+- The CI fetches nothing from Recade: no `RECADE_REF`, no deploy key, no quarantine or Recade job. Its messages name no tool. The conflicts and second-opinion workflows are gone; `/merge-order` and `/second-opinion` run on this machine.
+- What an agent sends to a code repository never names Recade: code, comments, commits, pull requests and their comments (a rule of the protocol and of the release manager, and a test on the templates).
+- The settings of a code repository (required gates, thresholds) are kept in the workspace, `recade/repos/<name>.yaml`. A session start carries an older `.claude/recade.yaml` there.
+- `recade repo clean <name>` takes the files of an older Recade out of a code repository, through one pull request the owner merges: a dry run first, `--apply` after the owner's yes. It keeps every other job of the CI and the conventions of `CLAUDE.md`, and lists the lines that would still name Recade.
+- `recade claude-md refresh` no longer writes the `CLAUDE.md` of a code repository.
+
+### The harness follows the plugin
+
+- The guard is a hook of the plugin (`bin/recade-guard.js`). It decides only in a Recade project and allows everything elsewhere. No guard launcher and no hook in `.claude/settings.json` any more: an install takes them out of the workspace.
+- The git hooks are local to the machine, in the git hooks folder of each checkout. They run the hooks of the plugin, so an update of the plugin updates them, and they let a commit through when the plugin is not on the machine.
+- At the start of each session in a workspace, `recade harness sync` runs: it installs the workspace again when the plugin changed and commits it, sets up this machine in the workspace and each code repository, and lists the new commits of others and the open pull requests that are not slices. Uncommitted changes of the owner in the harness files stop the update, with a line that says so.
+- A path a team added to the generic `## Writes` list of an agent is moved below the specialisation line by an update, with a warning, never lost.
+
+### Less noise
+
+- The guard refuses only a write to a harness file. Reading one (`cat`, `sed -n`, `grep`, `git diff`, a pipe, a redirect elsewhere) goes through, and so does `cd` into `.claude` to read.
+- `/slice` no longer stops on a Definition of Done line that only a person can do: it offers to move it to `Human actions after`.
+- A rebase that conflicts only on files of an older Recade settles them by itself (`recade rebase leftovers`); any other conflict still goes to the owner.
+- `/merge-order` names the pull requests that are not slices.
+- The cloud setup is gone: no plugin install in a cloud session.
+- `/exit` ends a session cleanly, also where the built-in exit only detaches it: it pushes the workspace, then stops the session.
+
+### Update an existing project
+
+Update the plugin and open a session in the workspace: the harness of the workspace and this machine are set up by themselves. Then run `/recade:harness`, or `recade repo clean <name>` for each code repository, and merge the pull requests it opens before rebasing the slices in progress.
+
 ## 1.5.3 (2026-11-24)
 
 ### Smaller fixes from a real project

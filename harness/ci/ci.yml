@@ -1,8 +1,5 @@
 name: CI
 
-# Template filled at install from the harness technical sheet of docs/STACK.md (section 12).
-# Every token written RECADE between double underscores below is replaced by the command of the sheet row it names.
-# A row left empty becomes a step that fails and says which row to fill, so a gate never passes by silence.
 on:
   push:
     branches: [main]
@@ -16,17 +13,11 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
-env:
-  # Where the Recade tools come from. Pin a tag or a commit here when Recade publishes releases.
-  RECADE_REPOSITORY: loycossou/recade
-  RECADE_REF: main
-
-# Actions are pinned to a major tag. The Dependabot file next to this one keeps them current,
-# and a team that wants stricter pinning replaces each tag by the full commit SHA, keeping the tag in a comment.
+# Each action is pinned to a full commit, with its release in a comment. The Dependabot file next to this one keeps them current.
 jobs:
-  # A new code repository holds only the harness files until its first slice adds code. Until then there is nothing to
-  # install, lint, build or test, so the four jobs below are skipped (GitHub reports a skipped job as passing) and the
-  # run summary says why. They run from the first file that is not a harness file.
+  # A new repository holds no code until its first change adds some. Until then there is nothing to install, lint,
+  # build or test, so the jobs below are skipped (GitHub reports a skipped job as passing) and the run summary says why.
+  # They run from the first file of code.
   code:
     name: Code present
     runs-on: ubuntu-latest
@@ -46,7 +37,7 @@ jobs:
             echo "present=true" >> "$GITHUB_OUTPUT"
           else
             echo "present=false" >> "$GITHUB_OUTPUT"
-            echo "No code yet: this repository holds only the harness files, so the lint, build, test and security jobs are skipped. They run from the first file of code." | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "No code yet, so the lint, build, test and security jobs are skipped. They run from the first file of code." | tee -a "$GITHUB_STEP_SUMMARY"
           fi
 
   quality:
@@ -107,7 +98,7 @@ jobs:
       - name: Accessibility tests (axe)
         run: |
           __RECADE_ACCESSIBILITY__
-      # The budgets of the sheet (response time, page weight, Core Web Vitals). A budget is never raised to make a run pass.
+      # The performance budgets (response time, page weight, Core Web Vitals). A budget is never raised to make a run pass.
       - name: Performance budget
         run: |
           __RECADE_PERFORMANCE__
@@ -147,7 +138,7 @@ jobs:
       - name: Software bill of materials (SBOM)
         run: |
           __RECADE_SBOM__
-      # Skipped when the sheet declares the SBOM not applicable: there is then nothing to keep.
+      # Skipped when the project has no SBOM: there is then nothing to keep.
       - name: Keep the SBOM
         if: __RECADE_SBOM_UPLOAD__
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -159,126 +150,3 @@ jobs:
       - name: Secret scan
         run: |
           __RECADE_SECRETS__
-
-  # Flaky tests. The tracked file tests/quarantine.json lists them, and the test command of the blocking jobs above
-  # skips them (a tag or a skip list that reads that file). They run here, alone: a failure here shows in the log and
-  # in the run summary but never blocks the pull request (continue-on-error). The job in `recade` below fails when a
-  # quarantined test outlives its increment.
-  quarantine:
-    name: Quarantined tests (non-blocking, reported)
-    needs: code
-    if: needs.code.outputs.present == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with:
-          persist-credentials: false
-      # __RECADE_SETUP__
-      - name: Install dependencies
-        run: |
-          __RECADE_INSTALL__
-      - name: Fetch the Recade tools
-        env:
-          REPOSITORY: ${{ env.RECADE_REPOSITORY }}
-          REF: ${{ env.RECADE_REF }}
-          # A read-only deploy key of a private Recade repository, when the project has one (README, "A private Recade").
-          DEPLOY_KEY: ${{ secrets.RECADE_DEPLOY_KEY }}
-        run: |
-          set -euo pipefail
-          tools="${RUNNER_TEMP}/recade-tools"
-          git init --quiet "$tools"
-          url="https://github.com/${REPOSITORY}.git"
-          if [ -n "${DEPLOY_KEY:-}" ]; then
-            ssh_dir="${RUNNER_TEMP}/recade-ssh"
-            mkdir -p -m 700 "$ssh_dir"
-            (umask 077 && printf '%s\n' "$DEPLOY_KEY" > "$ssh_dir/key")
-            # The host key GitHub publishes (gh api meta), pinned: no first-use trust.
-            echo 'github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl' > "$ssh_dir/known_hosts"
-            export GIT_SSH_COMMAND="ssh -i $ssh_dir/key -o User=git -o IdentitiesOnly=yes -o UserKnownHostsFile=$ssh_dir/known_hosts -o StrictHostKeyChecking=yes"
-            url="ssh://github.com/${REPOSITORY}.git"
-          fi
-          git -C "$tools" fetch --quiet --depth 1 "$url" "$REF"
-          git -C "$tools" checkout --quiet FETCH_HEAD
-          npm ci --omit=dev --ignore-scripts --prefix "$tools"
-          echo "RECADE_BIN=${tools}/bin/recade.js" >> "$GITHUB_ENV"
-      - name: List the quarantined tests
-        id: listing
-        run: |
-          set -euo pipefail
-          {
-            echo "### Quarantined tests"
-            echo
-            node "$RECADE_BIN" quarantine list
-          } | tee -a "$GITHUB_STEP_SUMMARY"
-          count="$(node "$RECADE_BIN" quarantine list --names | grep -c . || true)"
-          echo "count=${count}" >> "$GITHUB_OUTPUT"
-      - name: Install the browsers
-        if: steps.listing.outputs.count != '0'
-        run: |
-          __RECADE_E2E_SETUP__
-      - name: Run the quarantined tests
-        id: quarantined
-        if: steps.listing.outputs.count != '0'
-        run: |
-          __RECADE_QUARANTINE__
-      - name: Report the outcome
-        if: always()
-        env:
-          OUTCOME: ${{ steps.quarantined.outcome }}
-        run: |
-          echo "Quarantined tests: ${OUTCOME}. This job never blocks the pull request." | tee -a "$GITHUB_STEP_SUMMARY"
-      - name: Keep the Playwright reports
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: quarantine-report
-          path: |
-            playwright-report/
-            test-results/
-          if-no-files-found: ignore
-          retention-days: 7
-
-  recade:
-    name: Recade style and quarantine expiry
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
-        with:
-          node-version: 22
-      # The tools go outside the workspace, so the checks below never read them as project files.
-      - name: Fetch the Recade tools
-        env:
-          REPOSITORY: ${{ env.RECADE_REPOSITORY }}
-          REF: ${{ env.RECADE_REF }}
-          # A read-only deploy key of a private Recade repository, when the project has one (README, "A private Recade").
-          DEPLOY_KEY: ${{ secrets.RECADE_DEPLOY_KEY }}
-        run: |
-          set -euo pipefail
-          tools="${RUNNER_TEMP}/recade-tools"
-          git init --quiet "$tools"
-          url="https://github.com/${REPOSITORY}.git"
-          if [ -n "${DEPLOY_KEY:-}" ]; then
-            ssh_dir="${RUNNER_TEMP}/recade-ssh"
-            mkdir -p -m 700 "$ssh_dir"
-            (umask 077 && printf '%s\n' "$DEPLOY_KEY" > "$ssh_dir/key")
-            # The host key GitHub publishes (gh api meta), pinned: no first-use trust.
-            echo 'github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl' > "$ssh_dir/known_hosts"
-            export GIT_SSH_COMMAND="ssh -i $ssh_dir/key -o User=git -o IdentitiesOnly=yes -o UserKnownHostsFile=$ssh_dir/known_hosts -o StrictHostKeyChecking=yes"
-            url="ssh://github.com/${REPOSITORY}.git"
-          fi
-          git -C "$tools" fetch --quiet --depth 1 "$url" "$REF"
-          git -C "$tools" checkout --quiet FETCH_HEAD
-          npm ci --omit=dev --ignore-scripts --prefix "$tools"
-          echo "RECADE_BIN=${tools}/bin/recade.js" >> "$GITHUB_ENV"
-      - name: Writing style
-        run: node "$RECADE_BIN" lint-style .
-      # This repository holds its own tests/quarantine.json. The check reads it and fails on a file that is not valid. The slice
-      # sheets are private and live in the workspace, so the increments are judged there, by /retro.
-      - name: Quarantine expiry
-        run: node "$RECADE_BIN" quarantine check

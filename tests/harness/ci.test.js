@@ -66,11 +66,8 @@ test('the job set covers every gate the brief names, in the right jobs', () => {
   assert.match(names('quality'), /Lint.*Typecheck.*Unit tests.*Contract tests/);
   assert.match(names('e2e'), /End to end.*Confirmation tests.*Accessibility.*Performance budget/);
   assert.match(names('security'), /SAST.*Dependency audit.*SBOM.*Secret scan/);
-  const recade = doc.jobs.recade.steps.map((s) => s.run ?? '').join('\n');
-  assert.match(recade, /lint-style/);
-  assert.match(recade, /quarantine check/);
-  // The documents are in the workspace, so the ID index is checked there (workspace.yml), not in the code repository.
-  assert.doesNotMatch(recade, /index check/);
+  // The CI belongs to the project: no job of the tooling.
+  assert.deepEqual(Object.keys(doc.jobs).sort(), ['code', 'e2e', 'quality', 'security']);
 });
 
 test('a row that is empty, still an example, or absent gives a failing step and is reported', () => {
@@ -78,7 +75,7 @@ test('a row that is empty, still an example, or absent gives a failing step and 
     const { text, missing } = fillCi(CI, sheet);
     assert.deepEqual(missing, ['SAST']);
     assert.doesNotMatch(text, TOKEN);
-    assert.match(runs(parse(text)), /SAST.*not filled.*exit 1/);
+    assert.match(runs(parse(text)), /No command is set for SAST yet.*exit 1/);
   }
   const noSheet = fillCi(CI, '# no sheet here\n');
   assert.ok(noSheet.missing.includes('Runtime') && noSheet.missing.includes('Test'));
@@ -117,8 +114,8 @@ test('permissions are least privilege: read only, no secret, no pull_request_tar
     if (job.permissions) assert.ok(Object.values(job.permissions).every((v) => v === 'read' || v === 'none'), `${name} writes nothing`);
   }
   assert.ok(!('pull_request_target' in doc.on));
-  // One secret only: the read-only deploy key of a private Recade, read by the step that fetches the tools.
-  assert.deepEqual([...new Set(CI.match(/secrets\.\w+/g) ?? [])], ['secrets.RECADE_DEPLOY_KEY']);
+  // No secret: the CI downloads no tool of its own.
+  assert.deepEqual(CI.match(/secrets\.\w+/g) ?? [], []);
   assert.doesNotMatch(CI, /:\s*write\b/);
 });
 
@@ -164,44 +161,21 @@ test('dependabot: the ecosystem comes from the runtime, an explicit row wins, gi
   assert.throws(() => fillDependabot(DEPENDABOT, '# no sheet\n'), /ecosystem/i);
 });
 
-test('quarantined tests run in their own non-blocking job that still reports, and the blocking jobs never read the quarantine', () => {
+test('the CI fetches no tool and runs no tooling job: no quarantine or recade job, no RECADE setting', () => {
   const doc = parse(fillCi(CI, STACK).text);
-  const job = doc.jobs.quarantine;
-  assert.ok(job, 'a quarantine job');
-  assert.equal(job['continue-on-error'], true, 'its failure never blocks the workflow');
-  assert.ok(job['timeout-minutes'] > 0);
-  assert.equal(job.needs, 'code', 'it waits only for the code check');
-  for (const name of ['quality', 'e2e', 'security', 'recade']) {
-    assert.notEqual(doc.jobs[name]['continue-on-error'], true, `${name} blocks`);
-    assert.equal(doc.jobs[name].needs === undefined || !doc.jobs[name].needs.includes('quarantine'), true);
-  }
-  const runsOf = (steps) => steps.map((s) => s.run ?? '').join('\n');
-  const text = runsOf(job.steps);
-  assert.match(text, /quarantine list --names/, 'it reads the tracked list');
-  assert.match(text, /GITHUB_STEP_SUMMARY/, 'it reports on the run page');
-  assert.match(text, /quarantine list --names \| paste -sd'\|' -|echo "Quarantine tests: /, 'it runs the command of the sheet row');
-  const setup = job.steps.findIndex((s) => s.name === 'Install the browsers');
-  assert.ok(setup > 0, 'it installs the browsers like the e2e job');
-  assert.match(String(job.steps[setup].if), /steps\.listing\.outputs\.count != '0'/, 'only when something is quarantined');
-  assert.match(job.steps[setup].run, /npx playwright install --with-deps chromium/);
-  assert.ok(setup < job.steps.findIndex((s) => s.id === 'quarantined'), 'before the run');
-  const ran = job.steps.find((s) => s.id === 'quarantined');
-  assert.ok(ran, 'a step with the id quarantined');
-  assert.match(String(ran.if), /steps\.listing\.outputs\.count != '0'/, 'it runs only when something is quarantined');
-  assert.equal(job.steps.some((s) => String(s.if).includes('always()')), true, 'the report step runs after a failure too');
-  assert.equal(job.steps.some((s) => String(s.uses).startsWith('actions/upload-artifact@')), true, 'the output is kept');
-  // The blocking recade job fails an entry that outlives its increment.
-  assert.match(runsOf(doc.jobs.recade.steps), /quarantine check/);
+  assert.equal(doc.jobs.quarantine, undefined);
+  assert.equal(doc.jobs.recade, undefined);
+  assert.equal(doc.env, undefined);
+  for (const name of ['quality', 'e2e', 'security']) assert.notEqual(doc.jobs[name]['continue-on-error'], true, `${name} blocks`);
+  assert.doesNotMatch(CI, /RECADE_(REF|REPOSITORY|BIN)|recade-tools|quarantine list/);
   for (const s of stepsOf(doc).filter((x) => x.run)) assert.doesNotMatch(s.run, /\$\{\{/, `${s.name}: no expression inside a run line`);
 });
-
-test('a repository with only the harness files skips the jobs that need code, and the recade job still runs', () => {
+test('a repository with no code yet skips the jobs that need code', () => {
   const doc = parse(fillCi(CI, STACK).text);
-  for (const name of ['quality', 'e2e', 'security', 'quarantine']) {
+  for (const name of ['quality', 'e2e', 'security']) {
     assert.equal(doc.jobs[name].needs, 'code', `${name} waits for the code check`);
     assert.equal(doc.jobs[name].if, "needs.code.outputs.present == 'true'", `${name} is skipped without code`);
   }
-  assert.equal(doc.jobs.recade.needs, undefined, 'the style check runs on every repository');
   assert.equal(doc.jobs.code.outputs.present, '${{ steps.look.outputs.present }}');
   const look = doc.jobs.code.steps.find((s) => s.id === 'look');
   const run = (files) => {
@@ -227,31 +201,19 @@ test('a repository with only the harness files skips the jobs that need code, an
   assert.equal(run(['docs/CLAUDE.md']).output, 'present=true\n', 'only the root CLAUDE.md is a harness file');
 });
 
-test('the Quarantine tests row is optional: absent, it is a visible no-op and not a missing row', () => {
-  const fixture = withRow('Quarantine tests', '`npx playwright test --grep @quarantine`');
-  const { text, missing } = fillCi(CI, fixture);
-  assert.deepEqual(missing, []);
-  assert.match(runs(parse(text)), /npx playwright test --grep @quarantine/);
-  const none = fillCi(CI, withRow('Quarantine tests', null));
-  assert.deepEqual(none.missing, []);
-  assert.doesNotMatch(none.text, TOKEN);
-  assert.match(runs(parse(none.text)), /Quarantine tests: no command in the harness technical sheet/);
-  assert.throws(() => fillCi(CI, withRow('Quarantine tests', '`echo ${{ secrets.TOKEN }}`')), /expression/i);
-  assert.equal(fillCi(CI, withRow('Quarantine tests', 'not applicable')).missing.length, 0);
+test('the Quarantine tests row is not read by the CI: absent or set, nothing is missing and nothing names it', () => {
+  for (const sheet of [withRow('Quarantine tests', '`npx playwright test --grep @quarantine`'), withRow('Quarantine tests', null)]) {
+    const { text, missing } = fillCi(CI, sheet);
+    assert.deepEqual(missing, []);
+    assert.doesNotMatch(text, TOKEN);
+    assert.doesNotMatch(text, /@quarantine/);
+  }
 });
-
 test('the shipped STACK template lists every row the CI template reads', () => {
   const stack = read('../../templates/STACK.md');
   for (const item of ['Runtime', 'Install', 'Lint', 'Typecheck', 'Build', 'Test', 'Contract tests', 'E2E setup', 'E2E tests', 'Confirmation tests', 'Accessibility tests', 'Performance budget', 'SAST', 'Dependency audit', 'SBOM', 'Secret scan', 'Quarantine tests']) {
     assert.ok(stack.includes(`| ${item} |`), `STACK.md has no ${item} row`);
   }
-});
-
-test('the template keeps the browser install step in the quarantine job, and fillCi refuses one that lost it', () => {
-  assert.doesNotThrow(() => fillCi(CI, STACK));
-  const noSetup = CI.replace(/      - name: Install the browsers\n        if: steps\.listing[^\n]*\n        run: \|\n          __RECADE_E2E_SETUP__\n/, '');
-  assert.notEqual(noSetup, CI);
-  assert.throws(() => fillCi(noSetup, STACK), /quarantine job .* must install the browsers/);
 });
 
 // ---------------------------------------------------------------------------------------------------------
@@ -442,4 +404,15 @@ test('every action of the workflow templates is pinned to a full commit, with it
 test('dependabot.yml waits a few days before a new version (cooldown), for each ecosystem', () => {
   const doc = parse(read('../../harness/dependabot.yml').replace('__RECADE_ECOSYSTEM__', 'npm'));
   for (const u of doc.updates) assert.equal(u.cooldown?.['default-days'], 7, u['package-ecosystem']);
+});
+
+test('the filled CI and dependabot.yml name neither Recade nor the harness: they belong to the project', () => {
+  for (const sheet of [STACK, '# no sheet here\n']) {
+    const { text } = fillCi(CI, sheet);
+    assert.doesNotMatch(text, /recade/i);
+    assert.doesNotMatch(text, /harness/i);
+  }
+  const { text } = fillDependabot(DEPENDABOT, STACK);
+  assert.doesNotMatch(text, /recade/i);
+  assert.doesNotMatch(text, /harness/i);
 });

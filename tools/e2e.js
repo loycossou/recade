@@ -578,15 +578,16 @@ export async function runE2E({ mode, tmp, exec = defaultExec, example = EXAMPLE,
       for (const r of repoNames) verified.push((await cli(['harness', 'verify', '--target', 'code', '--repo', r])).stdout);
       const cost = await cli(['cost', 'record', DELIVERED, '--minutes', '30', '--fix-loops', '0', '--transcript', join(session, 'transcript.jsonl')]);
       if (!/tokens/.test(cost.stdout)) throw new E2EError(phase, 'recade cost record', null, 'The cost record counted no tokens from the recorded session.');
-      // Each code repository commits its own harness. In adopt only the files Recade wrote are staged, by name (the rest is the owner's).
+      // A code repository gets only its CI, once, and commits it as the project's own: nothing else of the harness is
+      // in it, and nothing names Recade. An adopted repository keeps the CI of its owner: Recade writes nothing there.
       for (const r of repoNames) {
         const where = repoDir(r);
+        const status = String(await gitIn(where, 'status', '--porcelain', '--untracked-files=all'));
+        const unexpected = status.split('\n').filter((l) => l.trim() !== '' && !/^\?\? \.github\/(workflows\/ci\.yml|dependabot\.yml)$/.test(l));
+        if (unexpected.length > 0) throw new E2EError(phase, `repos/${r}`, null, `The harness changed files of the code repository: ${unexpected.join(', ')}`);
         if (adopt) {
-          const created = JSON.parse(readFileSync(join(where, '.recade', 'created.json'), 'utf8')).files.map((f) => f.path);
-          // `.recade/` is the machine-local record and is in .gitignore.
-          for (const p of exists(where, [...created.filter((c) => !c.startsWith('.recade/')), '.claude/settings.json', '.gitignore', 'CLAUDE.md'])) await gitIn(where, 'add', '--', p);
-          await gitIn(where, 'commit', '-q', '-m', 'chore: install the Recade harness');
-        } else await commitIn(where, 'chore: install the Recade harness');
+          if (status.trim() !== '') throw new E2EError(phase, `repos/${r}`, null, 'The harness wrote in an adopted repository, which keeps the CI of its owner.');
+        } else await commitIn(where, 'ci: add the CI workflow');
       }
       await commit('chore: install the Recade harness', ...exists(dir, ['.claude', '.githooks', '.github', '.gitignore', 'CLAUDE.md', 'docs', 'recade']));
       const gates = [await gate('G5')];

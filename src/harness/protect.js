@@ -2,8 +2,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parse } from 'yaml';
 import { loadState } from '../state.js';
-import { isAdopt, workflowFiles } from './install.js';
-import { WORKSPACE_WORKFLOW } from './targets.js';
+import { isAdopt } from './install.js';
 
 /**
  * Branch protection on GitHub: no direct push to the main branch, a pull request and the CI checks required, for the
@@ -14,29 +13,20 @@ import { WORKSPACE_WORKFLOW } from './targets.js';
  */
 
 /**
- * A check name per job of the workflows of `root`: the `name` of the job, else its key. A code repository has the CI and
- * conflicts workflows; the workspace has `workspace.yml`, and an unreadable or absent one gives no check, never an error.
+ * A check name per job of the CI of a code repository (`.github/workflows/ci.yml`): the `name` of the job, else its
+ * key. The CI is the project's own, so its jobs are the checks, whatever they are. The workspace runs no CI, and an
+ * adopted repository keeps the CI of its owner, which Recade does not choose: both give no check, never an error.
  */
 export function requiredChecks(root, adopt = isAdopt(root)) {
-  const names = [];
   let workspace = false;
   try {
     workspace = loadState(root)?.kind === 'workspace';
   } catch { /* a state that cannot be read is no workspace here */ }
-  const wf = workflowFiles(adopt);
-  for (const f of workspace ? [WORKSPACE_WORKFLOW] : [wf.ci, wf.conflicts]) {
-    const path = join(root, f);
-    if (!existsSync(path)) continue;
-    let jobs;
-    try {
-      jobs = parse(readFileSync(path, 'utf8'))?.jobs ?? {};
-    } catch (err) {
-      if (!workspace) throw err;
-      continue;
-    }
-    for (const [key, job] of Object.entries(jobs)) names.push(typeof job?.name === 'string' ? job.name : key);
-  }
-  return names;
+  if (workspace || adopt) return [];
+  const path = join(root, '.github', 'workflows', 'ci.yml');
+  if (!existsSync(path)) return [];
+  const jobs = parse(readFileSync(path, 'utf8'))?.jobs ?? {};
+  return Object.entries(jobs).map(([key, job]) => (typeof job?.name === 'string' ? job.name : key));
 }
 
 /** The `gh api` arguments that set the protection of a branch. */

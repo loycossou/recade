@@ -23,3 +23,21 @@ export function autoPushWorkspace(start, { exists, read }) {
     if (dirname(d) === d) return null;
   }
 }
+
+/**
+ * The workspace a session starts in, or null: the first `recade/state.yaml` above `start` that says `kind: workspace`.
+ * Two line tests, no YAML parser.
+ */
+export function workspaceAt(start, { exists, read }) {
+  for (let d = resolve(start); ; d = dirname(d)) {
+    const file = join(d, 'recade', 'state.yaml');
+    if (exists(file)) {
+      try {
+        return /^kind:\s*["']?workspace["']?\s*$/m.test(read(file)) ? d : null;
+      } catch {
+        return null;
+      }
+    }
+    if (dirname(d) === d) return null;
+  }
+}

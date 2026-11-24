@@ -15,7 +15,9 @@ test('protection names the CI jobs as required checks, includes administrators a
   const root = makeProject();
   install(root, { pluginRoot: plugin });
   const checks = requiredChecks(root);
-  assert.ok(checks.length >= 3 && checks.includes('conflicts'));
+  // The jobs of the project's own CI, and nothing of the tooling.
+  assert.ok(checks.length >= 3);
+  assert.equal(checks.some((c) => /conflicts|quarantine|recade/i.test(c)), false, checks.join(', '));
   const args = protectionArgs('acme/fernhill', 'main', ['CI', 'conflicts']);
   const text = args.join(' ');
   assert.deepEqual(args.slice(0, 4), ['api', '-X', 'PUT', 'repos/acme/fernhill/branches/main/protection']);
@@ -134,14 +136,11 @@ test('parallel plan takes its default limit from harness.wip_limit, and --max st
   assert.equal(await picked('--max', '4'), 4);
 });
 
-test('requiredChecks of a workspace reads the jobs of workspace.yml, and nothing errors when the workflow is absent', async () => {
+test('requiredChecks of a workspace is empty: the workspace runs no CI, and protect sends no check', async () => {
   const ws = await makeWorkspace();
-  assert.deepEqual(requiredChecks(ws.dir), [], 'no workflow yet: no check, no error');
-  install(ws.dir, { pluginRoot: plugin, target: 'workspace', ref: 'v1.0.0' });
-  const jobs = Object.values(parse(readFileSync(join(ws.dir, '.github/workflows/workspace.yml'), 'utf8')).jobs).map((j) => j.name);
-  assert.ok(jobs.length > 0);
-  assert.deepEqual(requiredChecks(ws.dir), jobs);
-  // The workspace rule uses no check today: protect still sends none, whatever the workflow holds.
+  assert.deepEqual(requiredChecks(ws.dir), []);
+  install(ws.dir, { pluginRoot: plugin, target: 'workspace' });
+  assert.deepEqual(requiredChecks(ws.dir), []);
   const state = parse(readFileSync(join(ws.dir, 'recade/state.yaml'), 'utf8'));
   writeFileSync(join(ws.dir, 'recade/state.yaml'), stringify({ ...state, github: { owner: 'acme', repo: 'fernhill-workspace' } }));
   const result = protect(ws.dir, { exec: () => ok() });
@@ -149,7 +148,6 @@ test('requiredChecks of a workspace reads the jobs of workspace.yml, and nothing
   assert.deepEqual(result.checks, []);
   assert.doesNotMatch(result.command, /contexts/);
 });
-
 test('requiredChecks of a workspace survives an unreadable workspace.yml', async () => {
   const ws = await makeWorkspace();
   mkdirSync(join(ws.dir, '.github', 'workflows'), { recursive: true });

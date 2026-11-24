@@ -37,13 +37,13 @@ export const TARGETS = Object.freeze({
   code: Object.freeze({
     commands: Object.freeze([]),
     agents: Object.freeze([]),
-    pointers: POINTER_COMMANDS,
+    pointers: Object.freeze([]),
     preCommit: 'pre-commit',
     protocol: false,
   }),
 });
 
-/** The CI workflow of the workspace. The workflows of a code repository are `workflowFiles()` of install.js. */
+/** The CI workflow an older install wrote in the workspace. An install now removes it when it is still Recade's. */
 export const WORKSPACE_WORKFLOW = '.github/workflows/workspace.yml';
 
 /**
@@ -87,8 +87,10 @@ export function thresholdCandidates(dir) {
 
 /* ---------- the settings of one code repository ---------- */
 
-/** The settings of a code repository, tracked in it: `harness: {required_gates, threshold_files}`. */
+/** Where an older install kept the settings of a code repository, tracked in it. They now live in the workspace. */
 export const REPO_SETTINGS = '.claude/recade.yaml';
+export { repoSettingsRel, repoSettingsFile } from './reposettings.js';
+import { repoSettingsFile } from './reposettings.js';
 
 const isNames = (v) => Array.isArray(v) && v.every((x) => typeof x === 'string');
 
@@ -99,9 +101,10 @@ const isNames = (v) => Array.isArray(v) && v.every((x) => typeof x === 'string')
  * @returns {{required_gates?: string[], threshold_files?: string[], error?: true, message?: string}}
  */
 export function readRepoSettings(dir) {
-  const file = join(dir, REPO_SETTINGS);
+  const inWorkspace = repoSettingsFile(dir);
+  const file = inWorkspace !== null && existsSync(inWorkspace) ? inWorkspace : join(dir, REPO_SETTINGS);
   if (!existsSync(file)) return {};
-  const bad = (message) => ({ error: true, message: `${REPO_SETTINGS}: ${message}` });
+  const bad = (message) => ({ error: true, message: `${file}: ${message}` });
   const doc = parseDocument(readFileSync(file, 'utf8'));
   if (doc.errors.length > 0) return bad(doc.errors[0].message.split('\n')[0]);
   const data = doc.toJS();
@@ -128,8 +131,13 @@ export function readRepoSettings(dir) {
  * @param {{own?: boolean}} [options]
  */
 export function writeRepoSettings(dir, patch, { own = false } = {}) {
-  const file = join(dir, REPO_SETTINGS);
-  const doc = existsSync(file) ? parseDocument(readFileSync(file, 'utf8')) : new Document({});
+  void own;
+  const inWorkspace = repoSettingsFile(dir);
+  if (inWorkspace === null) throw new Error(`${dir} has no link to its workspace (.recade/workspace), so its settings have nowhere to go. Run: recade repo sync`);
+  const file = inWorkspace;
+  // An older install kept them in the repository: they are carried over, then the workspace file is the one read.
+  const legacy = join(dir, REPO_SETTINGS);
+  const doc = existsSync(file) ? parseDocument(readFileSync(file, 'utf8')) : existsSync(legacy) ? parseDocument(readFileSync(legacy, 'utf8')) : new Document({});
   if (doc.errors.length > 0) throw new Error(`${REPO_SETTINGS} does not parse: ${doc.errors[0].message.split('\n')[0]}`);
   if (doc.contents === null) doc.contents = doc.createNode({});
   for (const [key, names] of Object.entries(patch)) {
@@ -138,9 +146,6 @@ export function writeRepoSettings(dir, patch, { own = false } = {}) {
     doc.setIn(['harness', key], seq);
   }
   const text = doc.toString({ flowCollectionPadding: false });
-  if (own) writeOwnFile(dir, REPO_SETTINGS, text, { keepEdits: true });
-  else {
-    mkdirSync(dirname(file), { recursive: true });
-    writeFileSync(file, text);
-  }
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, text);
 }

@@ -142,7 +142,7 @@ test('each agent calls the Recade CLI through the plugin root, with single-quote
       assert.equal(/(^|[^.\w/"])recade (gate|board|lint-style|slices|state|harness|index)\b/.test(line.replaceAll('`', '')), false, `${f}: bare recade command: ${line.slice(0, 80)}`);
     }
     for (const m of src.matchAll(/recade\.js"\s+([a-z-]+)(?: ([a-z-]+))?/g)) {
-      assert.ok(['gate', 'board', 'lint-style'].includes(m[1]), `${f}: unexpected CLI call ${m[1]}`);
+      assert.ok(['gate', 'board', 'lint-style', 'rebase'].includes(m[1]), `${f}: unexpected CLI call ${m[1]}`);
     }
     for (const m of src.matchAll(/recade\.js" (gate run|lint-style) ([^\s`]+)/g)) {
       assert.ok(m[2].startsWith("'") || m[2] === '--', `${f}: ${m[1]} argument not single-quoted: ${m[2]}`);

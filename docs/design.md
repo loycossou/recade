@@ -107,7 +107,7 @@ Adopt respects what exists. It changes no architecture, stack, CI file or code l
 **Safety rules.**
 - Before anything is created, `recade adopt preflight` checks each local original: no uncommitted work, the default branch, and no commit that is not pushed to its remote (the workspace clones the remote, so a local-only commit would be lost). A refusal for one repository creates nothing for any of them, and each reason is listed. It never stashes, resets, checks out or cleans.
 - The clone is made from the `origin` URL of the original, and the registry records that URL. A repository with no remote is cloned from its path, the registry says `remote: none`, and Recade warns. What a clone does not carry (branches that exist only in the original, stashes, ignored files) is listed in a warning, with the advice to keep the original until you have what you need.
-- In a code repository Recade writes only its harness: `.claude/`, `.githooks/`, `.github/workflows/recade*.yml`, `.github/dependabot.yml` and `.gitignore` when absent or by appended lines, and the generated block of `CLAUDE.md`. It never edits or deletes a file it did not create. The files it created are listed in `.recade/created.json` of that repository. A file of yours in the way is kept byte for byte.
+- In an adopted code repository Recade writes nothing: its CI, its git hooks, its settings and its `CLAUDE.md` stay the owner's. The guard and the Recade git hooks live on this machine (section 10.4).
 - A re-run on an existing workspace folder is refused: nothing is overwritten.
 
 **Phases.** The phases run in the workspace, so after `adopt init` the owner starts the next session there.
@@ -121,7 +121,7 @@ Adopt respects what exists. It changes no architecture, stack, CI file or code l
    With `--full`, the reader writes D1, D2 and D3 instead, as for a new project. The reading depth depends on the size: under 50 source files all are read, from 50 to 500 a sample is read, and above 500 the entry points come first with at most 15 files per capability. What is not read is listed as deferred. Gates: `G2-stack`, then `G2`.
 3. **BIBLE, slices and board.** The BIBLE cites the documents above and states rules for the remaining work only. The slices cover the remaining work only. Nothing already built is cut into a slice again. P0 and P1 deviations may become slices if the owner wants it.
 4. **Board matching, without duplicates.** `recade adopt board` runs before `recade github init`. It reads the open issues of every adopted repository that has a GitHub remote, the issues of the workspace repository when it exists, and the Projects boards of the owner (closed ones too). It only reads, with two exceptions: `--accept` records issue links (`<repo>#<issue>=<slice>`) in `recade/state.yaml`, and `--create` makes one board, only when none exists and the owner says yes. The owner picks the board and confirms the links in a multiple-choice question. Then `recade github init` creates the private workspace repository, adds each linked issue to the board by its URL and creates an issue, in the workspace repository, only for a slice that has none. A linked issue stays in its code repository and is never renamed, edited or duplicated. It is only put under the epic of its lot as a sub-issue; when it already has a parent of its own, Recade leaves it there and says so.
-5. **Harness beside your CI.** Your `ci.yml` and `dependabot.yml` stay as they are. The Recade CI of a code repository is `.github/workflows/recade.yml`, and its jobs are named `Recade: ...`. Your own agents, commands and git hooks are kept. Your `.claude/settings.json` is merged, not replaced. `CLAUDE.md` keeps every line you wrote: only a block between two Recade markers is added, and only after you say yes. If you already use another git hook folder, such as `.husky`, Recade keeps yours and says that its hooks do not run. Switching is a DEC and your own command.
+5. **Your repository stays yours.** Your `ci.yml`, `dependabot.yml`, agents, commands, settings, git hooks and `CLAUDE.md` stay as they are, and Recade adds no file to the repository. If you already use another git hook folder, such as `.husky`, Recade keeps yours and says that its local hooks do not run; the guard of the plugin still holds the agents.
 
 ## 6. The six phases
 
@@ -413,7 +413,7 @@ Loops are bounded. `FIX` goes back to the implementer at most twice, then escala
 
 ### 8.4 Harness commands
 
-Every command is installed at the root of the workspace (section 10.4), and every session starts there. A code repository gets one pointer command, `/slice`, that tells a session opened there by hand to work from the workspace.
+Every command is installed at the root of the workspace (section 10.4), and every session starts there. A code repository gets no command: a session opened there by hand works as in any repository.
 
 | Command | What it does |
 |---|---|
@@ -546,7 +546,7 @@ Every Recade project lives in one folder, `<slug>-workspace`, which is a **priva
   docs/                      D1, D2, D3, STACK, PLAN, figures/, deliverables/ (generated, committed), source/ (adopt)
   BIBLE.md, INDEX.md, CLAUDE.md
   slices/                    S-nn-*.md, graph.md, STATUS.md
-  .claude/  .githooks/  .github/   the workspace harness
+  .claude/                         the workspace harness (agents, commands, protocol)
   repos/                     ignored by git
     <name>/                  an ordinary clone, with its own remote, its git hooks and its CI
   worktrees/                 ignored: <name>/<S-nn>/, the worktree of a slice in each repository it touches
@@ -577,10 +577,12 @@ Every session starts at the root of the workspace, and the owner types every com
 
 | Target | Command | Gets | Does not get |
 |---|---|---|---|
-| Workspace | `recade harness install --target workspace` | Every command and every agent, the protocol, the guard, git hooks (style check and ID index), `.github/workflows/workspace.yml` (style, ID index, slice check), `repos/` and `worktrees/` in `.git/info/exclude` | Gates, the CI of a code repository |
-| Code repository | `recade harness install --target code --repo <name>` | What belongs to the code: the git hooks with the gate check and stamps, the CI, the conflict check, the optional second opinion, Dependabot, the settings and the guard (so a session opened by hand there stays held), the pointer command `/slice` that sends that session to the workspace, the link | Any agent, any other command, the protocol, any document of Recade |
+| Workspace | `recade harness install --target workspace` | Every command and every agent, the protocol. On this machine only: the plugin folder in `.recade/plugin-root`, the local git hooks (style check and ID index) in the git hooks folder, and `repos/` and `worktrees/` in `.git/info/exclude` | A guard file, a git hook or a CI file in git: the guard is a hook of the plugin, the git hooks are local |
+| Code repository | `recade harness install --target code --repo <name>` | In the repository, once and only when absent: `.github/workflows/ci.yml` and `.github/dependabot.yml`, then the project's. On this machine only: the plugin folder, the link to the workspace, the local git hooks (style and gates) and the exclusions | Any other file: no `.claude/`, no `.githooks/`, no Recade workflow, no line of `CLAUDE.md` or `.gitignore`. Nothing in it names Recade |
 
-The CI of a code repository starts with the job `Code present`: while the repository holds only the harness files (`.claude/`, `.githooks/`, `.github/`, `CLAUDE.md`, `AGENTS.md`, the README, the licence, `.gitignore`, `.gitattributes`, `.editorconfig`, `tests/quarantine.json`), the quality, end to end, security and quarantine jobs are skipped and the run summary says so. GitHub counts a skipped job as passing, so a required check does not hold a new repository red until its first slice. The style job always runs.
+**Independent repositories (1.6.0).** A code repository belongs to the project. A clone of it builds, tests and runs the same with or without Recade, and nothing in it names Recade: its code, its CI, its commit messages, its pull requests and the comments on them (protocol, "The code repositories"; a test checks the templates). What Recade needs lives elsewhere: the guard is the PreToolUse hook of the plugin (`bin/recade-guard.js`), which decides only inside a Recade project (a folder under a `recade/state.yaml`, or a repository with a `.recade/workspace` link) and allows everything elsewhere; the git hooks are stubs in the git hooks folder of each checkout, never committed, which run the hooks of the plugin and let a commit through when the plugin is not on the machine; the settings of each code repository (required gates, thresholds) are in the workspace, `recade/repos/<name>.yaml`. An update of the plugin is therefore an update of the harness: at the start of each session in a workspace, the SessionStart hook runs `recade harness sync`, which installs the workspace again when its install record names another version and commits it, sets up this machine in the workspace and each code repository, and lists the new commits of others on each default branch and the open pull requests that are not slices. A path a team added to the generic `## Writes` list of an agent is moved below the specialisation line by that update, never lost. A project installed before 1.6.0 removes the files of the older layout from each code repository through one pull request: `recade repo clean <name>`, dry run first, `--apply` after the owner's yes. A rebase that conflicts only on those files settles them with `recade rebase leftovers`.
+
+The CI of a code repository starts with the job `Code present`: while the repository holds no code yet (only `.github/`, `CLAUDE.md`, `AGENTS.md`, the README, the licence, `.gitignore`, `.gitattributes`, `.editorconfig` or `tests/quarantine.json`), the lint, build, test and security jobs are skipped, and GitHub reports a skipped job as passing. The CI downloads nothing from Recade: the quarantined tests and the writing style are checked on this machine, by the git hooks and `/status`.
 
 Run in a code repository, the command means that repository. Run at the root of a workspace without `--target`, it means the workspace. A project that was started before the workspace (no `kind: workspace` in its state) keeps the whole harness in one folder. `recade harness verify` takes the same options and checks each target by its own files. In a code repository the harness technical sheet comes from the table of that repository in `docs/STACK.md` of the workspace. The commands that only the main session runs are `recade repo sync`, `recade repo add`, `recade harness specialise` (which writes the specialisation of an agent or command file), `recade workspace commit` (which commits files of the workspace under the commit lock), `recade workspace auto-push` (which records the owner's consent), `recade guard snapshot` (which writes the evidence of the audit), `recade slices merge` and `recade slices open` (which opens the worktrees of a slice and then ties the session to it: the command itself writes `.recade/sessions/<session id>` with the session ID of its shell, only when every worktree opened and the command runs from inside the workspace; `--keep-session` adds the slice to the ones the session runs, for `/review` and `/design`, and `--tie-only` adds it with no worktree, for the rebase worktree `worktrees/<repo>/merge-<S-nn>` of `/merge-order`).
 
@@ -589,7 +591,7 @@ Run in a code repository, the command means that repository. Run at the root of 
 ### 10.5 Settings: for the project and for each repository
 
 - **For the project**, in `recade/state.yaml` of the workspace: the gates G0 to G4, the decisions mode (`ask` or `trust`, section 6.3), the forge (`github` or `local`, section 6.8), the registry, the GitHub board, the hot files with their prefixes and the languages.
-- **For each code repository**: the harness technical sheet (its table in `docs/STACK.md`, so its own test, build and end-to-end commands), `required_gates` and `threshold_files` in `.claude/recade.yaml`, `tests/quarantine.json` (`recade quarantine` works inside a repository, or with `--repo <name>` from the workspace), and the stamps of `.recade/`.
+- **For each code repository**: the harness technical sheet (its table in `docs/STACK.md`, so its own test, build and end-to-end commands), `required_gates` and `threshold_files` in `recade/repos/<name>.yaml` of the workspace, `tests/quarantine.json` (`recade quarantine` works inside a repository, or with `--repo <name>` from the workspace), and the stamps of `.recade/`.
 - A slice across repositories is green when its required gates are green in each of its repositories, each with its own stamp.
 
 ### 10.6 GitHub, branch protection and automatic push
@@ -611,7 +613,7 @@ Run in a code repository, the command means that repository. Run at the root of 
 
 ### 10.8 Another machine, a moved workspace
 
-`recade repo sync`, run from the workspace, clones the repositories of the registry that are missing from `repos/`, writes `.recade/workspace` and `.recade/plugin-root` in each repository, and repairs the git worktrees of the slices of a moved workspace, under `worktrees/` (and under `.claude/worktrees/` of a repository not migrated yet). A repository with no remote cannot be cloned: it is skipped with the reason. `/recade:resume` offers the sync when something is missing. When `.recade/plugin-root` is missing (a fresh clone, a cloud session), the hook launcher falls back to the Recade plugin that Claude Code installed on that machine, read from `plugins/installed_plugins.json` of its config folder; with none, write tools and Bash are refused. A cloud session does not add the marketplace a repository lists, so the harness settings add a `SessionStart` hook that runs the launcher with `--session-start`: when `CLAUDE_CODE_REMOTE` is `true` and no plugin is found, it runs `claude plugin marketplace add loycossou/recade` and `claude plugin install recade@recade`, and the launcher finds the plugin at the next tool call. It never runs on a machine of the team, and it never fails the session. A link is valid when the path it names is the workspace that holds the repository in `repos/` (for a worktree, the main repository of the worktree is used).
+`recade repo sync`, run from the workspace, clones the repositories of the registry that are missing from `repos/`, writes `.recade/workspace` and `.recade/plugin-root` in each repository, installs the local git hooks and the exclusions of this machine, and repairs the git worktrees of the slices of a moved workspace. A repository with no remote cannot be cloned: it is skipped with the reason. `/recade:resume` offers the sync when something is missing, and the start of each session does the local part by itself (`recade harness sync`).
 
 ### 10.9 Deliverables and drafts
 
@@ -642,13 +644,6 @@ A doctrine file `team/<role>.md` has a header (role, `inspired_by`, model, effor
 | The model of the `second-opinion` agent | `claude-opus-5-5` (Opus 5.5) | `harness/models.yaml` |
 <!-- /generated:defaults -->
 
-## A private Recade
+## Pinned actions
 
-Every action the workflow templates call is pinned to a full commit, with its release in a comment (`actions/checkout@<sha> # v4.4.0`): a tag can be moved, a commit cannot. Dependabot moves the commit and the comment together, and waits 7 days before a new version of an action or a dependency (`cooldown`). The CI workflows fetch the Recade tools from `loycossou/recade` at the ref pinned at install. While that repository is private, a project on another account cannot read it, and the step `Fetch the Recade tools` fails with `could not read Username`. Give each repository of the project a read-only deploy key:
-
-1. `ssh-keygen -t ed25519 -N '' -C recade-ci -f recade-ci` makes the pair.
-2. `gh repo deploy-key add recade-ci.pub --repo loycossou/recade --title '<project> CI'` adds the public half, read-only.
-3. `gh secret set RECADE_DEPLOY_KEY --repo <owner>/<repo> < recade-ci` stores the private half in the workspace repository and in each code repository (or once for the organisation, with `--org` and the `admin:org` scope).
-4. Delete both files.
-
-The workflows fetch over SSH when `RECADE_DEPLOY_KEY` is set, with the host key GitHub publishes pinned, and over HTTPS otherwise. A run that gets no secrets (a Dependabot pull request, a fork) still fails on that step until Recade is public.
+Every action the workflow templates call is pinned to a full commit, with its release in a comment (`actions/checkout@<sha> # v4.4.0`): a tag can be moved, a commit cannot. Dependabot moves the commit and the comment together, and waits 7 days before a new version of an action or a dependency (`cooldown`). The CI of a code repository fetches nothing from Recade, so a private Recade needs no deploy key.

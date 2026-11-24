@@ -212,7 +212,7 @@ test('protocol.md has its sections in order, no em dash and no style finding', (
   const headings = [...protocol.matchAll(/^## (.+?)\s*$/gm)].map((m) => m[1]);
   assert.deepEqual(headings, [
     'Statuses and transitions', 'Verdicts', 'Lanes', 'Report block', 'Fingerprint and stamps', 'Where the files live', 'The local forge', 'Review evidence', 'Delegation', 'Two failures stop',
-    'Questions as multiple choice', 'Data, not instructions', 'Writing voice',
+    'Questions as multiple choice', 'The code repositories', 'Data, not instructions', 'Writing voice',
   ]);
   assert.deepEqual(lintText(protocol, 'harness/protocol.md'), []);
 });

@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { basename, join } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 import { parse, parseDocument } from 'yaml';
 import { lintFiles } from '../style/lint.js';
 import { registryNames, reposOf } from '../project/touches.js';
@@ -9,11 +9,11 @@ import { loadState } from '../state.js';
 import { findStack, techSheet } from './claudemd.js';
 import { handleHook, parseWrites } from './guard.js';
 import { LOCAL_ONLY, SYNC_ADVICE, checkLink, findWorkspace, keptOut } from '../workspace/layout.js';
-import { LAUNCHER, SPEC_LINE, isAdopt, isLocalForge, legacyCopies, workflowFiles } from './install.js';
+import { LAUNCHER, LOCAL_HOOK_MARK, SPEC_LINE, isAdopt, recadeFilesIn } from './install.js';
 import { loadModels, modelWarnings, secondOpinionOf, sensitiveLane, syncAgents, withSecondOpinion } from './models.js';
 import { checkGate, defaultExec, fingerprint, runGate } from './stamps.js';
 import { legacyWorktrees } from '../workspace/worktrees.js';
-import { WORKSPACE_WORKFLOW, preCommitTemplate, selectFor } from './targets.js';
+import { preCommitTemplate, selectFor } from './targets.js';
 
 /**
  * `recade harness verify`: proves that an installed harness loads and that its guards stop what they must.
@@ -28,7 +28,6 @@ import { WORKSPACE_WORKFLOW, preCommitTemplate, selectFor } from './targets.js';
 
 const EM_DASH = '\u2014';
 const NOT_APPLICABLE = /^(?:none|n\/a|not applicable)\b/i;
-const REF_PINNED = /^(?:[0-9a-f]{40}|v\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)$/;
 
 const read = (file) => readFileSync(file, 'utf8');
 const mdFiles = (dir) => (existsSync(dir) ? readdirSync(dir).filter((f) => f.endsWith('.md')).sort() : []);
@@ -60,12 +59,10 @@ const DENY_EXIT = JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreTool
  * Run the hook command of the settings the way Claude Code does: in the project folder, with CLAUDE_PROJECT_DIR and the
  * environment of the settings, and no RECADE_PLUGIN_ROOT of this shell. An exit code 2 blocks the call, as a deny.
  */
-function spawnHook(root, settings, event) {
-  const command = settings?.hooks?.PreToolUse?.flatMap((e) => e.hooks ?? []).map((h) => h.command).find((c) => typeof c === 'string' && c.includes('guard.mjs'));
-  if (command === undefined) return null;
-  const env = { ...process.env, CLAUDE_PROJECT_DIR: root, ...(settings.env ?? {}) };
-  if (settings.env?.RECADE_PLUGIN_ROOT === undefined) delete env.RECADE_PLUGIN_ROOT;
-  const r = spawnSync('sh', ['-c', command], { cwd: root, input: JSON.stringify(event), encoding: 'utf8', timeout: 30000, env });
+function spawnHook(root, pluginRoot, event) {
+  const env = { ...process.env, CLAUDE_PROJECT_DIR: root };
+  delete env.RECADE_PLUGIN_ROOT;
+  const r = spawnSync(process.execPath, [join(pluginRoot, 'bin', 'recade-guard.js')], { cwd: root, input: JSON.stringify(event), encoding: 'utf8', timeout: 30000, env });
   return r.status === 2 ? DENY_EXIT : (r.stdout ?? '');
 }
 
@@ -101,17 +98,18 @@ export async function verify(root, { pluginRoot, target, runHook, only } = {}) {
   // A code repository is adopted when its workspace is; the workspace is Recade's own.
   const workspaceDir = target === 'code' ? findWorkspace(root)?.dir ?? null : null;
   const adopt = target === 'workspace' ? false : isAdopt(workspaceDir ?? root);
-  const wf = workflowFiles(adopt);
-  const local = isLocalForge(workspaceDir ?? root);
   const forWorkspace = target === 'workspace';
   const stem = (f) => f.replace(/\.md$/, '');
 
+  // The settings of the project are optional now: the guard is a hook of the plugin. They are read for what may switch it off.
   let settings = null;
   let settingsError = null;
-  try {
-    settings = JSON.parse(read(join(claude, 'settings.json')));
-  } catch (err) {
-    settingsError = `.claude/settings.json does not parse: ${err.message}`;
+  if (existsSync(join(claude, 'settings.json'))) {
+    try {
+      settings = JSON.parse(read(join(claude, 'settings.json')));
+    } catch (err) {
+      settingsError = `.claude/settings.json does not parse: ${err.message}`;
+    }
   }
   // A code repository holds no agent: the guard reads the agents of the plugin there.
   const writesDir = target === 'code' ? join(harness, 'agents') : agentsDir;
@@ -123,26 +121,23 @@ export async function verify(root, { pluginRoot, target, runHook, only } = {}) {
     const chosen = selectFor(target, { agents: mdFiles(join(harness, 'agents')).map(stem), commands: mdFiles(join(harness, 'commands')).map(stem) });
     const wantAgents = chosen.agents.map((a) => `${a}.md`);
     const wantCommands = chosen.commands.map((c) => `${c}.md`);
-    const wantPointers = chosen.pointers.map((c) => `${c}.md`);
     for (const f of wantAgents) if (!existsSync(join(agentsDir, f))) add('error', 'layout', `.claude/agents/${f} is missing. Run: recade harness install`);
-    for (const f of [...wantCommands, ...wantPointers]) if (!existsSync(join(commandsDir, f))) add('error', 'layout', `.claude/commands/${f} is missing. Run: recade harness install`);
-    // On the local forge the GitHub-only workflows and dependabot.yml are not installed (install.js, GITHUB_ONLY).
-    const ci = forWorkspace ? [WORKSPACE_WORKFLOW] : (local ? [wf.ci] : [wf.ci, wf.conflicts, ...(adopt ? [] : ['.github/dependabot.yml'])]);
-    for (const f of [...(chosen.protocol ? ['.claude/protocol.md'] : []), '.claude/settings.json', LAUNCHER, '.githooks/pre-commit', '.githooks/commit-msg', '.recade/plugin-root', ...ci]) {
+    for (const f of wantCommands) if (!existsSync(join(commandsDir, f))) add('error', 'layout', `.claude/commands/${f} is missing. Run: recade harness install`);
+    for (const f of [...(chosen.protocol ? ['.claude/protocol.md'] : []), '.recade/plugin-root']) {
       if (!existsSync(join(root, f))) add('error', 'layout', `${f} is missing. Run: recade harness install`);
     }
     if (target === 'code') {
       const link = checkLink(root);
       if (!link.ok) add('error', 'layout', `The link of this repository to its workspace is not good: ${link.reason}. Run: ${SYNC_ADVICE}`);
-      const old = legacyCopies(root);
-      if (old.length > 0) add('warn', 'layout', `The harness of the old layout is still here (${old.length} file${old.length === 1 ? '' : 's'}, such as ${old[0]}): every command and agent now lives in the workspace. Run: recade harness migrate --dry-run, from the workspace.`);
+      const old = recadeFilesIn(root);
+      if (old.length > 0) add('warn', 'layout', `Files of an older Recade are still in this repository (${old.length} file${old.length === 1 ? '' : 's'}, such as ${old[0]}). Run: recade repo clean ${basename(root)}, which removes them through a pull request.`);
     }
     if (forWorkspace) {
       for (const entry of LOCAL_ONLY.filter((e) => !keptOut(root, e))) add('error', 'layout', `The workspace does not keep ${entry} out of git (neither .git/info/exclude nor .gitignore holds it), so the code checkouts would be committed. Run: recade harness install`);
       if (legacyWorktrees(root, { exec: defaultExec }).length > 0) add('warn', 'layout', 'Slice worktrees of the old layout are still under repos/<repo>/.claude/worktrees/. Run: recade harness migrate --dry-run');
     }
     const scan = (dir) => (existsSync(dir) ? readdirSync(dir, { recursive: true, withFileTypes: true }).filter((e) => e.isFile()).map((e) => join(e.parentPath ?? e.path, e.name)) : []);
-    for (const file of [...scan(claude), ...scan(join(root, '.githooks')), ...(adopt ? [wf.ci, wf.conflicts, wf.secondOpinion].map((f) => join(root, f)).filter((f) => existsSync(f)) : scan(join(root, '.github')))]) {
+    for (const file of [...scan(claude), ...(adopt || forWorkspace ? [] : scan(join(root, '.github')))]) {
       if (/__RECADE_[A-Z0-9_]+__/.test(read(file))) add('error', 'layout', `${file.slice(root.length + 1)} still holds a placeholder. Run: recade harness install`);
     }
   }
@@ -208,50 +203,29 @@ export async function verify(root, { pluginRoot, target, runHook, only } = {}) {
   if (want('settings')) {
     checks.push('settings');
     if (settingsError !== null) add('error', 'settings', settingsError);
-    if (settings !== null) {
-      if (settings.env?.RECADE_PLUGIN_ROOT !== undefined) add('error', 'settings', '.claude/settings.json sets env.RECADE_PLUGIN_ROOT: a folder of one machine, committed. Run: recade harness install, which moves it to .recade/plugin-root.');
-      const deny = settings.permissions?.deny ?? [];
-      const template = JSON.parse(read(join(harness, 'settings.json')));
-      for (const rule of template.permissions?.deny ?? []) if (!deny.includes(rule)) add('error', 'settings', `The deny rule ${rule} is missing.`);
-      const wanted = template.hooks?.PreToolUse?.[0]?.hooks?.[0]?.command;
-      const entries = settings.hooks?.PreToolUse ?? [];
-      const entry = entries.find((e) => (e.hooks ?? []).some((h) => String(h.command).includes(LAUNCHER)));
-      if (entry === undefined) {
-        const old = entries.some((e) => (e.hooks ?? []).some((h) => String(h.command).includes('guard.mjs')));
-        add('error', 'settings', old ? 'The guard hook runs the plugin folder directly, the old form that fails open when the folder moves. Run: recade harness install' : `No PreToolUse hook runs the guard launcher ${LAUNCHER}. Run: recade harness install`);
-      } else {
-        if (!/Bash/.test(entry.matcher ?? '') || !/Write/.test(entry.matcher ?? '') || !/Edit/.test(entry.matcher ?? '')) add('error', 'settings', 'The guard hook does not match Bash, Write and Edit.');
-        if (!(entry.hooks ?? []).some((h) => h.command === wanted)) add('error', 'settings', 'The guard hook command differs from the Recade one, which refuses the call when the launcher is missing. Run: recade harness install');
-      }
-      if (settings.disableAllHooks === true) add('error', 'settings', 'disableAllHooks is true in .claude/settings.json: no hook runs, so the guard is off.');
-    }
-    const launcher = join(root, LAUNCHER);
-    if (existsSync(launcher) && read(launcher) !== read(join(harness, 'hooks', 'launcher.mjs'))) add('error', 'settings', `${LAUNCHER} differs from the Recade launcher. Run: recade harness install (--force to replace it).`);
-    const recorded = existsSync(join(root, '.recade', 'plugin-root')) ? read(join(root, '.recade', 'plugin-root')).split('\n')[0].trim() : '';
-    if (recorded !== '' && (!existsSync(join(recorded, 'harness', 'hooks', 'guard.mjs')) || !existsSync(join(recorded, 'bin', 'recade.js')))) {
-      add('error', 'settings', `.recade/plugin-root points to ${recorded}, which has no harness/hooks/guard.mjs or bin/recade.js: the guard refuses every write. Run: recade harness install`);
-    }
-    // The local settings file is not committed and wins over the shared one: it must not undo the harness.
-    const localPath = join(claude, 'settings.local.json');
-    if (existsSync(localPath)) {
-      let local = null;
+    const pluginHooks = (() => {
       try {
-        local = JSON.parse(read(localPath));
+        return JSON.parse(read(join(pluginRoot, 'hooks', 'hooks.json')));
+      } catch {
+        return null;
+      }
+    })();
+    if (!(pluginHooks?.hooks?.PreToolUse ?? []).some((e) => (e.hooks ?? []).some((h) => String(h.command).includes('recade-guard.js')))) add('error', 'settings', 'The plugin has no PreToolUse hook that runs bin/recade-guard.js, so no guard runs. Update the plugin.');
+    for (const [file, data] of [['.claude/settings.json', settings], ['.claude/settings.local.json', (() => {
+      try {
+        return existsSync(join(claude, 'settings.local.json')) ? JSON.parse(read(join(claude, 'settings.local.json'))) : null;
       } catch (err) {
         add('error', 'settings', `.claude/settings.local.json does not parse: ${err.message}`);
+        return null;
       }
-      if (local !== null && typeof local === 'object') {
-        if (local.disableAllHooks === true) add('error', 'settings', 'disableAllHooks is true in .claude/settings.local.json: no hook runs, so the guard is off.');
-        const recordedRoot = existsSync(join(root, '.recade', 'plugin-root')) ? read(join(root, '.recade', 'plugin-root')).split('\n')[0].trim() : '';
-        if (local.env?.RECADE_PLUGIN_ROOT !== undefined && local.env.RECADE_PLUGIN_ROOT !== recordedRoot) add('error', 'settings', '.claude/settings.local.json changes env.RECADE_PLUGIN_ROOT, so the commands may run another plugin folder than .recade/plugin-root.');
-        const bare = (rule) => String(rule).replace(/^Bash\(/, '').replace(/\)$/, '').replace(/:?\*$/, '').trim();
-        const denyRules = [...(settings?.permissions?.deny ?? []), ...(JSON.parse(read(join(harness, 'settings.json'))).permissions?.deny ?? [])].map(bare);
-        for (const rule of [...(local.permissions?.allow ?? []), ...(local.permissions?.ask ?? [])]) {
-          const a = bare(rule);
-          if (a !== '' && denyRules.some((d) => d !== '' && (d.startsWith(a) || new RegExp(`^${d.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replaceAll('*', '.*')}`).test(a)))) add('error', 'settings', `.claude/settings.local.json allows ${rule}, which the deny list refuses.`);
-        }
-        if ((local.hooks?.PreToolUse ?? []).length > 0) add('warn', 'settings', '.claude/settings.local.json adds PreToolUse hooks. verify cannot tell what they allow: read them.');
-      }
+    })()]]) {
+      if (data === null || typeof data !== 'object') continue;
+      if (data.disableAllHooks === true) add('error', 'settings', `disableAllHooks is true in ${file}: no hook runs, so the guard is off.`);
+      if ((data.hooks?.PreToolUse ?? []).some((e) => (e.hooks ?? []).some((h) => String(h.command).includes(LAUNCHER)))) add('warn', 'settings', `${file} still runs the guard launcher of an older Recade. Run: recade harness install, which takes it out.`);
+    }
+    const recorded = existsSync(join(root, '.recade', 'plugin-root')) ? read(join(root, '.recade', 'plugin-root')).split('\n')[0].trim() : '';
+    if (recorded !== '' && (!existsSync(join(recorded, 'harness', 'githooks', 'local')) || !existsSync(join(recorded, 'bin', 'recade.js')))) {
+      add('error', 'settings', `.recade/plugin-root points to ${recorded}, which is not a Recade plugin folder of this version: the git hooks do nothing. Run: recade repo sync`);
     }
   }
 
@@ -259,14 +233,20 @@ export async function verify(root, { pluginRoot, target, runHook, only } = {}) {
   if (want('git')) {
     checks.push('git');
     const hooksPath = spawnSync('git', ['config', '--get', 'core.hooksPath'], { cwd: root, encoding: 'utf8' });
-    if (hooksPath.status !== 0 || hooksPath.stdout.trim() !== '.githooks') add('error', 'git', 'core.hooksPath is not .githooks, so the git hooks do not run. Run: recade harness install');
+    if (hooksPath.status === 0 && hooksPath.stdout.trim() !== '') add('error', 'git', `core.hooksPath is ${hooksPath.stdout.trim()}, so the local git hooks of Recade do not run. Run: git config --unset core.hooksPath, then recade repo sync`);
+    const gitPath = spawnSync('git', ['rev-parse', '--git-path', 'hooks'], { cwd: root, encoding: 'utf8' });
+    const dir = gitPath.status === 0 ? resolve(root, gitPath.stdout.trim()) : null;
+    const stub = read(join(harness, 'githooks', 'local'));
     for (const name of ['pre-commit', 'commit-msg']) {
-      const file = join(root, '.githooks', name);
-      if (!existsSync(file)) continue;
+      const file = dir === null ? null : join(dir, name);
+      if (file === null || !existsSync(file)) {
+        add('error', 'git', `The local git hook ${name} is missing. Run: recade repo sync`);
+        continue;
+      }
       // Git skips a hook that is not executable, without a word.
-      if ((statSync(file).mode & 0o111) === 0) add('error', 'git', `.githooks/${name} is not executable, so git skips it. Run: chmod +x .githooks/${name}, or install again.`);
-      const expected = read(join(harness, 'githooks', name === 'pre-commit' ? preCommitTemplate(target) : name));
-      if (read(file) !== expected) add('error', 'git', `.githooks/${name} differs from the Recade hook. Run: recade harness install (--force to replace it).`);
+      if ((statSync(file).mode & 0o111) === 0) add('error', 'git', `The local git hook ${name} is not executable, so git skips it. Run: recade repo sync`);
+      const expected = stub.replaceAll('__HOOK__', name).replaceAll('__TEMPLATE__', name === 'pre-commit' ? preCommitTemplate(target) : name);
+      if (read(file) !== expected) add(read(file).includes(LOCAL_HOOK_MARK) ? 'error' : 'warn', 'git', read(file).includes(LOCAL_HOOK_MARK) ? `The local git hook ${name} differs from the Recade one. Run: recade repo sync` : `The git hook ${name} is your own, so the Recade ${name} does not run.`);
     }
   }
 
@@ -280,7 +260,7 @@ export async function verify(root, { pluginRoot, target, runHook, only } = {}) {
       if (runHook !== undefined) return runHook(event);
       if (!wired) {
         wired = true;
-        return settings === null ? null : spawnHook(root, settings, event);
+        return spawnHook(root, pluginRoot, event);
       }
       return handleHook(JSON.stringify(event), { cwd: root, pluginRoot });
     };
@@ -311,8 +291,8 @@ export async function verify(root, { pluginRoot, target, runHook, only } = {}) {
   if (want('pre-commit') || want('stamps')) {
     if (want('pre-commit')) checks.push('pre-commit');
     if (want('stamps')) checks.push('stamps');
-    const preCommit = join(root, '.githooks', 'pre-commit');
-    const commitMsg = join(root, '.githooks', 'commit-msg');
+    const preCommit = join(harness, 'githooks', preCommitTemplate(target));
+    const commitMsg = join(harness, 'githooks', 'commit-msg');
     const scratch = mkdtempSync(join(tmpdir(), 'recade-verify-'));
     try {
       gitIn(scratch, ['init', '-q', '-b', 'main']);
@@ -373,21 +353,13 @@ export async function verify(root, { pluginRoot, target, runHook, only } = {}) {
   /* ci */
   if (want('ci')) {
     checks.push('ci');
-    const files = forWorkspace ? [WORKSPACE_WORKFLOW] : [wf.ci, wf.conflicts, wf.secondOpinion, ...(adopt ? [] : ['.github/dependabot.yml'])];
+    const files = forWorkspace || adopt ? [] : ['.github/workflows/ci.yml', '.github/dependabot.yml'];
     for (const f of files) {
       const path = join(root, f);
       if (!existsSync(path)) continue;
       const doc = parseDocument(read(path));
       if (doc.errors.length > 0) add('error', 'ci', `${f} is not valid YAML: ${doc.errors[0].message}`);
-    }
-    for (const f of forWorkspace ? [WORKSPACE_WORKFLOW] : [wf.ci, wf.conflicts]) {
-      const path = join(root, f);
-      if (!existsSync(path)) continue;
-      const text = read(path);
-      const ref = /^\s*RECADE_REF:\s*(\S+)/m.exec(text)?.[1];
-      if (ref === undefined) add('error', 'ci', `${f} has no RECADE_REF.`);
-      else if (!REF_PINNED.test(ref)) add('error', 'ci', `${f} fetches the Recade tools at ${ref}. Pin a tag such as v1.2.3 or a commit.`);
-      for (const m of text.matchAll(/The row (.+?) of the harness technical sheet is not filled/g)) add('error', 'ci', `${f}: the row ${m[1]} of the harness technical sheet is not filled, so CI fails on it. Fill the sheet of the STACK (${target === 'code' ? 'the stack document of the workspace' : findStack(root)?.file ?? 'docs/STACK.md'}) and install again.`);
+      for (const m of read(path).matchAll(/No command is set for (.+?) yet/g)) add('warn', 'ci', `${f}: no command is set for ${m[1]}, so CI fails on it. Write the command in ${f}.`);
     }
     // The sheet and the slices are in the workspace for a code repository: its own table of the sheet, and the sensitive
     // slices that touch it.

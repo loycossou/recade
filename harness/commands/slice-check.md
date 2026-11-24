@@ -54,7 +54,7 @@ This command implements nothing and changes no status.
 
 ## Step 4. Refresh CLAUDE.md
 
-1. Run `recade claude-md refresh --target workspace`, then, for each code repository of the slice (the prefixes of its `touches:`, or the only repository of the registry), `recade claude-md refresh --target code --repo '<repo>'`. Each reads its folder and the tech sheet of `STACK.md` in the workspace (the path named in CLAUDE.md) (the table `### <repo>` for a code repository), keeps the rules written by hand, and prints the diff without writing. Show them one after the other.
+1. Run `recade claude-md refresh --target workspace`. It reads the workspace and the tech sheet of `STACK.md` (the path named in CLAUDE.md), and keeps the rules written by hand. The `CLAUDE.md` of a code repository is the project's own: Recade does not refresh it.
 2. If it says `CLAUDE.md is up to date.`, say so and go to Step 5. If it reports TODO lines for a value the tech sheet lacks, say which value and that the sheet must be filled.
 3. Show the diff to the owner. A rule written by hand is never removed without the owner's agreement: if the diff removes one, say so.
 4. Ask with `AskUserQuestion`, in `languages.chat`: "Write CLAUDE.md with this diff?" Options: `Yes, write it` and `No, leave it`. Default: `No, leave it`.

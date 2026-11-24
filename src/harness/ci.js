@@ -58,7 +58,7 @@ function commandFor(item, sheet, missing, stackName) {
   const value = sheet.get(item.toLowerCase());
   if (value === undefined) {
     missing.push(item);
-    return `echo "The row ${item} of the harness technical sheet is not filled. Fill it in ${stackName}, then install the harness again." >&2 && exit 1`;
+    return `echo "No command is set for ${item} yet. Write it in this step of the workflow, or replace this line with an echo when it does not apply." >&2 && exit 1`;
   }
   if (NOT_APPLICABLE.test(value)) return `echo "${item}: not applicable for this project."`;
   if (/\$\{\{/.test(value)) throw new Error(`The row ${item} holds a GitHub expression. Use a plain command: expressions are not allowed in a sheet value.`);
@@ -108,7 +108,7 @@ function setupLines(runtime, stackName) {
     return [
       '- name: Set up the toolchain',
       '  run: |',
-      `    echo "The row Runtime of the harness technical sheet is not filled. Fill it in ${stackName}, then install the harness again." >&2 && exit 1`,
+      `    echo "No toolchain is set yet. Replace this step with the setup action of the project." >&2 && exit 1`,
     ];
   }
   const lines = [`- uses: ${runtime.uses} # ${runtime.tag}`, '  with:', `    ${runtime.input}: "${runtime.version}"`];

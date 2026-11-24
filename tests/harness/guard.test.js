@@ -13,7 +13,7 @@ import { linkRepo } from '../../src/workspace/layout.js';
 
 const plugin = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const guardMjs = join(plugin, 'harness', 'hooks', 'guard.mjs');
-const launcherMjs = join(plugin, 'harness', 'hooks', 'launcher.mjs');
+const guardBin = join(plugin, 'bin', 'recade-guard.js');
 const EM = '\u2014';
 
 // Every git call carries its own identity: a merge needs one too, and a CI machine has none.
@@ -279,8 +279,9 @@ test('handleHook: a denial is logged to .recade/guard.log', async () => {
 
 // A config folder with no installed plugin by default, so the record of this machine never answers for a test.
 const noPlugins = mkdtempSync(join(tmpdir(), 'recade-config-'));
-const runLauncher = (cwd, input, env = {}) =>
-  spawnSync('node', [launcherMjs], { cwd, input, encoding: 'utf8', env: { ...process.env, RECADE_PLUGIN_ROOT: '', CLAUDE_PROJECT_DIR: cwd, CLAUDE_CONFIG_DIR: noPlugins, ...env } });
+/** The guard of the plugin, as its PreToolUse hook runs it: in the folder the session started in. */
+const runGuardBin = (cwd, input, env = {}) =>
+  spawnSync('node', [guardBin], { cwd, input, encoding: 'utf8', env: { ...process.env, RECADE_PLUGIN_ROOT: '', CLAUDE_PROJECT_DIR: cwd, CLAUDE_CONFIG_DIR: noPlugins, ...env } });
 
 const runMjs = (cwd, input, env = {}) =>
   spawnSync('node', [guardMjs], { cwd, input, encoding: 'utf8', env: { ...process.env, RECADE_PLUGIN_ROOT: plugin, ...env } });
@@ -415,7 +416,7 @@ test('pre-commit explains a missing plugin root', () => {
 
 /* ---------- settings ---------- */
 
-test('settings.json: deny list, PreToolUse hook to the project launcher, no plugin path', () => {
+test('settings.json is only the record of what an older install wrote: deny rules, no plugin path; the guard is a hook of the plugin', () => {
   const text = readFileSync(join(plugin, 'harness', 'settings.json'), 'utf8');
   const settings = JSON.parse(text);
   assert.ok(settings.permissions.deny.includes('Bash(gh pr merge:*)'));
@@ -423,12 +424,14 @@ test('settings.json: deny list, PreToolUse hook to the project launcher, no plug
   assert.ok(settings.permissions.deny.some((d) => d.includes('--no-verify')));
   assert.equal(settings.env, undefined, 'no environment: a plugin path would be committed');
   assert.doesNotMatch(text, /RECADE_PLUGIN_ROOT/);
-  const entry = settings.hooks.PreToolUse[0];
+  assert.equal(existsSync(join(plugin, 'harness', 'hooks', 'launcher.mjs')), false, 'no launcher is copied into a project any more');
+  const hooks = JSON.parse(readFileSync(join(plugin, 'hooks', 'hooks.json'), 'utf8')).hooks;
+  const entry = hooks.PreToolUse[0];
   assert.match(entry.matcher, /Write/);
   assert.match(entry.matcher, /Bash/);
-  assert.match(entry.hooks[0].command, /^node "\$CLAUDE_PROJECT_DIR\/\.claude\/hooks\/recade-guard\.mjs" \|\| \{ .*exit 2; \}$/);
+  assert.match(entry.matcher, /Edit/);
+  assert.equal(entry.hooks[0].command, 'node "${CLAUDE_PLUGIN_ROOT}/bin/recade-guard.js"');
   assert.ok(existsSync(guardMjs));
-  assert.ok(existsSync(launcherMjs));
 });
 
 test('the new harness files pass the style lint', () => {
@@ -668,19 +671,22 @@ test('handleHook: the shell guard for a known agent runs through the hook', asyn
   assert.equal(await hook(repo, { tool_name: 'Bash', tool_input: { command: 'echo x > src/a.js' } }), '');
 });
 
-test('hooks find the plugin root from .recade/plugin-root, also from another worktree', () => {
+test('the plugin guard decides in a Recade project and in its worktrees; the git hooks find the plugin root from .recade/plugin-root', () => {
   const repo = makeRepo();
-  mkdirSync(join(repo, '.recade'));
+  mkdirSync(join(repo, 'recade'), { recursive: true });
+  writeFileSync(join(repo, 'recade', 'state.yaml'), 'version: 1\n');
+  git(repo, 'add', 'recade/state.yaml');
+  git(repo, 'commit', '-q', '-m', 'chore: state');
   mkdirSync(join(repo, '.recade'), { recursive: true });
   writeFileSync(join(repo, '.recade', 'plugin-root'), `${plugin}\n`);
   const event = (cwd) => JSON.stringify({ cwd, tool_name: 'Bash', tool_input: { command: 'gh pr merge 1' } });
-  const a = runLauncher(repo, event(repo));
+  const a = runGuardBin(repo, event(repo));
   assert.equal(JSON.parse(a.stdout).hookSpecificOutput.permissionDecision, 'deny');
   const wt = join(mkdtempSync(join(tmpdir(), 'recade-wt-')), 'wt');
   git(repo, 'worktree', 'add', '-q', '-b', 'slice/S-01-x', wt);
-  const b = runLauncher(wt, event(wt), { CLAUDE_PROJECT_DIR: wt });
+  const b = runGuardBin(wt, event(wt));
   assert.equal(JSON.parse(b.stdout).hookSpecificOutput.permissionDecision, 'deny');
-  assert.equal(runLauncher(wt, JSON.stringify({ cwd: wt, tool_name: 'Bash', tool_input: { command: 'ls' } }), { CLAUDE_PROJECT_DIR: wt }).stdout, '');
+  assert.equal(runGuardBin(wt, JSON.stringify({ cwd: wt, tool_name: 'Bash', tool_input: { command: 'ls' } })).stdout, '');
   writeFileSync(join(wt, 'ok.md'), 'fine\n');
   git(wt, 'add', 'ok.md');
   const pc = spawnSync('sh', [join(hooksDir, 'pre-commit')], { cwd: wt, encoding: 'utf8', env: { ...process.env, RECADE_PLUGIN_ROOT: '' } });
@@ -688,6 +694,34 @@ test('hooks find the plugin root from .recade/plugin-root, also from another wor
   const none = spawnSync('sh', [join(hooksDir, 'pre-commit')], { cwd: makeRepo(), encoding: 'utf8', env: { ...process.env, RECADE_PLUGIN_ROOT: '' } });
   assert.equal(none.status, 1);
   assert.match(none.stderr, /plugin-root/);
+});
+
+test('the plugin guard does nothing outside a Recade project, even for a call it would refuse inside one', () => {
+  const plain = makeRepo();
+  for (const command of ['gh pr merge 1', 'git push origin main', 'echo x > .claude/settings.json']) {
+    const r = runGuardBin(plain, JSON.stringify({ cwd: plain, tool_name: 'Bash', tool_input: { command } }));
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(r.stdout, '', command);
+  }
+  const w = runGuardBin(plain, JSON.stringify({ cwd: plain, tool_name: 'Write', tool_input: { file_path: join(plain, '.claude', 'settings.json'), content: '{}' } }));
+  assert.equal(w.stdout, '');
+});
+
+test('the plugin guard refuses a write to .claude/settings.json inside a workspace, and fails closed there when its input is broken', () => {
+  const { ws } = makeWorkspace();
+  const write = runGuardBin(ws, JSON.stringify({ cwd: ws, tool_name: 'Write', tool_input: { file_path: join(ws, '.claude', 'settings.json'), content: '{}' } }));
+  assert.equal(JSON.parse(write.stdout).hookSpecificOutput.permissionDecision, 'deny');
+  const shell = runGuardBin(ws, JSON.stringify({ cwd: ws, tool_name: 'Bash', tool_input: { command: 'echo x > .claude/settings.json' } }));
+  assert.equal(JSON.parse(shell.stdout).hookSpecificOutput.permissionDecision, 'deny');
+  assert.equal(runGuardBin(ws, JSON.stringify({ cwd: ws, tool_name: 'Bash', tool_input: { command: 'cat .claude/settings.json' } })).stdout, '', 'a read goes through');
+  const broken = runGuardBin(ws, '{not json');
+  assert.equal(JSON.parse(broken.stdout).hookSpecificOutput.permissionDecision, 'deny');
+  assert.match(JSON.parse(broken.stdout).hookSpecificOutput.permissionDecisionReason, /Recade guard failed/);
+  // A session opened in a subfolder of the workspace is held the same way: CLAUDE_PROJECT_DIR is the folder it started in.
+  const sub = join(ws, 'docs');
+  mkdirSync(sub, { recursive: true });
+  const inner = runGuardBin(sub, JSON.stringify({ cwd: sub, tool_name: 'Bash', tool_input: { command: 'gh pr merge 1' } }));
+  assert.equal(JSON.parse(inner.stdout).hookSpecificOutput.permissionDecision, 'deny');
 });
 
 test('pre-commit refuses a file that is staged and changed again after staging', async () => {
@@ -851,47 +885,6 @@ test('handleHook: a write resolves the repository, branch and conflicts from the
   denied(await hook(home, { tool_name: 'Write', tool_input: { file_path: join(slice, '.recade', 'stamps.json'), content: '{}' } }));
 });
 
-test('the launcher fails closed when the plugin folder is unknown or stale: writes and Bash refused, reinstall allowed', () => {
-  const repo = makeRepo();
-  const ev = (tool, input) => JSON.stringify({ cwd: repo, tool_name: tool, tool_input: input });
-  const deny = (r) => {
-    assert.equal(r.status, 0, r.stderr);
-    const j = JSON.parse(r.stdout).hookSpecificOutput;
-    assert.equal(j.permissionDecision, 'deny');
-    assert.match(j.permissionDecisionReason, /\/recade:harness/);
-  };
-  for (const setup of [() => {}, () => {
-    mkdirSync(join(repo, '.recade'), { recursive: true });
-    writeFileSync(join(repo, '.recade', 'plugin-root'), `${join(repo, 'gone')}\n`);
-  }]) {
-    setup();
-    deny(runLauncher(repo, ev('Write', { file_path: join(repo, 'a.js'), content: 'x' })));
-    deny(runLauncher(repo, ev('Edit', { file_path: join(repo, 'a.js'), old_string: 'a', new_string: 'b' })));
-    deny(runLauncher(repo, ev('Bash', { command: 'ls' })));
-    deny(runLauncher(repo, ev('Bash', { command: 'node "/x/bin/recade.js" harness install; rm -rf src' })));
-    deny(runLauncher(repo, ev('Bash', { command: 'node "$(evil)/bin/recade.js" version' })));
-    deny(runLauncher(repo, '{not json'));
-    assert.equal(runLauncher(repo, ev('Read', { file_path: join(repo, 'a.js') })).stdout, '');
-    assert.equal(runLauncher(repo, ev('Grep', { pattern: 'x' })).stdout, '');
-    for (const c of [
-      `node "${plugin}/bin/recade.js" harness install --project '/home/x/app'`,
-      `node "${plugin}/bin/recade.js" version`,
-      `node "${plugin}/bin/recade.js" state show --project '/p'`,
-      `node ${plugin}/bin/recade.js harness verify --project '/p'`,
-      `npm ci --omit=dev --prefix "${plugin}"`,
-      `node "${plugin}/bin/recade.js" harness install --ref v1.2.3 --force --project '/p'`,
-      `node "${plugin}/bin/recade.js" harness verify --json --project /p`,
-      `node "${plugin}/bin/recade.js" state can-start --json`,
-      `\tnode "${plugin}/bin/recade.js"\tversion `,
-      "git -C '/p' rev-parse --show-toplevel",
-      `node "${plugin}/bin/recade.js" harness install --target workspace --project '/p'`,
-      `node "${plugin}/bin/recade.js" harness install --target code --repo api --ref v1.2.3 --project '/p'`,
-      `node "${plugin}/bin/recade.js" harness verify --target code --repo web-app --json --project /p`,
-      `node "${plugin}/bin/recade.js" harness verify --target workspace`,
-    ]) assert.equal(runLauncher(repo, ev('Bash', { command: c })).stdout, '', c);
-    for (const c of reinstallBypasses(repo)) deny(runLauncher(repo, ev('Bash', { command: c })));
-  }
-});
 
 /** Commands that look like a reinstall and would run other code. Each one must be refused while the guard is down. */
 function reinstallBypasses(repo) {
@@ -950,34 +943,7 @@ function reinstallBypasses(repo) {
   ];
 }
 
-test('the launcher fails closed when the guard of the plugin cannot load', () => {
-  const repo = makeRepo();
-  const broken = mkdtempSync(join(tmpdir(), 'recade-broken-'));
-  mkdirSync(join(broken, 'harness', 'hooks'), { recursive: true });
-  writeFileSync(join(broken, 'harness', 'hooks', 'guard.mjs'), 'export async function runGuard() { throw new Error("broken"); }\n');
-  mkdirSync(join(repo, '.recade'));
-  writeFileSync(join(repo, '.recade', 'plugin-root'), `${broken}\n`);
-  const r = runLauncher(repo, JSON.stringify({ cwd: repo, tool_name: 'Write', tool_input: { file_path: join(repo, 'a.js'), content: 'x' } }));
-  assert.equal(JSON.parse(r.stdout).hookSpecificOutput.permissionDecision, 'deny');
-  assert.match(JSON.parse(r.stdout).hookSpecificOutput.permissionDecisionReason, /broken/);
-});
 
-test('the hook command of the settings blocks with exit 2 when the launcher is missing, and runs it when present', () => {
-  const repo = makeRepo();
-  const command = JSON.parse(readFileSync(join(plugin, 'harness', 'settings.json'), 'utf8')).hooks.PreToolUse[0].hooks[0].command;
-  const sh = () => spawnSync('sh', ['-c', command], { cwd: repo, input: JSON.stringify({ cwd: repo, tool_name: 'Bash', tool_input: { command: 'gh pr merge 1' } }), encoding: 'utf8', env: { ...process.env, CLAUDE_PROJECT_DIR: repo } });
-  const missing = sh();
-  assert.equal(missing.status, 2);
-  assert.match(missing.stderr, /launcher/);
-  mkdirSync(join(repo, '.claude', 'hooks'), { recursive: true });
-  writeFileSync(join(repo, '.claude', 'hooks', 'recade-guard.mjs'), readFileSync(launcherMjs, 'utf8'));
-  mkdirSync(join(repo, '.recade'));
-  mkdirSync(join(repo, '.recade'), { recursive: true });
-  writeFileSync(join(repo, '.recade', 'plugin-root'), `${plugin}\n`);
-  const present = sh();
-  assert.equal(present.status, 0, present.stderr);
-  assert.equal(JSON.parse(present.stdout).hookSpecificOutput.permissionDecision, 'deny');
-});
 
 /* ---------- re-review: nested repositories, symlinks ---------- */
 
@@ -1062,7 +1028,7 @@ test('the shell cannot write the hook launcher from an interpreter string or an 
   for (const c of [
     'node -e "require(\\"fs\\").writeFileSync(\\".claude/hooks/recade-guard.mjs\\",\\"\\")"',
     'python3 -c \'open(".claude/hooks/recade-guard.mjs","w")\'',
-    'tee=.claude/hooks/x',
+    'tee=.claude/hooks/x; echo x > $tee',
     'node -e "require(\'fs\').rmSync(\'.claude//hooks\',{recursive:true})"',
   ]) assert.ok(checkBash(c), `should refuse: ${c}`);
 });
@@ -1098,18 +1064,18 @@ test('the shell cannot reach the stamps, the settings, the git hooks or the stat
   }
 });
 
-test('cd and pushd into the harness folders are refused', () => {
+test('cd and pushd into the harness folders are refused in a command that writes, and allowed to read', () => {
   for (const c of [
     'cd .claude && rm -rf hooks',
-    'cd .claude/hooks',
-    'pushd .recade',
+    'cd .claude/hooks && echo x > recade-guard.mjs',
+    'pushd .recade; touch stamps.json',
     'cd ./.githooks; echo > pre-commit',
     'cd recade && cp x state.yaml',
-    'cd .cl*',
-    'cd /abs/proj/.recade',
-    'cd src; cd ../.claude',
+    'cd .cl* && sed -i s/a/b/ settings.json',
+    'cd /abs/proj/.recade && mv a b',
+    'cd src; cd ../.claude; tee x < y',
   ]) assert.ok(checkBash(c), `should refuse: ${c}`);
-  for (const c of ['cd src', 'cd /home/u/projects/plugins/recade', 'cd ..', 'pushd tests']) assert.equal(checkBash(c), null, `should allow: ${c}`);
+  for (const c of ['cd src', 'cd /home/u/projects/plugins/recade', 'cd ..', 'pushd tests', 'cd .claude && ls', 'cd .claude/agents && grep -n Writes *.md']) assert.equal(checkBash(c), null, `should allow: ${c}`);
 });
 
 test('git include.path and includeIf cannot pull in a config that sets core.hooksPath', () => {
@@ -1507,16 +1473,14 @@ test('guard: a code repository whose link is missing, stale or elsewhere refuses
   assert.match(denied(await write(lone, null, join(lone, 'src', 'a.js'))), /recade repo sync/);
 });
 
-test('the launcher refuses writes in a slice worktree whose link is missing, with recade repo sync', () => {
+test('the plugin guard refuses writes in a slice worktree whose link is missing, with recade repo sync', () => {
   const { repo, wt } = makeWorkspace();
-  mkdirSync(join(repo.api, '.recade'), { recursive: true });
-  writeFileSync(join(repo.api, '.recade', 'plugin-root'), `${plugin}\n`);
   const ev = (tool, input) => JSON.stringify({ cwd: wt.api, tool_name: tool, tool_input: input });
-  const ok = runLauncher(wt.api, ev('Write', { file_path: join(wt.api, 'src', 'a.ts'), content: 'x' }));
+  const ok = runGuardBin(wt.api, ev('Write', { file_path: join(wt.api, 'src', 'a.ts'), content: 'x' }));
   assert.equal(ok.stdout, '', ok.stderr);
   rmSync(join(repo.api, '.recade', 'workspace'));
   for (const [tool, input] of [['Write', { file_path: join(wt.api, 'src', 'a.ts'), content: 'x' }], ['Bash', { command: 'ls' }]]) {
-    const r = runLauncher(wt.api, ev(tool, input));
+    const r = runGuardBin(wt.api, ev(tool, input));
     assert.equal(r.status, 0, r.stderr);
     const j = JSON.parse(r.stdout).hookSpecificOutput;
     assert.equal(j.permissionDecision, 'deny');
@@ -2007,36 +1971,6 @@ test('final A, I1: guard snapshot never overwrites an existing snapshot without 
   assert.notEqual(readFileSync(file, 'utf8'), before);
 });
 
-test('final B #2: with only the plugin root missing, the main session may resume: repo sync, repo check, config get', () => {
-  const repo = makeRepo();
-  const ev = (command, extra = {}) => JSON.stringify({ cwd: repo, tool_name: 'Bash', tool_input: { command }, ...extra });
-  const allowed = [
-    `node "${plugin}/bin/recade.js" repo sync`,
-    `node "${plugin}/bin/recade.js" repo sync --project '/p'`,
-    `node "${plugin}/bin/recade.js" repo check`,
-    `node "${plugin}/bin/recade.js" repo check --json --project /p`,
-    `node "${plugin}/bin/recade.js" repo list --json`,
-    `node "${plugin}/bin/recade.js" config get languages.chat`,
-  ];
-  for (const c of allowed) assert.equal(runLauncher(repo, ev(c)).stdout, '', c);
-  const deny = (r, c) => assert.equal(JSON.parse(r.stdout).hookSpecificOutput.permissionDecision, 'deny', c);
-  for (const c of allowed) deny(runLauncher(repo, ev(c, { agent_type: 'implementer' })), c);
-  for (const c of [
-    `node "${plugin}/bin/recade.js" repo add x --new`,
-    `node "${plugin}/bin/recade.js" repo sync --json`,
-    `node "${plugin}/bin/recade.js" config set languages.chat fr`,
-    `node "${plugin}/bin/recade.js" config get 'a b'`,
-    `node "${plugin}/bin/recade.js" config get`,
-    `node "${plugin}/bin/recade.js" repo sync; id`,
-  ]) deny(runLauncher(repo, ev(c)), c);
-  // A guard that is there but broken is not a fresh clone: only the reinstall commands pass.
-  const broken = mkdtempSync(join(tmpdir(), 'recade-broken-'));
-  mkdirSync(join(broken, 'harness', 'hooks'), { recursive: true });
-  writeFileSync(join(broken, 'harness', 'hooks', 'guard.mjs'), 'export async function runGuard() { throw new Error("broken"); }\n');
-  mkdirSync(join(repo, '.recade'), { recursive: true });
-  writeFileSync(join(repo, '.recade', 'plugin-root'), `${broken}\n`);
-  deny(runLauncher(repo, ev(allowed[0])), allowed[0]);
-});
 
 /* ---------- one entry point: every session starts at the root of the workspace ---------- */
 
@@ -2442,23 +2376,6 @@ test('guard: an agent of the plugin itself (recade:spike-runner) writes by the W
   denied(await write(ws, 'spike-runner', join(ws, 'spikes', 'pdf-typst', 'RESULT.md')));
 });
 
-test('launcher: a clone with no .recade/plugin-root finds the Recade plugin Claude Code installed, and still refuses without one', () => {
-  const repo = makeRepo();
-  rmSync(join(repo, '.recade', 'plugin-root'), { force: true });
-  const ev = (tool, input) => JSON.stringify({ cwd: repo, tool_name: tool, tool_input: input });
-  // No plugin installed: closed.
-  assert.equal(JSON.parse(runLauncher(repo, ev('Bash', { command: 'ls' })).stdout).hookSpecificOutput.permissionDecision, 'deny');
-  // The record of the installed plugins names this plugin (and an older copy that is gone): the guard runs and judges.
-  const config = mkdtempSync(join(tmpdir(), 'recade-config-'));
-  mkdirSync(join(config, 'plugins'), { recursive: true });
-  writeFileSync(join(config, 'plugins', 'installed_plugins.json'), JSON.stringify({ version: 2, plugins: {
-    'other@market': [{ installPath: join(config, 'nowhere') }],
-    'recade@recade': [{ installPath: join(config, 'gone'), lastUpdated: '2027-01-01T00:00:00Z' }, { installPath: plugin, lastUpdated: '2026-11-23T00:00:00Z' }],
-  } }));
-  const env = { CLAUDE_CONFIG_DIR: config };
-  assert.equal(runLauncher(repo, ev('Bash', { command: 'ls' }), env).stdout, '');
-  assert.equal(JSON.parse(runLauncher(repo, ev('Bash', { command: 'git push origin main' }), env).stdout).hookSpecificOutput.permissionDecision, 'deny');
-});
 
 test('root: in a session that runs a slice, an agent of the plugin writes its own workspace folders, and still nothing else', async () => {
   const { ws, wt } = makeWorkspace({ touches: ['api:src/**'] });
@@ -2474,10 +2391,19 @@ test('root: in a session that runs a slice, an agent of the plugin writes its ow
   denied(await s.write('implementer', join(ws, 'spikes', 'pdf-typst', 'RESULT.md')));
 });
 
-test('checkBash: reading .recade/plugin-root in a command that writes is refused with its own way out, a change of the harness keeps its message', async () => {
+test('checkBash: reading a harness file in a command that writes elsewhere goes through; a write to one is refused', async () => {
   const { checkBash } = await import('../../src/harness/shellscan.js');
-  for (const c of ['node "$(cat /w/.recade/plugin-root)/bin/recade.js" spikes check > /w/spikes/a/check.txt', 'R=$(head -1 /w/.recade/plugin-root) && printf x > /w/spikes/a/MANIFEST.json']) {
-    assert.match(checkBash(c), /reads \.recade\/plugin-root and writes a file in the same command/, c);
+  for (const c of [
+    'node "$(cat /w/.recade/plugin-root)/bin/recade.js" spikes check > /w/spikes/a/check.txt',
+    'R=$(head -1 /w/.recade/plugin-root) && printf x > /w/spikes/a/MANIFEST.json',
+    'sed -n 1,5p .claude/agents/devops.md',
+    'cat .claude/agents/x.md | grep y > /tmp/o',
+    'git diff -- .claude/agents/test-engineer.md',
+    'node /p/bin/recade.js harness models --check --dir /w/.claude/agents | tail -2',
+    'cat .claude/*.json',
+  ]) assert.equal(checkBash(c), null, c);
+  for (const c of ['sed -i s/a/b/ .claude/agents/x.md', 'ls .claude/agents | xargs rm', 'git checkout -- .claude/agents/x.md', 'find .claude -name x -delete', 'sed -n "1w .claude/agents/x.md" a', 'dd if=/x of=.claude/settings.json', 'chmod -x .githooks/pre-commit', 'cat x > .git/hooks/pre-commit', 'cp /tmp/x .claude/settings.json']) {
+    assert.ok(checkBash(c), `should refuse: ${c}`);
   }
   for (const c of ['cat /w/.recade/plugin-root; date > /w/.recade/x', 'R=$(cat /w/.recade/plugin-root) > /w/.recade/plugin-root', 'echo x > .claude/settings.json']) {
     assert.match(checkBash(c), /The stamps, the hooks, the settings and the project state/, c);
@@ -2485,32 +2411,3 @@ test('checkBash: reading .recade/plugin-root in a command that writes is refused
   assert.equal(checkBash('date > /w/spikes/a/.start'), null);
 });
 
-test('launcher --session-start: a cloud session with no Recade plugin installs the public one, and nothing happens elsewhere', () => {
-  const repo = makeRepo();
-  rmSync(join(repo, '.recade', 'plugin-root'), { force: true });
-  const bin = mkdtempSync(join(tmpdir(), 'recade-bin-'));
-  const calls = join(bin, 'calls');
-  // A fake claude command: it records its arguments, and its install writes the record of the installed plugins.
-  const fake = (installs) => {
-    writeFileSync(join(bin, 'claude'), `#!/bin/sh\necho "$*" >> '${calls}'\nif [ "$2" = install ]; then ${installs ? `mkdir -p "$CLAUDE_CONFIG_DIR/plugins" && printf '%s' '{"plugins":{"recade@recade":[{"installPath":"${plugin}"}]}}' > "$CLAUDE_CONFIG_DIR/plugins/installed_plugins.json"` : 'echo "network is unreachable" >&2; exit 1'}; fi\n`, { mode: 0o755 });
-  };
-  const start = (env) => {
-    rmSync(calls, { force: true });
-    const r = spawnSync('node', [launcherMjs, '--session-start'], { cwd: repo, input: '{}', encoding: 'utf8', env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, CLAUDE_PROJECT_DIR: repo, CLAUDE_CONFIG_DIR: mkdtempSync(join(tmpdir(), 'recade-config-')), ...env } });
-    assert.equal(r.status, 0, 'the session never fails');
-    return { out: r.stdout, calls: existsSync(calls) ? readFileSync(calls, 'utf8') : '' };
-  };
-  fake(true);
-  // A machine of the team: the owner installs the plugin, the hook never does.
-  assert.deepEqual(start({ CLAUDE_CODE_REMOTE: '' }), { out: '', calls: '' });
-  const cloud = start({ CLAUDE_CODE_REMOTE: 'true' });
-  assert.equal(cloud.calls, 'plugin marketplace add loycossou/recade\nplugin install recade@recade\n');
-  assert.match(cloud.out, /installed for this cloud session/);
-  fake(false);
-  const failed = start({ CLAUDE_CODE_REMOTE: 'true' });
-  assert.match(failed.out, /could not be installed in this cloud session \(network is unreachable\)/);
-  // A plugin already there: nothing to install.
-  mkdirSync(join(repo, '.recade'), { recursive: true });
-  writeFileSync(join(repo, '.recade', 'plugin-root'), `${plugin}\n`);
-  assert.deepEqual(start({ CLAUDE_CODE_REMOTE: 'true' }), { out: '', calls: '' });
-});

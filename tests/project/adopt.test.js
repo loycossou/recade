@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { LOCAL_HOOK_MARK } from '../../src/harness/install.js';
 import { createHash } from 'node:crypto';
 import {
   mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, rmSync, symlinkSync, lstatSync, utimesSync,
@@ -593,17 +594,18 @@ test('two repositories give two registry entries, two clones and two links', asy
   } finally { cleanup(api); cleanup(web); cleanup(parent); }
 });
 
-test('a code repository gets only the harness: created.json lists harness paths and no document, and docs/recade/ exists nowhere', async () => {
+test('a code repository gets nothing of Recade in its tree: created.json is empty, the local part is on this machine only, and docs/recade/ exists nowhere', async () => {
   const dir = repo(EXISTING);
   const parent = parentDir();
   try {
     const r = await initAdopt(options(parent, [{ source: dir, name: 'api' }]));
     const code = join(r.dir, 'repos', 'api');
-    const created = readCreated(code);
-    assert.ok(created.length > 5, 'the harness was installed');
-    assert.equal(created.some((f) => f.startsWith('.claude/agents/')), false, 'the agents live in the workspace');
-    for (const f of created) assert.match(f, /^(\.claude\/|\.githooks\/|\.github\/workflows\/recade[^/]*\.ya?ml$|\.github\/dependabot\.yml$|\.gitignore$|\.recade\/)/, f);
-    assert.ok(created.includes('.github/workflows/recade.yml'));
+    assert.deepEqual(readCreated(code), [], 'the install wrote no file in the tree of an adopted repository');
+    for (const f of ['.github/workflows/recade.yml', '.githooks', '.claude/hooks/recade-guard.mjs', '.claude/settings.json']) assert.equal(existsSync(join(code, f)), EXISTING[f] !== undefined, f);
+    // The local part: the plugin folder and the git hooks of this machine, out of git.
+    assert.ok(existsSync(join(code, '.recade', 'plugin-root')));
+    assert.match(readFileSync(join(code, '.git', 'hooks', 'pre-commit'), 'utf8'), new RegExp(LOCAL_HOOK_MARK));
+    assert.equal(spawnSync('git', ['-C', code, 'status', '--porcelain'], { encoding: 'utf8' }).stdout, '', 'the repository is clean after the install');
     for (const f of ['recade', 'docs/recade', 'slices', 'docs/inventory.md']) assert.equal(existsSync(join(code, f)), false, `${f} is not written in a code repository`);
     // what the owner had stays byte for byte
     assert.equal(readFileSync(join(code, 'CLAUDE.md'), 'utf8'), EXISTING['CLAUDE.md']);
@@ -828,7 +830,8 @@ test('a parent folder and a repository folder with spaces and accents work end t
     const out = await initAdopt(options(parent, [{ source: src, name: 'api' }], { name: 'Été Désk' }));
     assert.equal(out.dir, join(parent, 'ete-desk-workspace'));
     assert.deepEqual(checkLink(join(out.dir, 'repos', 'api')), { ok: true });
-    assert.ok(readCreated(join(out.dir, 'repos', 'api')).includes('.github/workflows/recade.yml'));
+    assert.deepEqual(readCreated(join(out.dir, 'repos', 'api')), []);
+    assert.match(readFileSync(join(out.dir, 'repos', 'api', '.git', 'hooks', 'pre-commit'), 'utf8'), new RegExp(LOCAL_HOOK_MARK));
   } finally { cleanup(base); cleanup(dir); }
 });
 

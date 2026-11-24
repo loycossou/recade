@@ -4,7 +4,8 @@ import { isAbsolute, join, resolve } from 'node:path';
 import { loadState, saveState } from '../state.js';
 import { frontMatterLength } from '../frontmatter-lines.js';
 import { checkSlices } from '../project/slices.js';
-import { LAUNCHER } from '../harness/install.js';
+import { INSTALL_RECORD, LOCAL_HOOK_MARK, setupLocal } from '../harness/install.js';
+import { defaultExec } from '../harness/stamps.js';
 import { checkLink, keepLocal, linkRepo } from './layout.js';
 import { LEGACY_DIR, WORKTREES_DIR } from './worktrees.js';
 
@@ -179,21 +180,18 @@ export async function addRepo(ws, name, spec, { exec, cwd = process.cwd() }) {
   return { ...entry, prefixed, prefixedHotspots };
 }
 
-/** Does `dir` hold the Recade git hooks (`.githooks/pre-commit` written by `recade harness install`)? */
-const recadeHooks = (dir) => {
+/** Is the local Recade pre-commit hook in the git hooks folder of `dir`? It is per machine, so a fresh clone never has it. */
+const localHooks = (dir) => {
+  const r = spawnSync('git', ['-C', dir, 'rev-parse', '--git-path', 'hooks'], { encoding: 'utf8' });
+  if (r.status !== 0) return false;
   try {
-    return readFileSync(join(dir, '.githooks', 'pre-commit'), 'utf8').includes('Recade harness');
+    return readFileSync(join(resolve(dir, r.stdout.trim()), 'pre-commit'), 'utf8').includes(LOCAL_HOOK_MARK);
   } catch {
     return false;
   }
 };
-/** `core.hooksPath` of `dir`, '' when it is not set. It is local git config, so a fresh clone never has it. */
-const hooksPathOf = (dir) => {
-  const r = spawnSync('git', ['-C', dir, 'config', '--get', 'core.hooksPath'], { encoding: 'utf8' });
-  return r.status === 0 ? r.stdout.trim() : '';
-};
-/** The Recade hooks are there and git does not run them (no hooksPath at all: one the owner set is the owner's). */
-const hooksOff = (dir) => recadeHooks(dir) && hooksPathOf(dir) === '';
+/** The harness is installed in the workspace and the local git hooks are not here (a fresh clone, another machine). */
+const hooksOff = (ws, dir) => existsSync(join(ws, INSTALL_RECORD)) && !localHooks(dir);
 
 /**
  * What is wrong with each registered repository, seen from the workspace.
@@ -208,7 +206,7 @@ const hooksOff = (dir) => recadeHooks(dir) && hooksPathOf(dir) === '';
  */
 export function checkRepos(ws) {
   const findings = [];
-  if (hooksOff(ws)) findings.push({ repo: 'workspace', problem: 'git hooks off' });
+  if (hooksOff(ws, ws)) findings.push({ repo: 'workspace', problem: 'git hooks off' });
   for (const entry of listRepos(ws)) {
     const repo = String(entry.name);
     if (!usableName(repo)) {
@@ -226,8 +224,7 @@ export function checkRepos(ws) {
       continue;
     }
     if (!link.ok) findings.push({ repo, problem: link.reason === 'link missing' ? 'link missing' : 'link points elsewhere' });
-    if (!existsSync(join(dir, LAUNCHER))) findings.push({ repo, problem: 'no harness' });
-    if (hooksOff(dir)) findings.push({ repo, problem: 'git hooks off' });
+    if (hooksOff(ws, dir)) findings.push({ repo, problem: 'git hooks off' });
     if (oldLayout(dir)) findings.push({ repo, problem: 'old layout' });
   }
   return { findings };
@@ -252,11 +249,16 @@ export async function syncRepos(ws, { exec, pluginRoot }) {
   const repaired = [];
   const hooked = [];
   const skipped = [];
+  // The local part of the harness on this machine: plugin folder, git hooks, exclusions. Only once the harness is installed.
   const hooksOn = async (dir, name) => {
-    if (!hooksOff(dir)) return;
-    const r = await run(exec, 'git', ['-C', dir, 'config', 'core.hooksPath', '.githooks']);
-    if (r.code === 0) hooked.push(name);
-    else skipped.push({ repo: name, reason: `core.hooksPath was not set: ${errorLine(r.stderr) || `exit ${r.code}`}` });
+    if (typeof pluginRoot !== 'string' || !isAbsolute(pluginRoot) || !existsSync(join(ws, INSTALL_RECORD))) return;
+    try {
+      const done = setupLocal(dir, { pluginRoot, target: name === 'workspace' ? 'workspace' : 'code', exec: defaultExec });
+      if (done.hooks) hooked.push(name);
+      for (const w of done.warnings) skipped.push({ repo: name, reason: w });
+    } catch (err) {
+      skipped.push({ repo: name, reason: `this machine was not set up: ${errorLine(String(err?.message ?? err))}` });
+    }
   };
   // The workspace itself: its plugin root (the guard of a fresh clone fails closed without it) and its git hooks.
   if (typeof pluginRoot === 'string' && isAbsolute(pluginRoot)) {

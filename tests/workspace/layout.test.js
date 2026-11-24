@@ -193,3 +193,17 @@ test('recade workspace auto-push on|off writes workspace.auto_push and keeps the
   assert.equal(none.code, 1);
   assert.match(none.stderr, /no workspace/);
 });
+
+test('keepLocal anchors repos/ and worktrees/ at the root, rewrites an older bare line, and leaves recade/repos/ tracked', async () => {
+  const { mkdtempSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { spawnSync } = await import('node:child_process');
+  const dir = mkdtempSync(join(tmpdir(), 'recade-anchor-'));
+  spawnSync('git', ['init', '-q', dir]);
+  writeFileSync(join(dir, '.git', 'info', 'exclude'), '# comment\nrepos/\n');
+  keepLocal(dir);
+  assert.deepEqual(readFileSync(join(dir, '.git', 'info', 'exclude'), 'utf8').split('\n').filter(Boolean), ['# comment', '/repos/', '/worktrees/']);
+  assert.equal(spawnSync('git', ['-C', dir, 'check-ignore', '-q', 'recade/repos/api.yaml']).status, 1, 'recade/repos/ is not ignored');
+  assert.equal(spawnSync('git', ['-C', dir, 'check-ignore', '-q', 'repos/api/x']).status, 0, 'repos/ is');
+  assert.ok(keptOut(dir, 'repos/') && keptOut(dir, 'worktrees/'));
+});

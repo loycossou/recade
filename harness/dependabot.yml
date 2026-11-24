@@ -1,6 +1,5 @@
-# Template filled at install: the ecosystem comes from the harness technical sheet of docs/STACK.md.
-# Dependency updates arrive as ordinary pull requests, so they pass the same CI, the same review chain
-# and the same human gate as any slice. Nothing here merges anything.
+# Dependency updates arrive as ordinary pull requests, so they pass the same CI and the same review as any other
+# change. Nothing here merges anything.
 version: 2
 updates:
   - package-ecosystem: __RECADE_ECOSYSTEM__

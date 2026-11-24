@@ -226,6 +226,9 @@ function orderPulls(root, dir, { exec, base, name, registry = [], local = false 
     scored.sort((a, b) => a.shared.files.length - b.shared.files.length || a.p.files.size - b.p.files.size || a.p.lines - b.p.lines || a.p.number - b.p.number);
     const { p, shared } = scored[0];
     const parts = [];
+    // A pull request of another contributor, not of a slice: ordered with the others by the files they share, and never
+    // marked done or closed by Recade.
+    if (p.slice === null) parts.push('not a slice');
     const deps = after.get(p.number);
     if (deps.length > 0) parts.push(`after ${deps.map((q) => `${ref(q)} (${q.slice})`).join(', ')}, which it depends on`);
     parts.push(plural(p.files.size, 'file'));

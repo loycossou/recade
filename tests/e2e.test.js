@@ -57,20 +57,26 @@ for (const mode of MODES) {
     assert.equal(state.kind, 'workspace');
     assert.deepEqual(state.repos.map((e) => e.name), r.repos, 'the registry holds the code repositories');
     // The harness is installed at two targets and verified at each: every command and every agent in the workspace, the one
-    // entry point, and the guard, the git hooks, the CI and a pointer in each code repository.
-    assert.ok(existsSync(join(r.dir, '.claude', 'commands', 'status.md')) && existsSync(join(r.dir, '.github', 'workflows', 'workspace.yml')));
+    // entry point. A code repository gets only its own CI; the guard and the git hooks live in the plugin and on this machine.
+    assert.ok(existsSync(join(r.dir, '.claude', 'commands', 'status.md')));
+    assert.equal(existsSync(join(r.dir, '.github', 'workflows', 'workspace.yml')), false, 'the workspace runs no CI');
     assert.ok(existsSync(join(r.dir, '.claude', 'commands', 'slice.md')) && existsSync(join(r.dir, '.claude', 'agents', 'reviewer.md')), '/slice and every agent are in the workspace');
     assert.equal(existsSync(join(r.dir, '.github', 'workflows', 'ci.yml')), false, 'no CI of a code repository in the workspace');
     for (const name of r.repos) {
       const repo = join(r.dir, 'repos', name);
-      assert.ok(existsSync(join(repo, '.claude', 'hooks', 'recade-guard.mjs')) && existsSync(join(repo, '.githooks', 'pre-commit')), `${name} has the guard and the git hooks`);
-      assert.match(read(repo, '.claude/commands/slice.md'), /recade-pointer/, `${name} has the pointer to the workspace, not a second /slice`);
-      assert.equal(existsSync(join(repo, '.claude', 'agents')), false, `${name} has no agent`);
-      assert.ok(existsSync(join(repo, '.github', 'workflows', mode === 'adopt' ? 'recade.yml' : 'ci.yml')), `${name} has its CI`);
-      // The GitHub-only files are left out on the local forge.
-      for (const f of ['workflows/conflicts.yml', 'workflows/second-opinion.yml', 'dependabot.yml']) {
-        if (mode !== 'adopt') assert.equal(existsSync(join(repo, '.github', f)), mode !== 'local', `${name}: ${f} ${mode === 'local' ? 'is not' : 'is'} installed`);
+      // Nothing of Recade in the repository: no .claude, no .githooks, no Recade workflow. The git hooks are local.
+      assert.equal(existsSync(join(repo, '.claude')), false, `${name} holds no .claude`);
+      assert.equal(existsSync(join(repo, '.githooks')), false, `${name} holds no .githooks`);
+      const hooks = join(repo, gitOut(repo, 'rev-parse', '--git-path', 'hooks').trim(), 'pre-commit');
+      assert.match(readFileSync(hooks, 'utf8'), /Recade local hook/, `${name} has the local git hook of this machine`);
+      for (const f of ['conflicts.yml', 'second-opinion.yml', 'recade.yml']) assert.equal(existsSync(join(repo, '.github', 'workflows', f)), false, `${name}: no ${f}`);
+      // Its own CI, written once; dependabot.yml only on GitHub. An adopted repository keeps the CI of its owner.
+      if (mode !== 'adopt') {
+        assert.ok(existsSync(join(repo, '.github', 'workflows', 'ci.yml')), `${name} has its CI`);
+        assert.equal(existsSync(join(repo, '.github', 'dependabot.yml')), mode !== 'local', `${name}: dependabot.yml ${mode === 'local' ? 'is not' : 'is'} written`);
       }
+      const tracked = gitOut(repo, 'ls-files').split('\n').filter(Boolean);
+      for (const f of tracked) assert.doesNotMatch(readFileSync(join(repo, f), 'utf8'), mode === 'adopt' ? /\bRecade harness\b/ : /recade/i, `${name}: ${f} names Recade`);
       assert.ok(existsSync(join(repo, '.recade', 'workspace')), `${name} is linked to its workspace`);
       // A new repository has no document at all; an adopted one keeps the documents its owner wrote, and none of Recade's.
       assert.equal(existsSync(join(repo, 'docs')), mode === 'adopt', `no document of Recade is copied into ${name}`);
@@ -113,13 +119,16 @@ test('every mode ends with a clean workspace of exactly the planned tree, and gi
     const tracked = gitOut(r.dir, 'ls-files').split('\n').filter(Boolean);
     const top = [...new Set(tracked.map((f) => f.split('/')[0]))].sort();
     assert.deepEqual(top.filter((x) => !TRACKED.includes(x)), [], `${mode}: only the planned folders and files are tracked`);
-    for (const x of ['recade', 'slices', 'docs', '.claude', '.githooks', 'BIBLE.md', 'CLAUDE.md']) assert.ok(top.includes(x), `${mode}: ${x} is tracked`);
+    for (const x of ['recade', 'slices', 'docs', '.claude', 'BIBLE.md', 'CLAUDE.md']) assert.ok(top.includes(x), `${mode}: ${x} is tracked`);
+    // The git hooks are local to the machine, and the workspace runs no CI: nothing of either is tracked.
+    for (const x of ['.githooks']) assert.equal(top.includes(x), false, `${mode}: ${x} is not tracked`);
+    assert.equal(tracked.includes('.github/workflows/workspace.yml'), false, `${mode}: no workspace.yml`);
     const lines = read(r.dir, '.gitignore').split('\n').map((l) => l.trim());
     for (const ignored of ['artifacts/', 'tmp/', '.recade/']) assert.ok(lines.includes(ignored), `${mode}: .gitignore holds ${ignored}`);
     // The code checkouts are kept out by .git/info/exclude, so a tool run inside one does not take it for ignored.
     const exclude = read(r.dir, '.git/info/exclude').split('\n').map((l) => l.trim());
     for (const local of ['repos/', 'worktrees/']) {
-      assert.ok(exclude.includes(local), `${mode}: .git/info/exclude holds ${local}`);
+      assert.ok(exclude.includes(`/${local}`), `${mode}: .git/info/exclude holds /${local}, anchored so recade/repos/ stays tracked`);
       assert.equal(lines.includes(local), false, `${mode}: .gitignore does not hold ${local}`);
     }
     for (const name of r.repos) {
@@ -273,12 +282,10 @@ test('adopt keeps the repository as it was: no file of the owner is edited or de
   const owners = git('rev-list', '--reverse', 'HEAD').trim().split('\n')[2]; // the last commit of the example's own history
   const changed = git('diff', '--name-status', `${owners}..HEAD`).split('\n').filter(Boolean);
   const edited = changed.filter((l) => !l.startsWith('A\t'));
-  assert.deepEqual(edited, ['M\t.gitignore'], 'only .gitignore changes in the code repository: Recade appends its own line to it, as the adopt command says');
-  const patch = git('diff', `${owners}..HEAD`, '--', '.gitignore');
-  assert.deepEqual(patch.split('\n').filter((l) => l.startsWith('-') && !l.startsWith('---')), [], 'the .gitignore of the owner only gains a line');
+  assert.deepEqual(edited, [], 'no file of the owner changes: Recade keeps its own lines in .git/info/exclude');
   assert.equal(git('show', `${owners}:.github/workflows/ci.yml`), read(dir, '.github/workflows/ci.yml'), 'ci.yml is byte for byte what the owner wrote');
   const added = changed.filter((l) => l.startsWith('A\t')).map((l) => l.slice(2));
-  assert.deepEqual(added.filter((f) => !/^(\.claude\/|\.githooks\/|\.github\/workflows\/recade[^/]*\.yml$|\.github\/dependabot\.yml$|CLAUDE\.md$|src\/s-01\.js$)/.test(f)), [], 'Recade wrote in the code repository only its harness, and the slice the run delivered');
+  assert.deepEqual(added, ['src/s-01.js'], 'Recade wrote nothing in the code repository: only the slice the run delivered is added');
   assert.equal(existsSync(join(dir, 'docs', 'recade')), false);
   assert.equal(existsSync(join(workspace, 'docs', 'recade')), false, 'docs/recade/ no longer exists');
   const gh = results.adopt.gh;
@@ -303,8 +310,7 @@ test('adopt writes the PLAN of the remaining work through the own-files policy, 
   const created = JSON.parse(read(dir, '.recade/created.json')).files.map((f) => f.path);
   assert.ok(created.includes('docs/PLAN.md'), 'docs/PLAN.md is recorded in .recade/created.json of the workspace');
   assert.ok(created.includes('docs/RULES.md') && created.includes('docs/source/INDEX.md'), 'the documents written from the code sit under docs/');
-  const record = JSON.parse(read(join(dir, 'repos', 'fernhill-desk'), '.recade/created.json')).files.map((f) => f.path);
-  assert.deepEqual(record.filter((p) => !/^(\.claude\/|\.githooks\/|\.github\/workflows\/recade[^/]*\.yml$|\.github\/dependabot\.yml$|CLAUDE\.md$|\.gitignore$)/.test(p)), [], 'the code repository record holds harness paths only');
+  assert.equal(existsSync(join(dir, 'repos', 'fernhill-desk', '.recade', 'created.json')), false, 'Recade created no file in the code repository');
   const check = spawnSync(process.execPath, [join(EXAMPLE, '..', 'bin', 'recade.js'), 'slices', 'check', '--project', dir], { encoding: 'utf8' });
   assert.equal(check.status, 0, check.stdout + check.stderr);
 });
