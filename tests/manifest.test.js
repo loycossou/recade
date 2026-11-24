@@ -13,9 +13,9 @@ const plugin = readJson('.claude-plugin/plugin.json');
 const market = readJson('.claude-plugin/marketplace.json');
 
 test('versions match across package, plugin and marketplace', () => {
-  assert.equal(pkg.version, '1.5.2');
-  assert.equal(plugin.version, '1.5.2');
-  assert.equal(market.plugins[0].version, '1.5.2');
+  assert.equal(pkg.version, '1.5.3');
+  assert.equal(plugin.version, '1.5.3');
+  assert.equal(market.plugins[0].version, '1.5.3');
 });
 
 test('plugin.json has name recade, MIT, author name and url, no email key anywhere', () => {

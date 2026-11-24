@@ -91,6 +91,8 @@ test('only the document folders of the workspace can be committed, and a bad cal
     ['--paths', 'repos/api/a.ts', '-m', 'docs: x'], ['--paths', 'tmp/a.md', '-m', 'docs: x'], ['--paths', 'artifacts/a', '-m', 'docs: x'],
     ['--paths', '../outside.md', '-m', 'docs: x'], ['--paths', '/etc/passwd', '-m', 'docs: x'], ['--paths', '-A', '-m', 'docs: x'],
     ['--paths', 'slices/S-01-one.md', '-m', 'docs: x', '--all'],
+    ['--paths', '.github/workflows/workspace.yml', '-m', 'ci: x'], ['--paths', '.github/workflows', '-m', 'ci: x'],
+    ['--paths', '.github/dependabot.yml', '-m', 'ci: x'], ['--paths', '.github/workflows/sub/a.yml', '-m', 'ci: x'],
   ]) {
     const r = await call(ws, args);
     assert.equal(r.code, 2, `${args.join(' ')}: ${r.err}`);
@@ -134,4 +136,12 @@ test('final B #6: recade help keeps a space after a long label, and names worksp
   assert.match(out, /^recade release-notes +Release notes/m);
   assert.match(out, /^recade workspace +.*\| commit --paths/m);
   for (const l of out.split('\n').filter((x) => x.startsWith('recade '))) assert.match(l, /^recade [a-z-]+ {2,}\S/, l);
+});
+
+test('a workflow file of the project under .github/workflows/ is committed like a document; workspace.yml stays Recade\'s', async () => {
+  const ws = await workspace();
+  write(ws, '.github/workflows/workspace-secrets.yml', 'name: Secrets\n');
+  const r = await call(ws, ['--paths', '.github/workflows/workspace-secrets.yml', '-m', 'ci(S-48): secret scan of the workspace']);
+  assert.equal(r.code, 0, r.err);
+  assert.deepEqual(filesOf(ws), ['.github/workflows/workspace-secrets.yml']);
 });

@@ -507,3 +507,27 @@ test('a Writes section the team adds below the specialisation line survives a re
   assert.ok(writes.includes('config/fixtures/**'), 'the team path is kept');
   assert.ok(writes.includes('tests/**'), 'the generic paths are still read');
 });
+
+test('the workspace pre-commit hook of a worktree finds the plugin folder of the main checkout', () => {
+  const root = mkdtempSync(join(tmpdir(), 'recade-wshook-'));
+  const fake = join(root, 'plugin');
+  mkdirSync(join(fake, 'bin'), { recursive: true });
+  writeFileSync(join(fake, 'bin', 'recade.js'), `require('fs').appendFileSync(${JSON.stringify(join(root, 'calls'))}, process.argv.slice(2)[0] + '\\n');\n`);
+  const main = join(root, 'ws');
+  mkdirSync(join(main, '.recade'), { recursive: true });
+  git(main, 'init', '-q', '-b', 'main');
+  writeFileSync(join(main, '.recade', 'plugin-root'), `${fake}\n`);
+  writeFileSync(join(main, '.gitignore'), '.recade/\n');
+  git(main, 'add', '.gitignore');
+  git(main, 'commit', '-q', '--no-verify', '-m', 'chore: first');
+  const tree = join(root, 'trial');
+  git(main, 'worktree', 'add', '-q', '-b', 'trial', tree);
+  writeFileSync(join(tree, 'a.md'), 'x\n');
+  git(tree, 'add', 'a.md');
+  const env = { ...process.env };
+  delete env.RECADE_PLUGIN_ROOT;
+  const r = spawnSync('sh', [new URL('../../harness/githooks/pre-commit-workspace', import.meta.url).pathname], { cwd: tree, encoding: 'utf8', env });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(readFileSync(join(root, 'calls'), 'utf8').trim().split('\n'), ['lint-style', 'index']);
+  rmSync(root, { recursive: true, force: true });
+});

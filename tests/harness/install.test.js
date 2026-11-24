@@ -223,7 +223,7 @@ test('re-install keeps everything below the specialisation line byte for byte, u
   assert.notEqual(read(root, '.claude/agents/reviewer.md'), before['.claude/agents/reviewer.md']);
   const reviewerDiff = r.diffs.find((d) => d.file === '.claude/agents/reviewer.md').diff;
   assert.match(reviewerDiff, /^\+A new sentence of the next version\.$/m);
-  assert.match(reviewerDiff, /^-<!-- recade-harness v1\.5\.2/m);
+  assert.match(reviewerDiff, /^-<!-- recade-harness v1\.5\.3/m);
   assert.match(reviewerDiff, /^\+<!-- recade-harness v9\.9\.9/m);
   assert.equal(r.written.find((w) => w.file === '.claude/agents/reviewer.md').status, 'updated');
   // The plugin root recorded is the new one.

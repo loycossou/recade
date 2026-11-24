@@ -2781,8 +2781,12 @@ const INVENTORY_USAGE = 'Usage: recade inventory scan [--json]';
 const INTAKE_USAGE = 'Usage: recade intake scan [--json] [--project <dir>]';
 const WORKSPACE_USAGE = 'Usage: recade workspace root | auto-push on|off | push | commit --paths <path>[,<path>...] -m <message>';
 
-/** The folders and files of the workspace that `recade workspace commit` may commit: the documents, never state, harness, code or ignored folders. */
-const COMMITTABLE = /^(slices|design|decisions|retros|team|intake|docs)(\/|$)|^(BIBLE|INDEX)\.md$/;
+/**
+ * The folders and files of the workspace that `recade workspace commit` may commit: the documents, and a workflow file of
+ * the project's own under `.github/workflows/` (a CI step a slice adds). Never the state, the harness (`workspace.yml` is
+ * Recade's), code or an ignored folder.
+ */
+const COMMITTABLE = /^(slices|design|decisions|retros|team|intake|docs)(\/|$)|^(BIBLE|INDEX)\.md$|^\.github\/workflows\/(?!workspace\.ya?ml$)[\w.-]+\.ya?ml$/;
 
 /** `--paths a,b -m <message>`, or null when the arguments do not have that shape or a path is not a document of the workspace. */
 function parseWorkspaceCommit(rest) {

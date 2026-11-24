@@ -2,6 +2,14 @@
 
 This file is curated by hand for each release. At tag time, `recade release-notes <from>..<to> --version <v> --write` produces the raw list from the conventional commits, and this section is then edited from it.
 
+## 1.5.3 (2026-11-24)
+
+### Smaller fixes from a real project
+
+- `recade workspace commit` also commits a workflow file of the project's own under `.github/workflows/` of the workspace (a CI step a slice adds). `workspace.yml` stays Recade's and is refused, like the other harness files. `/slice` says so.
+- The workspace pre-commit hook finds the plugin folder of the main checkout from a worktree of the workspace, as the hook of a code repository already did. A commit in such a worktree no longer needs `RECADE_PLUGIN_ROOT`.
+- The guard's refusal of a shell command that names `.claude/agents`, `.claude/commands`, the hooks, the settings or the state now says why a mere read was refused too (the guard reads the whole command line) and to read those files with the Read tool.
+
 ## 1.5.2 (2026-11-24)
 
 ### The team's own write paths of an agent survive a re-install

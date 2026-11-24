@@ -1,11 +1,21 @@
 #!/bin/sh
 # Recade harness pre-commit for the workspace: the staged documents pass the style check and the ID index is sound.
-# The plugin folder comes from RECADE_PLUGIN_ROOT or from .recade/plugin-root (written at install).
+# The plugin folder comes from RECADE_PLUGIN_ROOT or from .recade/plugin-root (written at install), of this checkout or
+# of the main checkout of a worktree.
 set -u
 
 top=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
-if [ -z "${RECADE_PLUGIN_ROOT:-}" ] && [ -f "$top/.recade/plugin-root" ]; then
-  RECADE_PLUGIN_ROOT=$(sed -n '1p' "$top/.recade/plugin-root")
+if [ -z "${RECADE_PLUGIN_ROOT:-}" ]; then
+  # A worktree of the workspace has no .recade/ of its own: the main checkout has it, beside the common git folder.
+  common=$(git rev-parse --git-common-dir 2>/dev/null || true)
+  main=""
+  if [ -n "$common" ]; then main=$(cd "$common/.." 2>/dev/null && pwd || true); fi
+  for dir in "$top" "$main"; do
+    if [ -n "$dir" ] && [ -f "$dir/.recade/plugin-root" ]; then
+      RECADE_PLUGIN_ROOT=$(sed -n '1p' "$dir/.recade/plugin-root")
+      break
+    fi
+  done
 fi
 if [ -z "${RECADE_PLUGIN_ROOT:-}" ] || [ ! -f "$RECADE_PLUGIN_ROOT/bin/recade.js" ]; then
   echo "recade pre-commit: RECADE_PLUGIN_ROOT is not set and .recade/plugin-root does not point at a plugin folder with bin/recade.js. Fix it, then commit again." >&2

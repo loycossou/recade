@@ -633,13 +633,13 @@ export function checkBash(command, deny = {}) {
       if (readsRoot.test(command) && !harness(command.replace(readsRoot, 'PLUGIN'))) {
         return 'This command reads .recade/plugin-root and writes a file in the same command, and the guard does not tell that read from a change of the harness. Read the plugin folder in a command of its own, then write its path itself in the next command.';
       }
-      return 'The stamps, the hooks, the settings and the project state are not changed through the shell. A human does that.';
+      return 'The stamps, the hooks, the settings and the project state are not changed through the shell. A human does that. The guard reads the whole command line, so a command that only reads these files is refused too when it also writes, redirects or runs sed, node or python: read them with the Read tool.';
     }
     if (writesGitFolder(command)) {
       return 'A file or folder named .git is not written through the shell: git would read the folder around it as another checkout. Only git itself writes there.';
     }
     if (tokenize(command).some(namesAgentFiles)) {
-      return 'The agents and the commands of the harness (.claude/agents, .claude/commands) are not changed through the shell. `recade harness install` or a human does that.';
+      return 'The agents and the commands of the harness (.claude/agents, .claude/commands) are not changed through the shell. `recade harness install` or a human does that. The guard reads the whole command line, so a command that only reads these files is refused too when it also writes, redirects or runs sed, node or python: read them with the Read tool.';
     }
   }
   return null;
