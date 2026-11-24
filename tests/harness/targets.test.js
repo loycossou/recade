@@ -342,7 +342,7 @@ test('with no --target at the root of a workspace, install, verify and claude-md
   assert.equal(verified.code, 0, verified.stdout + verified.stderr);
   const refreshed = await cli(ws.dir, ['claude-md', 'refresh']);
   assert.equal(refreshed.code, 0, refreshed.stderr);
-  assert.match(refreshed.stdout, /`repos\/<name>\/CLAUDE\.md`/, 'the workspace block points to the code repositories');
+  assert.match(refreshed.stdout, /repos\/<name>\/.*stack sheet, section 12/, 'the workspace block points to the code repositories and to the stack sheet');
   assert.doesNotMatch(refreshed.stdout, /TODO|Test: /, 'no build, test or lint command of a code repository in the workspace');
   // A second install changes nothing, still as the workspace target.
   const again = await cli(ws.dir, ['harness', 'install', '--ref', REF]);

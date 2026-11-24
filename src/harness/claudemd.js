@@ -130,7 +130,7 @@ function block(repo, stack, eol, stackFile, { target, name } = {}) {
   const missing = wanted.filter((c) => !sheet.has(c.toLowerCase()));
   const lines = [START];
   if (target === 'workspace') {
-    lines.push('## Repositories', '', 'The code lives in the code repositories under `repos/<name>/`. Their build, test and lint commands are in `repos/<name>/CLAUDE.md`.');
+    lines.push('## Repositories', '', 'The code lives in the code repositories under `repos/<name>/`. Their install, build, test and lint commands are in the stack sheet, section 12 of `docs/STACK.md`, one table for each repository.');
   } else {
     lines.push('## Commands', '');
     if (missing.length > 0) {

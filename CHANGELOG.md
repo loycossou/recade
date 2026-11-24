@@ -2,6 +2,10 @@
 
 This file is curated by hand for each release. At tag time, `recade release-notes <from>..<to> --version <v> --write` produces the raw list from the conventional commits, and this section is then edited from it.
 
+## 1.6.1 (2026-11-24)
+
+- `/parallel`, `/slice` and the `CLAUDE.md` of the workspace send to the stack sheet of the workspace for the install, build and test commands of a code repository, since Recade no longer writes the `CLAUDE.md` of a code repository.
+
 ## 1.6.0 (2026-11-24)
 
 ### A code repository is the project's, and nothing in it depends on Recade

@@ -264,7 +264,8 @@ test('refresh for the workspace: no build commands to fill, the code lives in th
   const block = generated(next);
   assert.deepEqual(missing, []);
   assert.doesNotMatch(block, /TODO/);
-  assert.match(block, /repos\/<name>\/CLAUDE\.md/);
+  assert.match(block, /stack sheet, section 12/);
+  assert.doesNotMatch(block, /repos\/<name>\/CLAUDE\.md/, 'a code repository has no CLAUDE.md from Recade');
   assert.match(block, /`BIBLE\.md`/);
   assert.match(block, /`slices\/STATUS\.md`/);
 });

@@ -60,6 +60,6 @@ Do not start any slice here, and do not change any status: `/slice` moves the st
 
 1. Open a new Claude Code session at the root of the workspace, `<home>`, one session for each slice that runs at the same time. Every session starts there: the commands, the agents and the guard are in the workspace, and there is no folder to choose.
 2. Type `/slice <S-nn>` in that session. It finds the worktrees opened here, and opens one that is missing.
-3. Install the project dependencies in each new worktree, with the install command of the `CLAUDE.md` of its repository. A worktree does not share `node_modules` or other installed folders.
+3. Install the project dependencies in each new worktree, with the `Install` row of the table of its repository in the stack sheet of the workspace (`STACK.md`, the path named in CLAUDE.md, section 12). A worktree does not share `node_modules` or other installed folders.
 
 Then say that `/board` cleans the worktrees of merged slices, in every repository, and that `/merge-order` orders the merges and rebases the others. Say it in one sentence each. Nothing more.
