@@ -2,6 +2,16 @@
 
 This file is curated by hand for each release. At tag time, `recade release-notes <from>..<to> --version <v> --write` produces the raw list from the conventional commits, and this section is then edited from it.
 
+## 1.5.2 (2026-11-24)
+
+### The team's own write paths of an agent survive a re-install
+
+- The guard reads every `## Writes` section of an agent file, not only the first. The paths a team adds go in a `## Writes` section below the specialisation line, which a re-install keeps; before, a path added to the generic list was lost at the next install, and a second section was not read. `/recade:harness` says where they go.
+
+### A Definition of Done an agent can run
+
+- The slicer writes each Definition of Done row as a command an agent can run inside the harness. A check that must be seen to fail runs on a fixture that holds the fault (the style check on a file with an em dash), never on a commit or a push that the git hooks and the guard refuse. A step only a person can do goes under `Human actions after`.
+
 ## 1.5.1 (2026-11-24)
 
 ### Tools run inside a code checkout see its files

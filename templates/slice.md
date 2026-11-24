@@ -90,7 +90,7 @@ None.
 
 ## Definition of Done
 
-<!-- At most 15 lines. Each line is a command, the number of tests it counts, what it shows, and whether it failed first. The Done column starts as [ ]. The owner ticks it ([x]) at gate-2, before the merge, for each line seen green. /board marks the slice done only when every line is ticked and the pull request is merged. -->
+<!-- At most 15 lines. Each line is a command, the number of tests it counts, what it shows, and whether it failed first. An agent must be able to run it inside the harness: a check that must be seen to fail runs on a fixture that holds the fault, never on a commit or a push the hooks refuse. The Done column starts as [ ]. The owner ticks it ([x]) at gate-2, before the merge, for each line seen green. /board marks the slice done only when every line is ticked and the pull request is merged. -->
 
 | # | Command (counts tests) | Expected | Seen red first? | Done |
 |---|---|---|---|---|

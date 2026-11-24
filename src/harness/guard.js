@@ -74,18 +74,22 @@ export function toProjectPath(root, file) {
 
 /**
  * The paths an agent file allows under `## Writes`: the single backticked item of each bullet. A section that says
- * "None" gives an empty list. Returns null when the file has no `## Writes` section.
+ * "None" gives an empty list. Returns null when the file has no `## Writes` section. Every `## Writes` section counts:
+ * the team adds its own paths in a `## Writes` section below the specialisation line, which a re-install keeps, since
+ * the generic section above it is rewritten at each install.
  * @param {string} markdown
  * @returns {string[]|null}
  */
 export function parseWrites(markdown) {
   const lines = markdown.split(/\r?\n/);
-  const start = lines.findIndex((l) => /^##\s+Writes\s*$/.test(l));
-  if (start === -1) return null;
+  const starts = lines.flatMap((l, i) => (/^##\s+Writes\s*$/.test(l) ? [i] : []));
+  if (starts.length === 0) return null;
   const globs = [];
-  for (let i = start + 1; i < lines.length && !/^##\s/.test(lines[i]); i++) {
-    const m = /^\s*[-*]\s+`([^`]+)`/.exec(lines[i]);
-    if (m) globs.push(m[1].trim());
+  for (const start of starts) {
+    for (let i = start + 1; i < lines.length && !/^##\s/.test(lines[i]); i++) {
+      const m = /^\s*[-*]\s+`([^`]+)`/.exec(lines[i]);
+      if (m && !globs.includes(m[1].trim())) globs.push(m[1].trim());
+    }
   }
   return globs;
 }

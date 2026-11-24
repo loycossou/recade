@@ -7,6 +7,7 @@ import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { run } from '../../src/cli.js';
 import { lintText } from '../../src/style/lint.js';
+import { SPEC_LINE } from '../../src/harness/install.js';
 import { checkBash, decide, handleHook, matchGlob, parseTouches, parseWrites, resolveGlobs, rootOf } from '../../src/harness/guard.js';
 import { linkRepo } from '../../src/workspace/layout.js';
 
@@ -56,6 +57,11 @@ test('matchGlob: ** crosses folders, * stays in one, a leading * matches at any 
   assert.ok(matchGlob('src/api/', 'src/api/x.js'));
   assert.ok(matchGlob('docs/suivi/S-01.md', 'docs/suivi/S-01.md'));
   assert.ok(!matchGlob('docs/suivi/S-01.md', 'docs/suivi/S-011.md'));
+});
+
+test('parseWrites reads every Writes section: the team adds its own below the specialisation line, and a re-install keeps it', () => {
+  const file = `# agent\n\n## Writes\n\n- \`tests/**\`\n\n## Rules\n\n- \`not/a/path\`\n\n${SPEC_LINE}\n\n## Writes\n\n- \`config/fixtures/**\`\n- \`tests/**\`\n`;
+  assert.deepEqual(parseWrites(file), ['tests/**', 'config/fixtures/**']);
 });
 
 test('parseWrites reads the backticked bullets, None, and a missing section', () => {

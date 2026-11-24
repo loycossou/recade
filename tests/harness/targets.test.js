@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
+import { parseWrites } from '../../src/harness/guard.js';
 import { join } from 'node:path';
 import { parseDocument } from 'yaml';
 import { InstallError, install } from '../../src/harness/install.js';
@@ -494,4 +495,15 @@ test('the pre-commit hook passes each staged path whole to the style check, a sp
   assert.match(r.stderr, /style errors in the staged files/);
   assert.deepEqual(JSON.parse(readFileSync(join(root, 'args.json'), 'utf8')), ['lint-style', 'a b.md', 'c.md']);
   rmSync(root, { recursive: true, force: true });
+});
+
+test('a Writes section the team adds below the specialisation line survives a re-install, and the guard reads it', async () => {
+  const ws = await makeWorkspace();
+  installWs(ws);
+  const file = join(ws.dir, '.claude', 'agents', 'test-engineer.md');
+  writeFileSync(file, `${readFileSync(file, 'utf8')}\n## Writes\n\n- \`config/fixtures/**\`\n`);
+  installWs(ws);
+  const writes = parseWrites(readFileSync(file, 'utf8'));
+  assert.ok(writes.includes('config/fixtures/**'), 'the team path is kept');
+  assert.ok(writes.includes('tests/**'), 'the generic paths are still read');
 });
