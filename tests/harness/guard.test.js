@@ -716,7 +716,7 @@ test('the plugin guard refuses a write to .claude/settings.json inside a workspa
   assert.equal(runGuardBin(ws, JSON.stringify({ cwd: ws, tool_name: 'Bash', tool_input: { command: 'cat .claude/settings.json' } })).stdout, '', 'a read goes through');
   const broken = runGuardBin(ws, '{not json');
   assert.equal(JSON.parse(broken.stdout).hookSpecificOutput.permissionDecision, 'deny');
-  assert.match(JSON.parse(broken.stdout).hookSpecificOutput.permissionDecisionReason, /Recade guard failed/);
+  assert.match(JSON.parse(broken.stdout).hookSpecificOutput.permissionDecisionReason, /Recade guard cannot start/);
   // A session opened in a subfolder of the workspace is held the same way: CLAUDE_PROJECT_DIR is the folder it started in.
   const sub = join(ws, 'docs');
   mkdirSync(sub, { recursive: true });

@@ -167,10 +167,10 @@ test('hooks.json runs the guard of the plugin before Write, Edit, MultiEdit, Not
   assert.deepEqual(Object.keys(hooks.hooks).sort(), ['PreToolUse', 'SessionStart', 'Stop']);
 });
 
-test('bin/recade-guard.js imports only node: builtins and src/hookscope.js before it knows it is in a Recade project', () => {
+test('bin/recade-guard.js imports only node: builtins, src/hookscope.js and src/guardrescue.js before it knows it is in a Recade project', () => {
   const src = readFileSync(join(repo, 'bin', 'recade-guard.js'), 'utf8');
   const specs = [...src.matchAll(/^import\b[^\n]*?from\s+['"]([^'"]+)['"]/gm)].map((m) => m[1]);
-  for (const spec of specs) assert.ok(spec.startsWith('node:') || spec === '../src/hookscope.js', `unexpected import ${spec}`);
+  for (const spec of specs) assert.ok(spec.startsWith('node:') || spec === '../src/hookscope.js' || spec === '../src/guardrescue.js', `unexpected import ${spec}`);
   const scope = readFileSync(join(repo, 'src', 'hookscope.js'), 'utf8');
   for (const m of scope.matchAll(/from\s+['"]([^'"]+)['"]/g)) assert.ok(m[1].startsWith('node:'), `hookscope.js imports ${m[1]}`);
 });
@@ -405,4 +405,43 @@ test('LEFTOVER names only the files an older Recade kept in a code repository', 
   const { LEFTOVER } = await import('../src/rebase.js');
   for (const f of ['.claude/settings.json', '.claude/hooks/recade-guard.mjs', '.githooks/pre-commit', '.github/workflows/conflicts.yml', '.github/workflows/second-opinion.yml', '.github/workflows/recade.yml']) assert.ok(LEFTOVER.test(f), f);
   for (const f of ['.github/workflows/ci.yml', '.github/dependabot.yml', 'CLAUDE.md', 'src/.claude/x', 'tests/a.test.js']) assert.equal(LEFTOVER.test(f), false, f);
+});
+
+test('installAllowed: only the install of the dependencies in the plugin folder, written as the commands write it', async () => {
+  const { installAllowed } = await import('../src/guardrescue.js');
+  const root = '/opt/plugins/recade';
+  for (const c of ['npm ci --omit=dev --prefix "$RECADE_PLUGIN_ROOT"', 'npm ci --omit=dev --prefix "${CLAUDE_PLUGIN_ROOT}"', `npm ci --omit=dev --prefix '${root}'`, `npm ci --omit=dev --prefix ${root}`, `npm ci --omit=dev --ignore-scripts --prefix "${root}"`]) {
+    assert.equal(installAllowed(c, root), true, c);
+  }
+  for (const c of ['npm ci --omit=dev --prefix /tmp/other', `npm ci --prefix '${root}'`, `npm ci --omit=dev --prefix '${root}'; rm -rf x`, `npm ci --omit=dev --prefix '${root}' && echo`, `npm install --prefix '${root}'`, `npm ci --omit=dev --prefix "$(pwd)"`, 'git status']) {
+    assert.equal(installAllowed(c, root), false, c);
+  }
+});
+
+test('a plugin folder with no dependencies: the guard refuses work in a workspace, names the repair, and lets that one command through', async () => {
+  const { cpSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { spawnSync } = await import('node:child_process');
+  const plugin = mkdtempSync(join(tmpdir(), 'recade-nodeps-'));
+  for (const d of ['bin', 'src']) cpSync(join(repo, d), join(plugin, d), { recursive: true });
+  cpSync(join(repo, 'package.json'), join(plugin, 'package.json'));
+  const ws = mkdtempSync(join(tmpdir(), 'recade-ws-nodeps-'));
+  mkdirSync(join(ws, 'recade'), { recursive: true });
+  writeFileSync(join(ws, 'recade', 'state.yaml'), 'version: 1\nkind: workspace\n');
+  spawnSync('git', ['init', '-q', ws]);
+  const guard = (command) => {
+    const r = spawnSync(process.execPath, [join(plugin, 'bin', 'recade-guard.js')], { cwd: ws, encoding: 'utf8', input: JSON.stringify({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command }, cwd: ws, session_id: 'x' }), env: { ...process.env, CLAUDE_PROJECT_DIR: ws, NODE_PATH: '' } });
+    return r.stdout.trim();
+  };
+  const denied = guard('git status');
+  if (denied === '') {
+    rmSync(plugin, { recursive: true, force: true });
+    return; // the copy found the dependencies of a folder above it: nothing to prove here
+  }
+  assert.match(denied, /cannot start/);
+  assert.ok(denied.includes(`npm ci --omit=dev --prefix '${plugin}'`), 'the message gives the exact repair');
+  assert.equal(guard(`npm ci --omit=dev --prefix '${plugin}'`), '', 'the repair goes through');
+  assert.match(guard(`npm ci --omit=dev --prefix '${plugin}'; rm -rf ~`), /cannot start/);
+  rmSync(plugin, { recursive: true, force: true });
+  rmSync(ws, { recursive: true, force: true });
 });

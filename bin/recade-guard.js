@@ -8,6 +8,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { recadeProject } from '../src/hookscope.js';
+import { installAllowed, installCommand } from '../src/guardrescue.js';
 
 const GUARDED = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Bash']);
 const pluginRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -35,9 +36,11 @@ try {
   out = await handleHook(stdin, { cwd, pluginRoot });
 } catch (err) {
   const tool = typeof event?.tool_name === 'string' ? event.tool_name : null;
-  if (tool === null || GUARDED.has(tool)) {
+  // The repair goes through: the install of the dependencies of the plugin, and nothing else.
+  const repair = tool === 'Bash' && installAllowed(event?.tool_input?.command, pluginRoot);
+  if (!repair && (tool === null || GUARDED.has(tool))) {
     const message = String(err?.message ?? err).split('\n')[0];
-    out = JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: `The Recade guard failed (${message}), so write tools and Bash are refused in this project. Update the plugin, or turn it off for this project.` } });
+    out = JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: `The Recade guard cannot start (${message}), so write tools and Bash are refused in this project. If the plugin folder lacks its dependencies, this one command is allowed and repairs it: ${installCommand(pluginRoot)}` } });
   }
 }
 if (out !== '') process.stdout.write(`${out}\n`);

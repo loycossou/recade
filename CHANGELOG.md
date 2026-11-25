@@ -2,6 +2,10 @@
 
 This file is curated by hand for each release. At tag time, `recade release-notes <from>..<to> --version <v> --write` produces the raw list from the conventional commits, and this section is then edited from it.
 
+## 1.6.2 (2026-11-25)
+
+- When the guard of the plugin cannot start (a plugin folder whose dependencies are not installed), it still refuses every write and every shell command in a Recade project, but it lets one command through: the install of those dependencies in the plugin folder (`npm ci --omit=dev --prefix <plugin folder>`), which its message gives word for word. Before, it refused that command too, and the session could not repair itself.
+
 ## 1.6.1 (2026-11-24)
 
 - `/parallel`, `/slice` and the `CLAUDE.md` of the workspace send to the stack sheet of the workspace for the install, build and test commands of a code repository, since Recade no longer writes the `CLAUDE.md` of a code repository.
