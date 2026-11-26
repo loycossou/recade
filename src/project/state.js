@@ -63,7 +63,14 @@ export const FORGES = Object.freeze(['github', 'local']);
  * records it when the owner answers. A state without the key has no answer yet, so an older project does not change.
  */
 export const SPIKES = Object.freeze(['run', 'none']);
-export const SETTINGS = Object.freeze(['slicing', 'second_opinion', 'hotspots', 'lots', 'docs_step', 'budgets', 'decisions', 'track', 'forge', 'spikes']);
+/**
+ * The CI an install writes in a code repository, once (docs/design.md, section 10.4). `none`: nothing, the project keeps
+ * its own CI or has none, and the checks run on the machine before each commit. `light`: lint and unit tests on pull
+ * requests. `full`: lint, types, build, unit, contract, end to end and security checks on pull requests. A state without
+ * the key is `light`.
+ */
+export const CI_LEVELS = Object.freeze(['none', 'light', 'full']);
+export const SETTINGS = Object.freeze(['slicing', 'second_opinion', 'hotspots', 'lots', 'docs_step', 'budgets', 'decisions', 'track', 'forge', 'spikes', 'ci']);
 
 /**
  * The forge of `state`: `local` when its `forge` key says so, `github` otherwise (a missing or unknown key). The key is
@@ -232,8 +239,8 @@ export function resetFrom(state, gate) {
 export function setSetting(state, key, value) {
   if (!SETTINGS.includes(key)) throw new Error(`Cannot set ${key}. Use ${SETTINGS.join(', ')}.`);
   const next = fill(state);
-  if (key === 'slicing' || key === 'second_opinion' || key === 'decisions' || key === 'track' || key === 'forge' || key === 'spikes') {
-    const allowed = { slicing: SLICING, second_opinion: SECOND_OPINION, decisions: DECISIONS, track: TRACKS, forge: FORGES, spikes: SPIKES }[key];
+  if (key === 'slicing' || key === 'second_opinion' || key === 'decisions' || key === 'track' || key === 'forge' || key === 'spikes' || key === 'ci') {
+    const allowed = { slicing: SLICING, second_opinion: SECOND_OPINION, decisions: DECISIONS, track: TRACKS, forge: FORGES, spikes: SPIKES, ci: CI_LEVELS }[key];
     if (!allowed.includes(value)) throw new Error(`Invalid ${key}: ${value}. Use ${allowed.join(', ')}.`);
     next[key] = value;
     return next;

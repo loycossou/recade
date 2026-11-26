@@ -1,9 +1,9 @@
 name: CI
 
 on:
-  push:
-    branches: [main]
+  # Pull requests only: a merge into main has already passed the same checks. A run can also be started by hand.
   pull_request:
+  workflow_dispatch:
 
 # Read only. No job writes to the repository, no job needs a token, and no step reads a secret.
 permissions:

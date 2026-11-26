@@ -154,3 +154,21 @@ test('slices dod refuses when the sheet already has changes the step did not mak
   assert.match(t.err.join(''), /Commit it with `recade workspace commit --paths slices\/S-01-schedule\.md -m '<message>'` \(or restore it\), then run this command again\./);
   assert.doesNotMatch(readFileSync(join(ws, 'slices', 'S-01-schedule.md'), 'utf8'), /\[x\]/);
 });
+
+test('a large sheet: --tick <task>.<row> ticks a row of the Definition of Done of that task, in one commit', async () => {
+  const ws = await workspace();
+  const large = ['---', 'id: S-01', 'format: large', '---', '', '# S-01', '', '## Task 1: Model', '', '### Definition of Done', '',
+    '| # | Command (counts tests) | Expected | Seen red first? | Done |', '|---|---|---|---|---|', '| 1 | `make test` (2 tests) | All green | yes | [ ] |', '',
+    '## Task 2: Screen', '', '### Definition of Done', '',
+    '| # | Command (counts tests) | Expected | Seen red first? | Done |', '|---|---|---|---|---|', '| 1 | `make e2e` (1 test) | All green | yes | [ ] |', ''].join('\n');
+  write(ws, 'slices/S-01-schedule.md', large);
+  must(git(ws, 'add', '-A'));
+  must(git(ws, 'commit', '-q', '-m', 'docs: large sheet'));
+  const t = makeIO(ws, { run: syncExec });
+  assert.equal(await run(['slices', 'dod', 'S-01', '--tick', '2.1', '--tick', '1.1'], t.io), 0, t.err.join(''));
+  assert.equal(subjects(ws).at(-1), 'docs(slices): tick DoD rows 1.1, 2.1 of S-01');
+  assert.equal(readFileSync(join(ws, 'slices', 'S-01-schedule.md'), 'utf8').split('[x]').length - 1, 2);
+  const plain = makeIO(ws, { run: syncExec });
+  assert.equal(await run(['slices', 'dod', 'S-01', '--tick', '1'], plain.io), 1);
+  assert.match(plain.err.join(''), /Definition of Done in each task/);
+});

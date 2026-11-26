@@ -68,6 +68,16 @@ export function isLocalForge(root) {
   }
 }
 
+/** The CI level of the project (`ci` in recade/state.yaml): `none`, `light` (the default) or `full`. */
+export function ciLevel(root) {
+  try {
+    const v = loadState(root)?.ci;
+    return ['none', 'light', 'full'].includes(v) ? v : 'light';
+  } catch {
+    return 'light';
+  }
+}
+
 /** The files of a code install that only GitHub uses, left out on the local forge. */
 export const GITHUB_ONLY = (wf) => [wf.conflicts, wf.secondOpinion, '.github/dependabot.yml'];
 
@@ -503,9 +513,11 @@ export function install(root, { pluginRoot: given, target, workspace, team = 'te
   // (`recade repo clean`), never here, since a code repository changes only through review.
   const ours = (t) => t.startsWith(GENERATED);
   if (target !== 'workspace') {
+    const level = ciLevel(home);
     if (adopt) notes.push('Adopted repository: its own CI stays as it is, and Recade writes none.');
+    else if (level === 'none') notes.push('CI: none (the project setting ci). No workflow was written: the checks run on this machine before each commit.');
     else {
-      const ci = fillCi(read(join(harness, 'ci', 'ci.yml')), sheet, stackName, place.repo ?? undefined);
+      const ci = fillCi(read(join(harness, 'ci', level === 'full' ? 'ci.yml' : 'ci-light.yml')), sheet, stackName, place.repo ?? undefined);
       missing.push(...ci.missing);
       once('.github/workflows/ci.yml', ci.text.endsWith('\n') ? ci.text : `${ci.text}\n`);
       if (isLocalForge(home)) notes.push('Local forge: .github/dependabot.yml not written (GitHub only).');

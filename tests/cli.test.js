@@ -21,11 +21,11 @@ function makeIO() {
   };
 }
 
-test('recade version prints 1.6.2 and exits 0', async () => {
+test('recade version prints 1.7.0 and exits 0', async () => {
   const t = makeIO();
   const code = await run(['version'], t.io);
   assert.equal(code, 0);
-  assert.equal(t.stdout().trim(), '1.6.2');
+  assert.equal(t.stdout().trim(), '1.7.0');
 });
 
 test('unknown command exits 2 with a hint on stderr', async () => {

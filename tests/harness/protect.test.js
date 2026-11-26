@@ -16,7 +16,7 @@ test('protection names the CI jobs as required checks, includes administrators a
   install(root, { pluginRoot: plugin });
   const checks = requiredChecks(root);
   // The jobs of the project's own CI, and nothing of the tooling.
-  assert.ok(checks.length >= 3);
+  assert.ok(checks.length >= 2, 'the light CI: its two jobs');
   assert.equal(checks.some((c) => /conflicts|quarantine|recade/i.test(c)), false, checks.join(', '));
   const args = protectionArgs('acme/fernhill', 'main', ['CI', 'conflicts']);
   const text = args.join(' ');

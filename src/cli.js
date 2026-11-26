@@ -2694,7 +2694,7 @@ const SPIKES_USAGE = 'Usage: recade spikes check [--spike <layer>-<option>] [--j
 
 const SLICES_USAGE = 'Usage: recade slices check|graph|status [--project <dir>]'
   + ' | recade slices status --set <S-nn> <status> [--note <text>] [--project <dir>]'
-  + ' | recade slices dod <S-nn> --tick <n> [--tick <n> ...] [--project <dir>]'
+  + ' | recade slices dod <S-nn> --tick <n> [--tick <n> ...] (a large sheet: --tick <task>.<n>, row n of the Definition of Done of that task) [--project <dir>]'
   + ' | recade slices merge <S-nn> [--dry-run] [--project <dir>] (local forge, the owner\'s merge)'
   + ' | recade slices open <S-nn> [--json] [--no-session|--keep-session|--tie-only] [--project <dir>] (the worktrees of the slice, under worktrees/<repo>/<S-nn>, and the slice of the session)';
 
@@ -2746,10 +2746,12 @@ function parseDodTick(rest) {
   if (!/^S-\d{2}[a-z]?$/.test(id ?? '') || more.length === 0 || more.length % 2 !== 0) return null;
   const rows = [];
   for (let i = 0; i < more.length; i += 2) {
-    if (more[i] !== '--tick' || !/^[1-9]\d{0,2}$/.test(more[i + 1] ?? '')) return null;
-    rows.push(Number(more[i + 1]));
+    // `<n>` is row n of the Definition of Done; `<t>.<n>` is row n of the Definition of Done of task t (a large sheet).
+    if (more[i] !== '--tick' || !/^(?:[1-9]\d{0,1}\.)?[1-9]\d{0,2}$/.test(more[i + 1] ?? '')) return null;
+    rows.push(more[i + 1]);
   }
-  return { id, rows: [...new Set(rows)].sort((a, b) => a - b) };
+  const key = (r) => r.split('.').map(Number).reduce((a, b) => a * 1000 + b, 0) + (r.includes('.') ? 0 : 0);
+  return { id, rows: [...new Set(rows)].sort((a, b) => key(a) - key(b)) };
 }
 
 /**
@@ -2825,8 +2827,9 @@ async function slicesDod(rest, io) {
       return { fail: 2, message: `Cannot read ${path}: ${oneLine(err)}` };
     }
     let changed = false;
-    for (const n of tick.rows) {
-      const r = tickDod(text, n);
+    for (const row of tick.rows) {
+      const [task, n] = row.includes('.') ? row.split('.').map(Number) : [undefined, Number(row)];
+      const r = tickDod(text, n, task);
       if (!r.ok) return { fail: 1, message: `${tick.id}: ${r.message}` };
       text = r.text;
       changed ||= r.changed;

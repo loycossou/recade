@@ -1437,3 +1437,23 @@ test('reconcile (workspace): a draft pull request is not ready, even green and a
   assert.match(result.rows.find((r) => r.id === 'S-01').reason, /web #4 \(draft\)/);
   assert.match(gh.views[0].fields, /isDraft/);
 });
+
+test('dodState: a large sheet counts the Definition of Done of every task, and tickDod ticks a row of one task', async () => {
+  const { tickDod } = await import('../../src/project/slices.js');
+  const sheet = ['---', 'id: S-09', 'format: large', '---', '', '# S-09', '', '## Task 1: First', '', '### Definition of Done', '',
+    '| # | Command (counts tests) | Expected | Seen red first? | Done |', '|---|---|---|---|---|', '| 1 | `make test` (2 tests) | All green | yes | [x] |', '',
+    '### Work order', '', '1. Build.', '', '## Task 2: Second', '', '### Definition of Done', '',
+    '| # | Command (counts tests) | Expected | Seen red first? | Done |', '|---|---|---|---|---|', '| 1 | `make a` (1 test) | All green | yes | [ ] |', '| 2 | `make b` (1 test) | All green | yes | [ ] |', ''].join('\n');
+  assert.deepEqual(dodState(sheet), { met: false, ticked: 1, open: 2 });
+  assert.match(tickDod(sheet, 1).message, /--tick 3\.1|<task>\.<row>/);
+  let text = sheet;
+  for (const n of [1, 2]) {
+    const r = tickDod(text, n, 2);
+    assert.equal(r.ok, true, r.message);
+    text = r.text;
+  }
+  assert.deepEqual(dodState(text), { met: true, ticked: 3, open: 0 });
+  assert.match(text, /\| 1 \| `make test`[^\n]*\[x\] \|/, 'task 1 untouched');
+  assert.equal(tickDod(text, 3, 2).ok, false);
+  assert.equal(tickDod(text, 1, 7).ok, false);
+});

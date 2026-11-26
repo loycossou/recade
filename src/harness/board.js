@@ -87,6 +87,24 @@ function section(text, name) {
   return out.join('\n');
 }
 
+/** The text of every Definition of Done of a sheet: the `## Definition of Done` section and each `### Definition of Done` of a task. */
+function dodSections(text) {
+  const all = lines(text);
+  const out = [];
+  let inside = false;
+  let fence = false;
+  for (const line of all.slice(frontMatterLength(all))) {
+    if (/^\s{0,3}(```|~~~)/.test(line)) fence = !fence;
+    const heading = !fence && /^(#{2,3})\s+(.+?)\s*#*\s*$/.exec(line);
+    if (heading) {
+      inside = heading[2].toLowerCase() === 'definition of done';
+      continue;
+    }
+    if (inside) out.push(line);
+  }
+  return out.join('\n');
+}
+
 /**
  * Is the Definition of Done of a sheet met? Every line of it must be ticked: a list item `- [x]`, or a table row
  * with a `[x]` cell. A line with `[ ]` is open. A section with no tick box at all is not met.
@@ -96,7 +114,8 @@ function section(text, name) {
 export function dodState(text) {
   let ticked = 0;
   let open = 0;
-  for (const line of lines(section(text, 'Definition of Done'))) {
+  // A large sheet has a Definition of Done in each task (`### Definition of Done` under `## Task <n>`): all of them count.
+  for (const line of lines(dodSections(text))) {
     const item = /^\s{0,3}[-*+]\s+\[([ xX])\]/.exec(line);
     const boxes = item ? [item[1]] : (/^\s*\|/.test(line) ? [...line.matchAll(/\|\s*\[([ xX])\]\s*(?=\|)/g)].map((m) => m[1]) : []);
     if (boxes.length === 0) continue;

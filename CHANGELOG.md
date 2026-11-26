@@ -2,6 +2,20 @@
 
 This file is curated by hand for each release. At tag time, `recade release-notes <from>..<to> --version <v> --write` produces the raw list from the conventional commits, and this section is then edited from it.
 
+## 1.7.0 (2026-11-26)
+
+### The CI and the second opinion are the owner's choice
+
+- `/recade:harness` asks which CI the code repositories get, before it writes one: `light` (lint and unit tests, the default), `full` (lint, types, build, unit, contract, end to end and security checks, the CI of the earlier versions) or `none` (the project keeps its own CI, or has none, and the checks run on the machine before each commit). The choice is the project setting `ci` (`recade state set ci light|full|none`).
+- The CI runs on pull requests only, and by hand (`workflow_dispatch`): a merge into `main` no longer runs the same checks a second time. Every run counts against the GitHub minutes of the account.
+- `/recade:harness` asks whether the pull requests get a second opinion (`sensitive`, `off` or `always`) instead of turning it on silently.
+- A CI already in a code repository is the project's and is not changed.
+
+### The Definition of Done of a large sheet
+
+- A large sheet has a Definition of Done in each task (`### Definition of Done` under `## Task <n>`). `/board` and the local merge now read all of them: a slice is done only when every row of every task is ticked. Before, they read only a top-level section, so a large slice could never be marked done.
+- `recade slices dod <S-nn> --tick <task>.<row>` ticks a row of the Definition of Done of one task. On a large sheet, a plain `--tick <row>` says to name the task.
+
 ## 1.6.2 (2026-11-25)
 
 - When the guard of the plugin cannot start (a plugin folder whose dependencies are not installed), it still refuses every write and every shell command in a Recade project, but it lets one command through: the install of those dependencies in the plugin folder (`npm ci --omit=dev --prefix <plugin folder>`), which its message gives word for word. Before, it refused that command too, and the session could not repair itself.

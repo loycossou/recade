@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  # Pull requests only: a merge into main has already passed the same checks. A run can also be started by hand.
+  pull_request:
+  workflow_dispatch:
+
+# Read only. No job writes to the repository, no job needs a token, and no step reads a secret.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# Each action is pinned to a full commit, with its release in a comment. The Dependabot file next to this one keeps them current.
+jobs:
+  # A new repository holds no code until its first change adds some. Until then there is nothing to install, lint,
+  # build or test, so the jobs below are skipped (GitHub reports a skipped job as passing) and the run summary says why.
+  # They run from the first file of code.
+  code:
+    name: Code present
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      present: ${{ steps.look.outputs.present }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Look for code
+        id: look
+        run: |
+          set -euo pipefail
+          first="$(git ls-files | grep -Ev '^(\.claude/|\.githooks/|\.github/|CLAUDE\.md$|AGENTS\.md$|README[^/]*$|LICENSE[^/]*$|\.gitignore$|\.gitattributes$|\.editorconfig$|tests/quarantine\.json$)' | head -n 1 || true)"
+          if [ -n "$first" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "No code yet, so the lint and test job is skipped. They run from the first file of code." | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+
+  quality:
+    name: Lint and unit tests
+    needs: code
+    if: needs.code.outputs.present == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      # __RECADE_SETUP__
+      - name: Install dependencies
+        run: |
+          __RECADE_INSTALL__
+      - name: Lint
+        run: |
+          __RECADE_LINT__
+      - name: Unit tests
+        run: |
+          __RECADE_TEST__

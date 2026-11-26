@@ -164,14 +164,14 @@ test('a code install writes only the CI of the project, once, and sets up this m
   assert.equal(again.written.find((w) => w.file === '.github/workflows/ci.yml').status, 'unchanged');
 });
 
-test('ci.yml of a code repository is the CI of the project: build, tests and security, nothing that fetches or names Recade', async () => {
+test('ci.yml of a code repository is the CI of the project: lint and tests by default, nothing that fetches or names Recade', async () => {
   const ws = await makeWorkspace();
   installCode(ws, 'api');
   const code = read(ws.repo('api'), '.github/workflows/ci.yml');
   assert.equal(parseDocument(code).errors.length, 0);
   assert.doesNotMatch(code, /recade/i);
   assert.doesNotMatch(code, /__RECADE_|RECADE_REF|DEPLOY_KEY|index check|lint-style|quarantine check/);
-  assert.deepEqual(Object.keys(parseDocument(code).toJS().jobs), ['code', 'quality', 'e2e', 'security']);
+  assert.deepEqual(Object.keys(parseDocument(code).toJS().jobs), ['code', 'quality'], 'the light CI by default');
   assert.doesNotMatch(read(ws.repo('api'), '.github/dependabot.yml'), /recade/i);
 });
 

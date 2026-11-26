@@ -822,23 +822,38 @@ export function writeMerged(text, merged) {
  * a checklist) goes from `[ ]` to `[x]`. Nothing else changes, and the line ends of the sheet are kept.
  * @param {string} text the sheet
  * @param {number} n the row number, 1 or more
+ * @param {number} [task] in a large sheet, the task whose own `### Definition of Done` holds the row (`## Task <t>: ...`)
  * @returns {{ok: true, text: string, changed: boolean}|{ok: false, message: string}}
  */
-export function tickDod(text, n) {
+export function tickDod(text, n, task) {
   const parts = text.split(/(\r?\n)/);
   const at = (i) => parts[i * 2];
   const count = Math.ceil(parts.length / 2);
   let start = -1;
-  for (let i = 0; i < count; i++) {
-    if (/^##\s+Definition of Done\s*$/i.test(at(i))) {
-      start = i + 1;
-      break;
+  if (task === undefined) {
+    for (let i = 0; i < count; i++) {
+      if (/^##\s+Definition of Done\s*$/i.test(at(i))) {
+        start = i + 1;
+        break;
+      }
+    }
+    if (start < 0 && parts.some((p, i) => i % 2 === 0 && /^###\s+Definition of Done\s*$/i.test(p))) {
+      return { ok: false, message: `this sheet has a Definition of Done in each task: name the row as <task>.<row>, such as --tick 3.${n}` };
+    }
+  } else {
+    let inTask = false;
+    for (let i = 0; i < count; i++) {
+      if (/^##\s/.test(at(i))) inTask = new RegExp(`^##\\s+Task\\s+${task}\\b`, 'i').test(at(i));
+      else if (inTask && /^###\s+Definition of Done\s*$/i.test(at(i))) {
+        start = i + 1;
+        break;
+      }
     }
   }
-  const missing = { ok: false, message: `no row ${n} in the Definition of Done of this sheet` };
+  const missing = { ok: false, message: task === undefined ? `no row ${n} in the Definition of Done of this sheet` : `no row ${n} in the Definition of Done of task ${task} of this sheet` };
   if (start < 0) return missing;
   let item = 0;
-  for (let i = start; i < count && !/^##\s/.test(at(i)); i++) {
+  for (let i = start; i < count && !/^#{2,3}\s/.test(at(i)); i++) {
     const line = at(i);
     let row = null;
     let box = null;

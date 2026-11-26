@@ -173,11 +173,11 @@ test('an em dash written in a specialisation is caught by the style check', asyn
 });
 
 test('CI: an unfilled row is a warning that names it, and invalid YAML is an error', async () => {
-  const stack = STACK.split('\n').filter((l) => !/^\| SAST \|/.test(l)).join('\n');
+  const stack = STACK.split('\n').filter((l) => !/^\| Lint \|/.test(l)).join('\n');
   const root = installed({ stack });
   write(root, '.github/dependabot.yml', 'version: 2\nupdates: [\n');
   const r = await verify(root, { pluginRoot: plugin, only: ['ci'] });
-  assert.ok(r.findings.some((f) => f.severity === 'warn' && /ci\.yml: no command is set for SAST, so CI fails on it/.test(f.message)), JSON.stringify(r.findings));
+  assert.ok(r.findings.some((f) => f.severity === 'warn' && /ci\.yml: no command is set for Lint, so CI fails on it/.test(f.message)), JSON.stringify(r.findings));
   assert.match(errors(r, 'ci').map((f) => f.message).join('\n'), /dependabot\.yml is not valid YAML/);
 });
 
