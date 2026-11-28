@@ -2,6 +2,10 @@
 
 This file is curated by hand for each release. At tag time, `recade release-notes <from>..<to> --version <v> --write` produces the raw list from the conventional commits, and this section is then edited from it.
 
+## 1.8.0 (2026-11-28)
+
+- `/recade:harness` asks at what size the sessions of the project compact themselves: 600,000 tokens (recommended), the size set by Claude Code, or another size of at least 100,000. The answer is the project setting `compact` (`recade state set compact 600000|600k|default`). It is written as `autoCompactWindow` in `.claude/settings.local.json` of the workspace, a file of the machine that is never committed, and the start of each session writes it again on another machine. A shorter conversation keeps the session clearer. It takes effect in a new session.
+
 ## 1.7.0 (2026-11-26)
 
 ### The CI and the second opinion are the owner's choice

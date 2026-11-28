@@ -179,3 +179,29 @@ test('state show prints the line of the metric, and the JSON holds it', async ()
   assert.equal(await run(['state', 'show'], t.io), 0);
   assert.doesNotMatch(t.stdout(), /First slice/);
 });
+
+test('compact: a number of tokens from 100k, written 600000 or 600k, and default takes it out', () => {
+  const base = normalizeState({ version: 1, mode: 'scratch' });
+  assert.equal(setSetting(base, 'compact', '600000').compact, 600000);
+  assert.equal(setSetting(base, 'compact', '600k').compact, 600000);
+  assert.equal('compact' in setSetting(setSetting(base, 'compact', '600k'), 'compact', 'default'), false);
+  for (const bad of ['99999', '50k', 'lots', '3000000', '-1']) assert.throws(() => setSetting(base, 'compact', bad), /Invalid compact/, bad);
+});
+
+test('applyCompact writes autoCompactWindow in the local settings, keeps the other keys, and takes it out on default', async () => {
+  const { mkdtempSync, mkdirSync, readFileSync, writeFileSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { applyCompact } = await import('../../src/harness/compact.js');
+  const dir = mkdtempSync(join(tmpdir(), 'recade-compact-'));
+  mkdirSync(join(dir, '.claude'));
+  writeFileSync(join(dir, '.claude', 'settings.local.json'), '{"permissions":{"deny":["Bash(x:*)"]}}');
+  assert.equal(applyCompact(dir, 600000).changed, true);
+  const read = () => JSON.parse(readFileSync(join(dir, '.claude', 'settings.local.json'), 'utf8'));
+  assert.deepEqual(read(), { permissions: { deny: ['Bash(x:*)'] }, autoCompactWindow: 600000 });
+  assert.equal(applyCompact(dir, 600000).changed, false);
+  assert.equal(applyCompact(dir, null).changed, true);
+  assert.deepEqual(read(), { permissions: { deny: ['Bash(x:*)'] } });
+  writeFileSync(join(dir, '.claude', 'settings.local.json'), '{not json');
+  assert.match(applyCompact(dir, 600000).error, /not valid JSON/);
+});

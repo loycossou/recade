@@ -135,3 +135,17 @@ test('recade state set budgets merges documents, and refuses a bad one', async (
     assert.equal(await run(['state', 'set', 'budgets', bad], e.io), 2, bad);
   }
 });
+
+test('recade state set compact 600k writes autoCompactWindow in the local settings of the project, and default takes it out', async () => {
+  const { readFileSync, existsSync } = await import('node:fs');
+  const root = project('');
+  const t = makeIO(root);
+  assert.equal(await run(['state', 'set', 'compact', '600k'], t.io), 0);
+  assert.match(t.stdout(), /compact at 600000 tokens/);
+  assert.equal(JSON.parse(readFileSync(join(root, '.claude', 'settings.local.json'), 'utf8')).autoCompactWindow, 600000);
+  assert.match(readFileSync(join(root, 'recade', 'state.yaml'), 'utf8'), /^compact: 600000$/m);
+  assert.equal(await run(['state', 'set', 'compact', 'default'], makeIO(root).io), 0);
+  assert.equal('autoCompactWindow' in JSON.parse(readFileSync(join(root, '.claude', 'settings.local.json'), 'utf8')), false);
+  assert.equal(await run(['state', 'set', 'compact', '50k'], makeIO(root).io), 2);
+  assert.ok(existsSync(join(root, 'recade', 'state.yaml')));
+});

@@ -816,6 +816,7 @@ test('harness.md installs the workspace target and each code repository, asks th
   const text = read('harness.md');
   const step = (n) => stepSection('harness.md', n);
   for (const part of ['pushed once, at the end of each turn', 'recade workspace auto-push', 'Nothing in it names Recade', 'a hook of the plugin itself']) assert.ok(text.includes(part), part);
+  for (const part of ['At what size do the sessions of this project compact themselves?', '`600,000 tokens (recommended)`', '`Leave it as it is`', '`Another size`', 'recade state set compact 600000', 'invents less', 'Which CI for the code repositories?', 'A second opinion on the pull requests?']) assert.ok(step(2).includes(part), part);
   const one = step(1);
   for (const part of ['recade repo list --json', 'recade repo check', 'no code repository', '`/recade:docs`', "recade harness migrate --dry-run --project '<dir>'", "recade harness migrate --project '<dir>'", '`old layout`']) assert.ok(one.includes(part), part);
   const two = step(2);

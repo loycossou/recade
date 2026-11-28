@@ -70,7 +70,9 @@ export const SPIKES = Object.freeze(['run', 'none']);
  * the key is `light`.
  */
 export const CI_LEVELS = Object.freeze(['none', 'light', 'full']);
-export const SETTINGS = Object.freeze(['slicing', 'second_opinion', 'hotspots', 'lots', 'docs_step', 'budgets', 'decisions', 'track', 'forge', 'spikes', 'ci']);
+/** The smallest auto-compact window Claude Code accepts, in tokens. */
+export const COMPACT_MIN = 100000;
+export const SETTINGS = Object.freeze(['slicing', 'second_opinion', 'hotspots', 'lots', 'docs_step', 'budgets', 'decisions', 'track', 'forge', 'spikes', 'ci', 'compact']);
 
 /**
  * The forge of `state`: `local` when its `forge` key says so, `github` otherwise (a missing or unknown key). The key is
@@ -243,6 +245,19 @@ export function setSetting(state, key, value) {
     const allowed = { slicing: SLICING, second_opinion: SECOND_OPINION, decisions: DECISIONS, track: TRACKS, forge: FORGES, spikes: SPIKES, ci: CI_LEVELS }[key];
     if (!allowed.includes(value)) throw new Error(`Invalid ${key}: ${value}. Use ${allowed.join(', ')}.`);
     next[key] = value;
+    return next;
+  }
+  if (key === 'compact') {
+    // The size, in tokens, at which the sessions of this project compact themselves (`autoCompactWindow` of Claude
+    // Code), or `default` to leave the setting of Claude Code. `600k` and `600000` are the same.
+    if (value === 'default') {
+      delete next.compact;
+      return next;
+    }
+    const m = /^(\d+)(k)?$/i.exec(String(value).trim());
+    const tokens = m === null ? NaN : Number(m[1]) * (m[2] ? 1000 : 1);
+    if (!Number.isInteger(tokens) || tokens < COMPACT_MIN || tokens > 2000000) throw new Error(`Invalid compact: ${value}. Write a number of tokens from ${COMPACT_MIN} (100k) to 2000000, such as 600000 or 600k, or default.`);
+    next.compact = tokens;
     return next;
   }
   if (key === 'docs_step') {

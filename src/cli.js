@@ -25,6 +25,7 @@ import { createProject } from './project/scaffold.js';
 import { SYNC_ADVICE, linkRepo } from './workspace/layout.js';
 import { CLEAN_BRANCH, CLEAN_TITLE, applyClean, cleanPlan } from './workspace/clean.js';
 import { endSession } from './session.js';
+import { LOCAL_SETTINGS, applyCompact } from './harness/compact.js';
 import { resolveLeftovers } from './rebase.js';
 import { REPO_NAME } from './project/touches.js';
 import { addRepo, listRepos, checkRepos, syncRepos, stripCredentials, VISIBILITIES } from './workspace/repos.js';
@@ -360,6 +361,12 @@ export const commands = {
       io.stdout.write(sub === 'pass'
         ? `${rest[0]} passed on ${next.gates[rest[0]].passed}. ${next.next_action}\n`
         : `${rest[0]} set.\n`);
+      // The compact size lives in the local settings of Claude Code for this project: it is applied there at once.
+      if (sub === 'set' && rest[0] === 'compact') {
+        const done = applyCompact(root, typeof next.compact === 'number' ? next.compact : null);
+        if (done.error) io.stderr.write(`recade: warning: ${done.error}.\n`);
+        else io.stdout.write(typeof next.compact === 'number' ? `Sessions of this project compact at ${next.compact} tokens (${LOCAL_SETTINGS}). It takes effect in a new session.\n` : `Sessions of this project compact at the size set by Claude Code (${LOCAL_SETTINGS}).\n`);
+      }
     }
     return 0;
   },
@@ -2200,6 +2207,14 @@ async function harnessSync(rest, io, { pluginRoot, usage }) {
       lines.push(`This machine was not set up for the workspace: ${oneLine(err)}`);
     }
   }
+  // The compact size of the project, on this machine too (a fresh clone has no local settings).
+  try {
+    const compact = loadState(ws)?.compact;
+    if (typeof compact === 'number') {
+      const done = applyCompact(ws, compact);
+      if (done.error) lines.push(done.error);
+    }
+  } catch { /* the state is read again by the steps that need it */ }
   const repos = listRepos(ws).map((e) => String(e.name)).filter((n) => /^[a-z0-9][a-z0-9-]*$/.test(n) && existsSync(join(ws, 'repos', n, '.git')));
   for (const name of repos) {
     const dir = join(ws, 'repos', name);
